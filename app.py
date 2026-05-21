@@ -2,26 +2,21 @@ from flask import Flask
 from flask_cors import CORS
 from config import config
 from database import db
-from routes import api
+from routes import students_bp, metrics_bp
 
 def create_app():
-    """Application factory"""
     app = Flask(__name__)
-
-    # Load configuration
     app.config.from_object(config)
 
-    # Enable CORS for all routes
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-    # Connect to database
     try:
         db.connect()
     except Exception as e:
         print(f"Warning: Could not connect to database: {e}")
 
-    # Register blueprints
-    app.register_blueprint(api)
+    app.register_blueprint(students_bp)
+    app.register_blueprint(metrics_bp)
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):
