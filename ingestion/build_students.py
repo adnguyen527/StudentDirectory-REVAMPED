@@ -1,8 +1,14 @@
 """
-Build the students collection by aggregating dwp_reports by account_id.
-Safe to re-run — drops and rebuilds the collection each time.
+Build the students collection by aggregating dwp_reports by (account_id, student_name).
+
+account_id identifies a household, not a student -- 191 accounts carry 2-5 siblings.
+Keying on account_id alone collapses those siblings into a single profile whose name is
+whichever row happened to be read first, so students are keyed by account plus name.
+
+Safe to re-run -- drops and rebuilds the target collection each time.
 """
 
+import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -13,29 +19,52 @@ from pymongo import MongoClient, ASCENDING
 from mongo_url import uri
 
 
+# Build into a scratch collection first; swap to 'students' once verified.
+TARGET_COLLECTION = 'students_v2'
+
+
+def slug(value):
+    """'Anthony Williams' -> 'anthony-williams'"""
+    return re.sub(r'[^a-z0-9]+', '-', str(value).lower()).strip('-')
+
+
+def make_student_key(account_id, student_name):
+    """Stable, URL-safe identity for one student.
+
+    account_ids are UUIDs (hyphens, never underscores) and slug() never emits an
+    underscore, so key.split('_', 1) recovers (account_id, name_slug).
+    """
+    return f"{account_id}_{slug(student_name)}"
 
 
 def build_students():
     client = MongoClient(uri)
     db = client['StudentDirectory']
     dwp_collection = db['dwp_reports']
-    students_collection = db['students']
+    students_collection = db[TARGET_COLLECTION]
 
     total_dwp = dwp_collection.count_documents({})
-    print(f"Reading {total_dwp} dwp_reports...")
+    print(f"Reading {total_dwp} dwp_reports into '{TARGET_COLLECTION}'...")
 
-    # Accumulate data per student keyed by account_id
+    # Accumulate data per student keyed by (account_id, student_name)
     students = {}
+    skipped = 0
 
     for doc in dwp_collection.find():
-        account_id = doc.get('account_id')
-        if not account_id:
+        account_id   = doc.get('account_id')
+        student_name = doc.get('student_name')
+        if not account_id or not student_name or not str(student_name).strip():
+            skipped += 1
             continue
 
-        if account_id not in students:
-            students[account_id] = {
+        student_name = str(student_name).strip()
+        key = make_student_key(account_id, student_name)
+
+        if key not in students:
+            students[key] = {
+                'student_key':              key,
                 'account_id':               account_id,
-                'student_name':             doc.get('student_name'),
+                'student_name':             student_name,
                 'centers':                  {},     # name → session count
                 'total_sessions':           0,
                 'last_session_date':        None,
@@ -47,7 +76,7 @@ def build_students():
                 'dwp_report_ids':           [],
             }
 
-        s = students[account_id]
+        s = students[key]
 
         # Centers — doc.centers is now a list from import parsing
         for center in doc.get('centers', []):
@@ -91,6 +120,8 @@ def build_students():
                 s['topics_mastered'][topic_id]['times_mastered'] += 1
 
     print(f"Found {len(students)} unique students. Building collection...")
+    if skipped:
+        print(f"  ({skipped} dwp_reports skipped — missing account_id or student_name)")
 
     # Drop and rebuild
     students_collection.drop()
@@ -103,6 +134,7 @@ def build_students():
             reverse=True
         )
         documents.append({
+            'student_key':               s['student_key'],
             'account_id':                s['account_id'],
             'student_name':              s['student_name'],
             'centers':                   sorted(
@@ -126,11 +158,16 @@ def build_students():
         })
 
     if documents:
-        students_collection.insert_many(documents)
-        students_collection.create_index([('account_id', ASCENDING)], unique=True)
+        # Indexes first, so a key-derivation bug fails before the write rather than after.
+        # account_id is deliberately NOT unique — siblings share one.
+        students_collection.create_index([('student_key', ASCENDING)], unique=True)
+        students_collection.create_index([('account_id', ASCENDING)])
         students_collection.create_index([('student_name', ASCENDING)])
+        students_collection.insert_many(documents)
 
-    print(f"Done. {len(documents)} students inserted into 'students' collection.")
+    print(f"Done. {len(documents)} students inserted into '{TARGET_COLLECTION}'.")
+    print(f"  total_sessions:        {sum(d['total_sessions'] for d in documents)}")
+    print(f"  total_pages_completed: {sum(d['total_pages_completed'] for d in documents)}")
     client.close()
 
 
