@@ -8,7 +8,6 @@ whichever row happened to be read first, so students are keyed by account plus n
 Safe to re-run -- drops and rebuilds the target collection each time.
 """
 
-import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -17,24 +16,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pymongo import MongoClient, ASCENDING
 from mongo_url import uri
+from util import make_student_key
 
 
-# Build into a scratch collection first; swap to 'students' once verified.
-TARGET_COLLECTION = 'students_v2'
-
-
-def slug(value):
-    """'Anthony Williams' -> 'anthony-williams'"""
-    return re.sub(r'[^a-z0-9]+', '-', str(value).lower()).strip('-')
-
-
-def make_student_key(account_id, student_name):
-    """Stable, URL-safe identity for one student.
-
-    account_ids are UUIDs (hyphens, never underscores) and slug() never emits an
-    underscore, so key.split('_', 1) recovers (account_id, name_slug).
-    """
-    return f"{account_id}_{slug(student_name)}"
+TARGET_COLLECTION = 'students'
 
 
 def build_students():
