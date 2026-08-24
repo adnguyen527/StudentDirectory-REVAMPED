@@ -1,5 +1,5 @@
 from pymongo import MongoClient
-from mongo_url import uri
+from mongo_url import uri, db_name
 
 class Database:
     """MongoDB database connection manager"""
@@ -14,7 +14,7 @@ class Database:
                 cls._client = MongoClient(uri)
                 # Verify connection
                 cls._client.admin.command('ping')
-                cls._db = cls._client['StudentDirectory']
+                cls._db = cls._client[db_name]
                 print("✓ Connected to MongoDB")
             except Exception as e:
                 print(f"✗ Failed to connect to MongoDB: {e}")
