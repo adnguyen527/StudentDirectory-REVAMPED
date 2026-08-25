@@ -85,7 +85,7 @@ time by `transform_dwp_row()`.
 
 Identity and timing: `account_id`, `lead_id`, `student_name`, `date` (native `Date`),
 `finalized_date`, `session_start`, `session_end`, `sessions_this_month`,
-`delivery_method`, `centers[]`, `instructors[]`.
+`delivery_method`, `centers[]`, `center_orgs[]`, `instructors[]`.
 
 Work: `pages_completed`, `session_page_goal`, `mathlete_score`, `topics[]` (each
 `{id, name, status}` where status is `Worked On` / `Mastered` / `Completed`),
@@ -308,7 +308,5 @@ pipeline = [
   so the app keeps working — the warning is cosmetic, but it is still a lie.
 - `dwp_report_ids` (up to 582 entries) and `days_taught` (up to 209) are unbounded arrays
   that grow with the dataset.
-- Center names are unnormalized: 13 values covering 4 locations, with 1,438 records
-  carrying a bare location and no brand suffix.
 - `finalized_date`, `session_start`, and `session_end` are stored as strings, so duration
   and time-of-day analysis requires reparsing at query time.

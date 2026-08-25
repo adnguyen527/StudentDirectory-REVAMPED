@@ -152,9 +152,37 @@ def parse_lp_assignment(value):
 COMPOUND_FIELDS = ['Session', 'General Information', 'Digital Reward System', 'Student Materials', 'LP Assignment', 'Schoolwork', 'Center']
 
 def parse_center(value):
+    """'Southlake, Mann Mathematics' -> {'centers': ['Southlake'],
+                                         'center_orgs': ['Mann Mathematics']}
+
+    The Center cell is '<location>, <organization>'. The organization is the operating
+    brand on the date of the session, not a property of the student or the session:
+    every location switched from 'Mann Mathematics' to 'Math Made Simple' on 2025-09-05,
+    so a student attending either side of that date would otherwise appear to have
+    attended two different centers. 1,438 rows carry a bare location and no organization.
+
+    '@Home Classroom 1' (37 rows, Southlake, Aug-Dec 2024) sits in the organization
+    position but names a room rather than a brand. It is kept as-is rather than special
+    cased -- the position is what this function knows about.
+    """
     if not value:
-        return []
-    return [c.strip() for c in str(value).split(';  ') if c.strip()]
+        return {'centers': [], 'center_orgs': []}
+
+    centers, orgs = [], []
+    for entry in str(value).split(';  '):
+        entry = entry.strip()
+        if not entry:
+            continue
+        # partition, not split: a location containing a comma would otherwise lose
+        # everything past the first one.
+        location, _, org = entry.partition(', ')
+        location = location.strip()
+        org = org.strip()
+        if location and location not in centers:
+            centers.append(location)
+        if org and org not in orgs:
+            orgs.append(org)
+    return {'centers': centers, 'center_orgs': orgs}
 
 def row_hash(doc):
     """Content fingerprint of a document, used as its idempotency key.
@@ -190,7 +218,7 @@ def transform_dwp_row(row):
     doc.update(parse_digital_reward_system(row.get('Digital Reward System')))
     doc.update(parse_student_materials(row.get('Student Materials')))
     doc.update(parse_schoolwork(row.get('Schoolwork')))
-    doc['centers'] = parse_center(row.get('Center'))
+    doc.update(parse_center(row.get('Center')))
     doc['topics'] = parse_lp_assignment(row.get('LP Assignment'))
     doc['row_hash'] = row_hash(doc)
     return doc

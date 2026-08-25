@@ -123,11 +123,45 @@ class TestOtherParsers:
         assert parsed['pages_completed'] == 5
         assert parsed['last_punch_of_day'] is False
 
-    def test_center_is_a_list(self):
-        assert parse_center('Tyler, Mann Mathematics') == ['Tyler, Mann Mathematics']
+    def test_center_splits_location_from_organization(self):
+        """'Southlake, Mann Mathematics' is one location under one brand, not one
+        center name. Every location rebranded on 2025-09-05, so keeping the brand in
+        centers[] splits a single location's history into three names."""
+        assert parse_center('Southlake, Mann Mathematics') == {
+            'centers': ['Southlake'],
+            'center_orgs': ['Mann Mathematics'],
+        }
+
+    def test_a_bare_location_has_no_organization(self):
+        """1,438 rows carry no brand at all."""
+        assert parse_center('North Dallas') == {
+            'centers': ['North Dallas'],
+            'center_orgs': [],
+        }
+
+    @pytest.mark.parametrize('value,org', [
+        ('Southlake, Mann Mathematics', 'Mann Mathematics'),
+        ('Southlake, Math Made Simple', 'Math Made Simple'),
+        ('Southlake, @Home Classroom 1', '@Home Classroom 1'),
+    ])
+    def test_every_organization_form_lands_in_the_same_place(self, value, org):
+        """'@Home Classroom 1' names a room, not a brand, but it sits in the
+        organization position and is kept there rather than special cased."""
+        assert parse_center(value) == {'centers': ['Southlake'], 'center_orgs': [org]}
+
+    def test_a_location_containing_a_comma_keeps_its_tail(self):
+        """partition, not split -- only the first ', ' separates the two halves."""
+        assert parse_center('Dallas, TX, Mann Mathematics') == {
+            'centers': ['Dallas'],
+            'center_orgs': ['TX, Mann Mathematics'],
+        }
 
     def test_center_of_nothing(self):
-        assert parse_center(None) == []
+        assert parse_center(None) == {'centers': [], 'center_orgs': []}
+
+    def test_repeated_values_are_not_duplicated(self):
+        parsed = parse_center('Tyler, Mann Mathematics;  Tyler, Mann Mathematics')
+        assert parsed == {'centers': ['Tyler'], 'center_orgs': ['Mann Mathematics']}
 
     def test_lp_assignment_topics(self):
         topics = parse_lp_assignment('T-100 (Fractions): Mastered;  T-200 (Angles): Worked On')
@@ -174,7 +208,7 @@ class TestTransformDwpRow:
             'Delivery Method': 'In-Center',
             'Session': SESSION,
             'General Information': 'Pages Completed: 5',
-            'Center': 'Tyler',
+            'Center': 'Tyler, Mann Mathematics',
             'LP Assignment': 'T-100 (Fractions): Mastered',
         })
 
@@ -183,6 +217,7 @@ class TestTransformDwpRow:
         assert doc['date'] == datetime(2025, 1, 2)
         assert doc['delivery_method'] == 'In-Center'
         assert doc['centers'] == ['Tyler']
+        assert doc['center_orgs'] == ['Mann Mathematics']
         assert doc['instructors'] == ['Dana Reyes', 'Sam Ortiz']
         assert doc['pages_completed'] == 5
         assert doc['topics'] == [{'id': 'T-100', 'name': 'Fractions', 'status': 'Mastered'}]

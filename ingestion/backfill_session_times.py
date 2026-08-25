@@ -75,21 +75,18 @@ def backfill(apply=False):
 
     internal = {h: ids for h, ids in by_hash.items() if len(ids) > 1}
 
-    untouched_ids = {doc['_id'] for doc in affected}
-    external = []
-    for h, ids in by_hash.items():
-        clash = collection.find_one(
-            {'row_hash': h, '_id': {'$nin': list(untouched_ids)}}, {'_id': 1}
-        )
-        if clash:
-            external.append((h, ids[0], clash['_id']))
+    # One projected pass over the collection, not a query per document -- cheap here at
+    # 217 rows, but the same shape that fails outright on a whole-collection migration.
+    stored = {d['_id']: d.get('row_hash') for d in collection.find({}, {'row_hash': 1})}
+    untouched = {h for _id, h in stored.items() if h and _id not in corrected}
+    external = [(h, ids[0]) for h, ids in by_hash.items() if h in untouched]
 
     if internal or external:
         print(f"\n  *** ABORTED: correcting these rows would create duplicates.")
         for h, ids in list(internal.items())[:5]:
             print(f"      {h[:12]}… x{len(ids)}: {[str(i) for i in ids[:4]]}")
-        for h, mine, theirs in external[:5]:
-            print(f"      {h[:12]}… {mine} would equal existing {theirs}")
+        for h, mine in external[:5]:
+            print(f"      {h[:12]}… {mine} would equal a row left untouched")
         print(f"      These are genuinely the same row twice. Resolve them first.")
         client.close()
         return False

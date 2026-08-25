@@ -166,6 +166,34 @@ def test_no_session_time_holds_the_string_none(live_db):
     )
 
 
+KNOWN_CENTERS = {'Southlake', 'North Dallas', 'Tyler', 'Forney'}
+
+
+def test_center_names_are_locations_not_location_plus_brand(live_db):
+    """A center is a place. The operating brand belongs in center_orgs.
+
+    Every location rebranded from 'Mann Mathematics' to 'Math Made Simple' on
+    2025-09-05, so a brand left inside the name splits one location's history into
+    three. Rows imported before the parse_center fix need
+    ingestion/backfill_center_split.py --apply.
+    """
+    for name in ['dwp_reports', 'students', 'instructors', 'attendance_reports']:
+        found = set()
+        for doc in live_db[name].find({}, {'centers': 1}):
+            for value in doc.get('centers', []) or []:
+                found.add(value['name'] if isinstance(value, dict) else value)
+        unexpected = {c for c in found if ', ' in str(c)}
+        assert not unexpected, f'{name} holds unsplit center value(s): {sorted(unexpected)[:5]}'
+        assert found <= KNOWN_CENTERS, f'{name} has unknown center(s): {sorted(found - KNOWN_CENTERS)}'
+
+
+def test_every_student_belongs_to_one_location(live_db, students):
+    """893/893 before the rebrand was split back out, and it must stay that way --
+    a student attending across the September rename is still at one place."""
+    spread = [s['student_key'] for s in students if len(s.get('centers', [])) > 1]
+    assert not spread, f'{len(spread)} student(s) now span locations, e.g. {spread[:5]}'
+
+
 def test_one_attendance_document_per_student_day(attendance):
     keys = [(d['student_key'], d['date']) for d in attendance]
     duplicates = {k for k in keys if keys.count(k) > 1}
