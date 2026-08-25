@@ -10,6 +10,7 @@ from tests.sample_data import (
     ANTHONY_KEY,
     AVA_KEY,
     CHLOE_KEY,
+    _day,
 )
 
 
@@ -118,25 +119,69 @@ class TestDigitalWorkoutPlan:
 
 class TestAttendance:
 
-    def test_find_all(self, seeded_db):
-        assert len(Attendance.find_all()) == 4
+    def test_find_by_student_excludes_siblings(self, seeded_db):
+        days = Attendance.find_by_student(ANTHONY_KEY)
+        assert len(days) == 2
+        assert {d['student_name'] for d in days} == {'Anthony Nguyen'}
 
-    def test_find_by_student_id_filters_on_account(self, seeded_db):
-        records = Attendance.find_by_student_id(ACCOUNT_TAN)
-        assert len(records) == 1
-        assert records[0]['Student Name'] == 'Chloe Tan'
+    def test_find_by_student_sorts_newest_first(self, seeded_db):
+        dates = [d['date'] for d in Attendance.find_by_student(ANTHONY_KEY)]
+        assert dates == sorted(dates, reverse=True)
 
-    def test_find_by_student_id_is_household_scoped(self, seeded_db):
-        """attendance_reports are keyed by 'Account Id', so this returns siblings
-        together -- the parameter name says student, the data says household."""
-        records = Attendance.find_by_student_id(ACCOUNT_NGUYEN)
-        assert {r['Student Name'] for r in records} == {'Anthony Nguyen', 'Ava Nguyen'}
+    def test_find_by_student_respects_the_limit(self, seeded_db):
+        assert len(Attendance.find_by_student(ANTHONY_KEY, limit=1)) == 1
 
-    def test_find_by_student_id_unknown_returns_empty(self, seeded_db):
-        assert Attendance.find_by_student_id('nope') == []
+    def test_find_by_student_omits_the_report_id_plumbing(self, seeded_db):
+        assert all('dwp_report_ids' not in d for d in Attendance.find_by_student(ANTHONY_KEY))
 
-    def test_count_all(self, seeded_db):
+    def test_find_by_student_unknown_returns_empty(self, seeded_db):
+        assert Attendance.find_by_student('no-such-account_nobody') == []
+
+    def test_find_by_account_returns_the_household(self, seeded_db):
+        days = Attendance.find_by_account(ACCOUNT_NGUYEN)
+        assert {d['student_name'] for d in days} == {'Anthony Nguyen', 'Ava Nguyen'}
+
+    def test_find_by_date_range_is_inclusive_on_both_bounds(self, seeded_db):
+        days = Attendance.find_by_date_range(_day(2026, 3, 7), _day(2026, 3, 14))
+        assert len(days) == 3
+        assert {d['date'] for d in days} == {
+            _day(2026, 3, 7), _day(2026, 3, 10), _day(2026, 3, 14)
+        }
+
+    def test_find_by_date_range_can_scope_to_one_student(self, seeded_db):
+        days = Attendance.find_by_date_range(
+            _day(2026, 3, 1), _day(2026, 3, 31), student_key=ANTHONY_KEY
+        )
+        assert {d['date'] for d in days} == {_day(2026, 3, 7), _day(2026, 3, 14)}
+
+    def test_find_by_date_range_excludes_days_outside_it(self, seeded_db):
+        """Chloe's only day is 2026-02-01, so a March window must not return her."""
+        days = Attendance.find_by_date_range(_day(2026, 3, 1), _day(2026, 3, 31))
+        assert CHLOE_KEY not in {d['student_key'] for d in days}
+        assert len(days) == 3
+
+    def test_count_all_counts_days_not_sessions(self, seeded_db):
+        """Anthony's 3/14 covers two sessions but is one day attended."""
         assert Attendance.count_all() == 4
+        assert sum(d['sessions'] for d in Attendance.find_by_student(ANTHONY_KEY)) == 3
+
+    def test_count_by_student(self, seeded_db):
+        assert Attendance.count_by_student(ANTHONY_KEY) == 2
+        assert Attendance.count_by_student(CHLOE_KEY) == 1
+
+    def test_at_home_days_are_kept_and_taggable(self, seeded_db):
+        """@Home is attendance, distinguishable by delivery_method rather than absent."""
+        in_center = list(seeded_db['attendance_reports'].find({'delivery_methods': 'In-Center'}))
+        at_home = list(seeded_db['attendance_reports'].find({'delivery_methods': '@Home'}))
+        assert len(in_center) == 3
+        assert len(at_home) == 1
+        assert at_home[0]['student_name'] == 'Chloe Tan'
+
+    def test_unmeasured_presence_is_null_not_zero(self, seeded_db):
+        """0 would read as 'attended, stayed no time' -- a different claim."""
+        day = Attendance.find_by_student(CHLOE_KEY)[0]
+        assert day['sessions_timed'] == 0
+        assert day['minutes_present'] is None
 
 
 def test_students_and_reports_agree_on_session_counts(seeded_db):

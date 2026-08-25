@@ -74,8 +74,12 @@ def parse_session(value):
     instructors_str = p.get('Instructors', '')
     return {
         'sessions_this_month': _int(p.get('Sessions This Month')),
-        'session_start':       p.get('Session Start'),
-        'session_end':         p.get('Session End'),
+        # _none(), like every other optional field here: the source writes the literal
+        # string 'None' for a session with no recorded time, and it has to land as a
+        # null. Without this, 'None' is stored as a value and every consumer has to know
+        # to special-case it.
+        'session_start':       _none(p.get('Session Start')),
+        'session_end':         _none(p.get('Session End')),
         'instructors':         [i.strip() for i in instructors_str.split(',')] if instructors_str else []
     }
 

@@ -136,22 +136,73 @@ aggregate `dwp_reports` directly for that.
 Instructors are identified by name alone, because that is all the source data carries.
 Two distinct people sharing a name would merge into one document.
 
+### `attendance_reports` — 29,311 documents
+
+One document per student per **day attended**, built from `dwp_reports` by
+`ingestion/build_attendance.py`.
+
+`student_key`, `account_id`, `student_name`, `date`, `sessions`, `sessions_timed`,
+`centers[]`, `instructors[]`, `delivery_methods[]`, `pages_completed`, `minutes_present`,
+`first_session_start`, `last_session_end`, `dwp_report_ids[]`, `last_modified`.
+
+**Indexes**: `(student_key, date)` (unique), `date`, `account_id`, `student_key`.
+
+**A day is not a session.** 70 student-days carry more than one DWP row (69 with two, one
+with three), so 29,382 sessions collapse to 29,311 days. Counting rows overstates
+attendance by exactly those 71 extra sessions.
+
+**@Home sessions are attendance.** 723 of 29,382 rows are `@Home` rather than `In-Center`,
+and they are kept and tagged rather than filtered out — an in-center-only view is
+`find({'delivery_methods': 'In-Center'})`. The reverse is not recoverable from a
+collection that dropped them at build time.
+
+`minutes_present` sums each session's own duration rather than spanning first start to
+last end, so a student who came in twice with a gap between visits is not credited with
+the gap. It is `null` — not `0` — on a day whose times could not be trusted, since `0`
+would read as "attended, stayed no time". `sessions_timed` says how many of the day's
+sessions were actually measured. Two sources of untrusted times: 217 rows carry the
+literal string `'None'` as `session_end` instead of a null, and 5 pairs end before they
+start. The builder treats both as unmeasured either way, so it is unaffected by whether
+the `'None'` rows have been migrated yet.
+
+`first_session_start` and `last_session_end` are stored as full datetimes, not the
+source's clock strings, so they sort and range-query without reparsing.
+
 ---
 
 ## Rebuilding the aggregates
 
-Both builders are pure functions of `dwp_reports` — nothing in `students` or
-`instructors` is authored, so they can be rebuilt from scratch at any time.
+All three builders are pure functions of `dwp_reports` — nothing in `students`,
+`instructors` or `attendance_reports` is authored, so they can be rebuilt from scratch at
+any time.
 
 ```bash
 python ingestion/import_reports.py      # Excel -> dwp_reports
 python ingestion/build_students.py      # dwp_reports -> students
 python ingestion/build_instructors.py   # dwp_reports -> instructors
+python ingestion/build_attendance.py    # dwp_reports -> attendance_reports
 ```
 
 Each builder `drop()`s and recreates its target collection, and creates indexes **before**
-inserting so a bad build fails ahead of the write. Both expose a `TARGET_COLLECTION`
+inserting so a bad build fails ahead of the write. Each exposes a `TARGET_COLLECTION`
 constant — point it at a scratch name (`students_v2`), verify, then swap and re-run.
+
+### Migrations
+
+One-time scripts, both dry-run by default and committed with `--apply`:
+
+```bash
+python ingestion/backfill_row_hash.py --apply       # hash pre-idempotency documents
+python ingestion/backfill_session_times.py --apply  # 'None' session times -> null
+```
+
+`backfill_session_times.py` cleans up rows imported before `parse_session` ran
+`session_start` / `session_end` through `_none()`, which stored the literal string
+`'None'` in 217 documents. It rewrites `row_hash` alongside the value — the hash covers
+the whole document, so correcting a field without rehashing would leave a document its
+stored hash no longer describes, and the next import of that row would insert a duplicate
+beside it. Two rows that differ only in this field become identical once corrected, so the
+script proves every corrected hash is distinct before writing and aborts untouched if not.
 
 ⚠️ **`import_reports.py` is not idempotent.** It does a plain `insert_many` with no unique
 index on `dwp_reports`, so re-importing the same spreadsheet silently duplicates every row,
@@ -187,6 +238,9 @@ ingestion run before the API serves it:
   they claim to count
 - instructor page total overshooting the recorded total by no more than co-taught sessions
   can explain
+- `attendance_reports` reconciling to `dwp_reports` exactly — one document per student-day,
+  sessions and pages summing to the rows they were built from, and `minutes_present` null
+  exactly when nothing on that day was measurable
 
 These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
@@ -215,9 +269,9 @@ account, so a collision needs two same-named students in the *same household*.
 List responses project out `dwp_report_ids`. `/api/students/<student_key>` scopes its
 `dwp_reports` to that student, not the household.
 
-`/api/metrics` still reports `total_attendance_records` and `avg_attendance_per_student`.
-There is no `attendance_reports` collection on the cluster, so both are always `0` — they
-are not measurements.
+`/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
+`attendance_reports`, so both count **days attended**, not sessions. They read `0` until
+`ingestion/build_attendance.py` has been run against the cluster.
 
 ---
 
