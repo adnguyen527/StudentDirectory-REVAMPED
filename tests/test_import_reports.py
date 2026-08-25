@@ -16,6 +16,7 @@ from ingestion.import_reports import (
     _parse_date,
     _split,
     _to_snake,
+    is_finalized,
     parse_center,
     parse_general_information,
     parse_lp_assignment,
@@ -173,6 +174,42 @@ class TestOtherParsers:
     def test_lp_assignment_keeps_what_it_cannot_parse(self):
         """An unrecognised entry is preserved raw rather than dropped."""
         assert parse_lp_assignment('gibberish') == [{'raw': 'gibberish'}]
+
+
+class TestIsFinalized:
+
+    def test_a_page_count_means_finalized(self):
+        assert is_finalized({'pages_completed': 5}) is True
+
+    def test_zero_pages_is_still_finalized(self):
+        """0 is a recorded result -- someone completed the report and wrote zero."""
+        assert is_finalized({'pages_completed': 0}) is True
+
+    def test_no_page_count_means_unfinalized(self):
+        assert is_finalized({'pages_completed': None}) is False
+        assert is_finalized({}) is False
+
+    def test_finalized_date_does_not_decide_it(self):
+        """72 rows (all December 2024) carry a finalized_date with no page count, and
+        547 carry pages with no finalized_date. The page count is the signal."""
+        assert is_finalized({'finalized_date': '12/02/2024', 'pages_completed': None}) is False
+        assert is_finalized({'finalized_date': None, 'pages_completed': 3}) is True
+
+    def test_transform_sets_the_flag(self):
+        finalized = transform_dwp_row({
+            'Date': '01/02/2025', 'General Information': 'Pages Completed: 5',
+        })
+        unfinalized = transform_dwp_row({'Date': '01/02/2025'})
+        assert finalized['finalized'] is True
+        assert unfinalized['finalized'] is False
+
+    def test_the_flag_is_inside_the_hash(self):
+        """It is derived from a field already hashed, so it cannot split or merge any
+        two rows -- but it does change every hash, which is why the backfill rewrites
+        row_hash rather than only $set-ing the flag."""
+        assert row_hash({'pages_completed': None, 'finalized': False}) != row_hash(
+            {'pages_completed': None}
+        )
 
 
 class TestRowHash:

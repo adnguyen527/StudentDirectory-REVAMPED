@@ -121,7 +121,7 @@ Aggregated instructor profiles built from `dwp_reports`. Rebuilt by
 `ingestion/build_instructors.py`.
 
 `instructor_name`, `total_sessions_taught`, `co_taught_sessions`, `total_pages_completed`,
-`total_days_taught`, `days_taught[]`, `last_session_date`, `total_students_taught`,
+`total_days_taught`, `days_taught[]`, `last_session_date`, `unique_students`,
 `students[]` (roster keyed by `student_key`), `centers[]`, `last_modified`.
 
 **Index**: `instructor_name` (unique).
@@ -234,7 +234,7 @@ ingestion run before the API serves it:
   `account_id` + `student_name`
 - no `dwp_report_ids` pointing at a missing session, and no session without a profile —
   the latter means `import_reports.py` ran and `build_students.py` did not
-- `total_sessions`, `total_students_taught` and `total_days_taught` matching the arrays
+- `total_sessions`, `unique_students` and `total_days_taught` matching the arrays
   they claim to count
 - instructor page total overshooting the recorded total by no more than co-taught sessions
   can explain

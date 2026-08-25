@@ -300,6 +300,42 @@ def test_attendance_minutes_are_plausible(attendance):
     assert not implausible, f'e.g. {implausible[:5]}'
 
 
+def test_the_finalized_flag_agrees_with_the_page_count(live_db):
+    """finalized is defined as `pages_completed is not None` and nothing else. Rows
+    imported before the flag existed need ingestion/backfill_finalized.py --apply."""
+    wrong = live_db['dwp_reports'].count_documents({
+        '$or': [
+            {'finalized': True, 'pages_completed': None},
+            {'finalized': False, 'pages_completed': {'$ne': None}},
+            {'finalized': {'$exists': False}},
+        ]
+    })
+    assert wrong == 0, f'{wrong} row(s) disagree with their page count'
+
+
+def test_unfinalized_sessions_are_kept_not_deleted(live_db):
+    """968 of them are the only record of their student-day, so they are attendance.
+    If this hits zero, someone filtered them out of the source collection."""
+    assert live_db['dwp_reports'].count_documents({'finalized': False}) > 0
+
+
+def test_instructor_unfinalized_never_exceeds_sessions_taught(instructors):
+    impossible = [
+        i['instructor_name'] for i in instructors
+        if i.get('unfinalized_sessions', 0) > i.get('total_sessions_taught', 0)
+    ]
+    assert not impossible, f'e.g. {impossible[:5]}'
+
+
+def test_instructor_unfinalized_totals_reconcile(live_db, instructors):
+    """Co-taught sessions credit each instructor, so the sum runs at or above the row
+    count -- never below it, which would mean sessions went uncounted."""
+    rows = live_db['dwp_reports'].count_documents({
+        'finalized': False, 'instructors.0': {'$exists': True},
+    })
+    assert sum(i.get('unfinalized_sessions', 0) for i in instructors) >= rows
+
+
 def test_instructor_names_are_unique(instructors):
     """One document per name -- which is one document per *person* only under the
     module's assumption that no two instructors share a name. This catches a broken
@@ -334,7 +370,7 @@ def test_instructor_rosters_point_at_real_students(live_db, instructors):
 def test_instructor_roster_size_matches_its_count(instructors):
     drifted = [
         i['instructor_name'] for i in instructors
-        if i.get('total_students_taught') != len(i.get('students', []))
+        if i.get('unique_students') != len(i.get('students', []))
     ]
     assert not drifted, f'{len(drifted)} roster count(s) out of sync, e.g. {drifted[:5]}'
 

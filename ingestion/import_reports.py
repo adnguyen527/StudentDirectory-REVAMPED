@@ -69,6 +69,27 @@ def _parse_date(value):
         return None
 
 
+# ONE TIME BACKFILL
+# Anonymization artifacts. The name mapping assigned a person's name to rows whose
+# instructor was empty in the source, so an unattributed session became one belonging to
+# someone who does not exist -- 73 rows, and no row anywhere with an empty instructors
+# list, which silently disabled the "no instructor named" guard in build_instructors.py.
+# Names here are dropped at parse time so the emptiness survives into the database.
+PLACEHOLDER_INSTRUCTORS = {'Elizabeth Griffin'}
+
+
+def parse_instructors(value):
+    """'Dana Reyes, Sam Ortiz' -> ['Dana Reyes', 'Sam Ortiz'], placeholders removed.
+
+    A row left with no instructors is unattributed, which is a fact about the row and
+    not a reason to drop it: the session still happened and still counts for the student.
+    """
+    if not value:
+        return []
+    names = [name.strip() for name in str(value).split(',')]
+    return [n for n in names if n and n not in PLACEHOLDER_INSTRUCTORS]
+
+
 def parse_session(value):
     p = _split(value)
     instructors_str = p.get('Instructors', '')
@@ -80,7 +101,7 @@ def parse_session(value):
         # to special-case it.
         'session_start':       _none(p.get('Session Start')),
         'session_end':         _none(p.get('Session End')),
-        'instructors':         [i.strip() for i in instructors_str.split(',')] if instructors_str else []
+        'instructors':         parse_instructors(instructors_str),
     }
 
 def parse_general_information(value):
@@ -220,8 +241,24 @@ def transform_dwp_row(row):
     doc.update(parse_schoolwork(row.get('Schoolwork')))
     doc.update(parse_center(row.get('Center')))
     doc['topics'] = parse_lp_assignment(row.get('LP Assignment'))
+    doc['finalized'] = is_finalized(doc)
     doc['row_hash'] = row_hash(doc)
     return doc
+
+
+def is_finalized(doc):
+    """Was this session's report actually completed?
+
+    Keyed on pages_completed, not finalized_date. 1,068 rows have no page count; 996 of
+    them also have no finalized_date, but 547 other rows carry a finalized_date with a
+    real page count missing from neither -- and 72 rows (all December 2024) are the
+    reverse, finalized with no pages. A page count is the signal that survives both.
+
+    An unfinalized row is still a session that happened: 968 of the 996 are the only
+    record of that student-day, and all 996 name an instructor. They belong in
+    attendance and out of any pages-per-session rate, which is what this flag is for.
+    """
+    return doc.get('pages_completed') is not None
 
 
 # ── Importer ──────────────────────────────────────────────────────────────────

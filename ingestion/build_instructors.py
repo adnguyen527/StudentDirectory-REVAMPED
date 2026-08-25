@@ -11,6 +11,12 @@ one instructor, so summing total_pages_completed across instructors comes to mor
 the pages in dwp_reports (168,720 vs 153,360). That is expected. These are per-instructor
 figures -- do not sum them for a center-wide total; aggregate dwp_reports for that.
 
+unfinalized_sessions counts sessions taught whose report was never completed -- no page
+count recorded. It is here and nowhere else: a student has no say in whether their
+instructor closed out the paperwork, so the number is only meaningful against the person
+responsible for it. 1,068 of 29,382 sessions are unfinalized, and they cluster hard by
+instructor rather than by date or center.
+
 Known limitation: instructors are identified by name alone, because that is all the
 source data carries. Two distinct people sharing a name would merge into one document.
 
@@ -62,6 +68,7 @@ def build_instructors():
                     'instructor_name':       name,
                     'total_sessions_taught': 0,
                     'co_taught_sessions':    0,
+                    'unfinalized_sessions':  0,
                     'total_pages_completed': 0,
                     'days_taught':           set(),
                     'students':              {},   # student_key → roster entry
@@ -73,6 +80,8 @@ def build_instructors():
             inst['total_pages_completed'] += pages
             if co_taught:
                 inst['co_taught_sessions'] += 1
+            if not doc.get('finalized'):
+                inst['unfinalized_sessions'] += 1
 
             if date:
                 inst['days_taught'].add(date)
@@ -120,11 +129,12 @@ def build_instructors():
             'instructor_name':       inst['instructor_name'],
             'total_sessions_taught': inst['total_sessions_taught'],
             'co_taught_sessions':    inst['co_taught_sessions'],
+            'unfinalized_sessions':  inst['unfinalized_sessions'],
             'total_pages_completed': inst['total_pages_completed'],
             'total_days_taught':     len(days),
             'days_taught':           days,
             'last_session_date':     days[-1] if days else None,
-            'total_students_taught': len(students_list),
+            'unique_students':       len(students_list),
             'students':              students_list,
             'centers':               centers_list,
             'last_modified':         datetime.now(timezone.utc),
@@ -140,7 +150,15 @@ def build_instructors():
           f"(exceeds {total_dwp} dwp_reports -- co-taught counted once per instructor)")
     print(f"  pages, full credit to each instructor: "
           f"{sum(d['total_pages_completed'] for d in documents)}")
-    print(f"  roster entries: {sum(d['total_students_taught'] for d in documents)}")
+    print(f"  roster entries: {sum(d['unique_students'] for d in documents)}")
+    unfinalized = sum(d['unfinalized_sessions'] for d in documents)
+    worst = sorted(documents, key=lambda d: -d['unfinalized_sessions'])[:3]
+    print(f"  unfinalized sessions: {unfinalized}")
+    for d in worst:
+        if d['unfinalized_sessions']:
+            share = d['unfinalized_sessions'] / d['total_sessions_taught']
+            print(f"    {d['instructor_name']}: {d['unfinalized_sessions']}"
+                  f"/{d['total_sessions_taught']} ({share:.0%})")
     client.close()
 
 
