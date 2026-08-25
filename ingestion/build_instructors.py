@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pymongo import MongoClient, ASCENDING
-from mongo_url import uri
+from mongo_url import uri, db_name
 from util import make_student_key
 
 
@@ -33,7 +33,7 @@ TARGET_COLLECTION = 'instructors'
 
 def build_instructors():
     client = MongoClient(uri)
-    db = client['StudentDirectory']
+    db = client[db_name]
     dwp_collection = db['dwp_reports']
     instructors_collection = db[TARGET_COLLECTION]
 

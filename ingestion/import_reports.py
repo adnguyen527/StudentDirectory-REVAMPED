@@ -1,14 +1,29 @@
 """
 Import anonymized data from Excel files into MongoDB.
+
 DWP rows are parsed at import time — compound string fields are split into
 discrete typed fields before insertion.
+
+Imports are idempotent: every row carries a row_hash content fingerprint, writes are
+upserts keyed on it, and a unique index enforces it. Re-importing a file that has
+already been loaded reports its rows as "unchanged" instead of duplicating them.
+
+Note that a row edited at the source produces a different hash, so it is imported as a
+new document rather than replacing the original. Correcting an already-imported row is
+a separate operation from re-importing a file.
+
+Run ingestion/backfill_row_hash.py once before the first import, to hash documents
+loaded before this mechanism existed.
 """
 
+import hashlib
 import re
 from pathlib import Path
 from datetime import datetime
+from bson import json_util
 from pymongo import MongoClient, ASCENDING
-from mongo_url import uri
+from pymongo.errors import BulkWriteError
+from mongo_url import uri, db_name
 import openpyxl
 
 
@@ -137,6 +152,32 @@ def parse_center(value):
         return []
     return [c.strip() for c in str(value).split(';  ') if c.strip()]
 
+def row_hash(doc):
+    """Content fingerprint of a document, used as its idempotency key.
+
+    A composite of (account_id, student_name, date, session_start) is NOT unique --
+    four session pairs in the current data share one while being genuinely different
+    records (different instructors, different notes). Hashing the whole document
+    avoids collapsing those. All 29,382 existing documents hash distinctly.
+
+    json_util handles BSON types (datetime, ObjectId) deterministically; sort_keys
+    makes the digest independent of field insertion order.
+    """
+    body = {k: v for k, v in doc.items() if k not in ('_id', 'row_hash')}
+    return hashlib.sha1(json_util.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def _is_row_hash_conflict(write_error):
+    """True if a duplicate-key error came from the row_hash index rather than another.
+
+    keyPattern is present on modern servers; the message is the fallback.
+    """
+    key_pattern = write_error.get('keyPattern')
+    if key_pattern is not None:
+        return 'row_hash' in key_pattern
+    return 'row_hash' in write_error.get('errmsg', '')
+
+
 def transform_dwp_row(row):
     doc = {_to_snake(k): v for k, v in row.items() if k not in COMPOUND_FIELDS}
     doc['date'] = _parse_date(row.get('Date'))
@@ -147,6 +188,7 @@ def transform_dwp_row(row):
     doc.update(parse_schoolwork(row.get('Schoolwork')))
     doc['centers'] = parse_center(row.get('Center'))
     doc['topics'] = parse_lp_assignment(row.get('LP Assignment'))
+    doc['row_hash'] = row_hash(doc)
     return doc
 
 
@@ -156,7 +198,7 @@ class DataImporter:
 
     def __init__(self):
         self.client = MongoClient(uri)
-        self.db = self.client['StudentDirectory']
+        self.db = self.client[db_name]
         self.stats = {
             'dwp_reports': 0,
             'attendance_reports': 0,
@@ -165,6 +207,8 @@ class DataImporter:
             'birthday_reports': 0,
             'total_files': 0,
             'total_documents': 0,
+            'already_present': 0,
+            'repeated_in_file': 0,
             'errors': 0
         }
 
@@ -207,19 +251,72 @@ class DataImporter:
 
         if collection_name == 'dwp_reports':
             rows = [transform_dwp_row(row) for row in rows]
+        else:
+            for row in rows:
+                row['row_hash'] = row_hash(row)
 
         try:
-            result = self.db[collection_name].insert_many(rows)
-            count = len(result.inserted_ids)
-            print(f"    ✓ {count} → {collection_name}")
-            self.stats[collection_name] += count
-            self.stats['total_documents'] += count
-            if collection_name == 'dwp_reports':
-                self.db[collection_name].create_index([('date', ASCENDING)])
-                self.db[collection_name].create_index([('account_id', ASCENDING)])
+            inserted, already, repeated = self._upsert(collection_name, rows)
+            note = f", {repeated} repeated in file" if repeated else ""
+            print(f"    ✓ {inserted} new, {already} already present{note} "
+                  f"→ {collection_name}")
+            self.stats[collection_name] += inserted
+            self.stats['total_documents'] += inserted
+            self.stats['already_present'] += already
+            self.stats['repeated_in_file'] += repeated
         except Exception as e:
             print(f"    ✗ Insert error: {e}")
             self.stats['errors'] += 1
+
+    def _upsert(self, collection_name, docs):
+        """Write only rows whose row_hash is not already stored.
+
+        There is deliberately no update path. row_hash covers the whole document, so a
+        hash that already exists means a byte-identical document is already stored and
+        rewriting it would change nothing. A row edited at the source hashes
+        differently and is inserted as a new document.
+
+        Returns (inserted, already_present, repeated_within_file).
+        """
+        collection = self.db[collection_name]
+        self._ensure_indexes(collection_name)
+
+        # Collapse rows repeated inside a single file before touching the database.
+        by_hash = {d['row_hash']: d for d in docs}
+        repeated = len(docs) - len(by_hash)
+
+        hashes = list(by_hash)
+        already = set()
+        for i in range(0, len(hashes), 1000):
+            chunk = hashes[i:i + 1000]
+            already |= set(collection.distinct('row_hash', {'row_hash': {'$in': chunk}}))
+
+        fresh = [d for h, d in by_hash.items() if h not in already]
+        inserted = 0
+        if fresh:
+            try:
+                inserted = len(collection.insert_many(fresh, ordered=False).inserted_ids)
+            except BulkWriteError as e:
+                # A row_hash duplicate here means another writer inserted the same row
+                # between the read above and this write -- harmless, the row is stored.
+                # A duplicate on any other index is a real problem and must not be
+                # swallowed, so check which index actually collided.
+                unexpected = [w for w in e.details['writeErrors']
+                              if w['code'] != 11000 or not _is_row_hash_conflict(w)]
+                if unexpected:
+                    raise
+                inserted = e.details['nInserted']
+
+        return inserted, len(by_hash) - inserted, repeated
+
+    def _ensure_indexes(self, collection_name):
+        collection = self.db[collection_name]
+        # Unique on row_hash is what actually enforces idempotency -- a second import
+        # of the same row matches an existing document instead of inserting beside it.
+        collection.create_index([('row_hash', ASCENDING)], unique=True)
+        if collection_name == 'dwp_reports':
+            collection.create_index([('date', ASCENDING)])
+            collection.create_index([('account_id', ASCENDING)])
 
     def import_all(self, directory='anonymized_data'):
         print(f"\n{'='*60}\nIMPORTING FROM {directory}\n{'='*60}")
@@ -243,9 +340,12 @@ class DataImporter:
 
     def print_stats(self):
         print(f"\n{'='*60}\nIMPORT COMPLETE\n{'='*60}")
-        print(f"Files:     {self.stats['total_files']}")
-        print(f"Documents: {self.stats['total_documents']}")
-        print(f"Errors:    {self.stats['errors']}")
+        print(f"Files:           {self.stats['total_files']}")
+        print(f"New documents:   {self.stats['total_documents']}")
+        print(f"Already present: {self.stats['already_present']}  (skipped -- re-import is a no-op)")
+        if self.stats['repeated_in_file']:
+            print(f"Repeated in file: {self.stats['repeated_in_file']}")
+        print(f"Errors:          {self.stats['errors']}")
         print(f"\nBy collection:")
         for name in ['dwp_reports', 'attendance_reports', 'enrollment_reports', 'student_reports', 'birthday_reports']:
             print(f"  {name}: {self.stats[name]}")
