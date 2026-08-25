@@ -11,6 +11,7 @@ dashboard.
 - **Database**: MongoDB Atlas (`StudentDirectory` database)
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
+- **Tests**: `pytest` + `mongomock`
 - **Frontend**: React *(in progress)*
 
 ---
@@ -27,6 +28,18 @@ python app.py
 ```
 
 Starts Flask on `http://0.0.0.0:5000` in debug mode. `.env` is gitignored — never commit it.
+
+`MONGODB_URI` is a full Atlas SRV string. The host has **four** labels
+(`<cluster>.<hash>.mongodb.net`) — dropping the cluster label leaves a hostname with no
+SRV record, and `pymongo` fails at `MongoClient()` with `ConfigurationError: The DNS query
+name does not exist` before any auth is attempted.
+
+To work on the code, install the dev dependencies as well and run the tests:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ---
 
@@ -146,6 +159,49 @@ and both aggregate collections inherit the inflation.
 
 ---
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest                  # 82 offline tests -- no network, no credentials (~0.5s)
+pytest --integration    # + 19 read-only checks against the real cluster
+```
+
+**Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
+then overwrites the environment variable with an unroutable sentinel, so a test that ever
+escapes the mock fails to resolve rather than reaching Atlas. Nothing in this layer writes
+anywhere. `Database`'s class-level client cache is reset around every test.
+
+The fixture directory in `tests/sample_data.py` is three students, two of them siblings on
+one account, because that is where this schema breaks. Most assertions turn on that pair —
+a household with 3 sessions in which one student owns 2.
+
+**`--integration`.** Read-only checks (`tests/test_live_database.py`) that catch a bad
+ingestion run before the API serves it:
+
+- `student_key` unique across `students`, and still re-derivable from that document's own
+  `account_id` + `student_name`
+- no `dwp_report_ids` pointing at a missing session, and no session without a profile —
+  the latter means `import_reports.py` ran and `build_students.py` did not
+- `total_sessions`, `total_students_taught` and `total_days_taught` matching the arrays
+  they claim to count
+- instructor page total overshooting the recorded total by no more than co-taught sessions
+  can explain
+
+These skip with a clear message when `MONGODB_URI` is unset or still holds the
+`.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
+
+⚠️ **The instructor checks assume one name is one person.** A DWP row carries an
+instructor's name and no uid, so `instructors` is keyed on `instructor_name` and every
+instructor assertion inherits that. Two people who share a name are already merged into a
+single, internally consistent document by the time the tests run —
+`test_instructor_names_are_unique` catches a broken build, not a collision, and no
+assertion here can see one. Separating them requires a uid in the source data, not a
+stricter test. Students are not exposed this way: `make_student_key` scopes the name to an
+account, so a collision needs two same-named students in the *same household*.
+
+---
+
 ## API
 
 | Method | Route | Notes |
@@ -195,7 +251,8 @@ pipeline = [
 - `openpyxl` is required by `import_reports.py` but missing from `requirements.txt`.
 - `database.py` prints `✓`/`✗`, which raises `UnicodeEncodeError` on a default Windows
   console (cp1252) and surfaces as a false "Could not connect" *after* the connection
-  has already succeeded.
+  has already succeeded. The client and database are now cached before that print runs,
+  so the app keeps working — the warning is cosmetic, but it is still a lie.
 - `dwp_report_ids` (up to 582 entries) and `days_taught` (up to 209) are unbounded arrays
   that grow with the dataset.
 - Center names are unnormalized: 13 values covering 4 locations, with 1,438 records
