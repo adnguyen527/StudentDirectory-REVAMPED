@@ -248,7 +248,6 @@ pipeline = [
 - No pagination on `/api/students`; the full list is ~1.8 MB.
 - `CORS(origins="*")` on all `/api/*` routes, which serve student names and session notes.
 - `app.run(debug=True, host='0.0.0.0')`.
-- `openpyxl` is required by `import_reports.py` but missing from `requirements.txt`.
 - `database.py` prints `✓`/`✗`, which raises `UnicodeEncodeError` on a default Windows
   console (cp1252) and surfaces as a false "Could not connect" *after* the connection
   has already succeeded. The client and database are now cached before that print runs,
