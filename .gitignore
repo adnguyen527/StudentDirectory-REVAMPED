@@ -12,6 +12,11 @@ __pycache__/
 venv/
 env/
 
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Data exports (may contain student PII)
 anonymized_data/
 *.xlsx

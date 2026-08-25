@@ -10,15 +10,24 @@ class Database:
     def connect(cls):
         """Connect to MongoDB"""
         if cls._client is None:
+            client = None
             try:
-                cls._client = MongoClient(uri)
+                client = MongoClient(uri)
                 # Verify connection
-                cls._client.admin.command('ping')
-                cls._db = cls._client[db_name]
-                print("✓ Connected to MongoDB")
+                client.admin.command('ping')
             except Exception as e:
+                # Nothing is published to the class until the ping succeeds. A client
+                # cached here before it was verified would satisfy the guard above, so
+                # every later connect() would short-circuit and get_db() would hand
+                # back a None database for the rest of the process.
+                if client is not None:
+                    client.close()
                 print(f"✗ Failed to connect to MongoDB: {e}")
                 raise
+
+            cls._client = client
+            cls._db = client[db_name]
+            print("✓ Connected to MongoDB")
         return cls._db
 
     @classmethod
