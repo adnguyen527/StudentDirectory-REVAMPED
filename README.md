@@ -347,6 +347,4 @@ pipeline = [
 - **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student, `days_taught` to
   272 per instructor, and instructor rosters to 304. All grow with the dataset, and all
   are far from MongoDB's 16 MB document limit — accepted, not a pending fix.
-- **`session_start` and `session_end` are still clock strings** (`'3:58 PM'`), so duration
-  and time-of-day analysis reparses at query time. `attendance_reports` already stores
-  real datetimes derived from them, and `finalized_date` is now a datetime too.
+
