@@ -248,6 +248,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 | GET | `/api/students` | all students; `?query=` to search, `?account_id=` for one household's siblings |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
+| GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
@@ -332,6 +333,10 @@ pipeline = [
 - [ ] **Decide who sees `student_notes`.** Personal interests collected for rapport, on
       3,594 rows. Fine for an instructor view, questionable in anything parent-facing.
       `internal_notes` and both spellings of the director note are already withheld.
+- [ ] **Expose the `instructors` collection.** 103 documents that no route touches —
+      there is no `Instructor` model and no endpoint. Needs a list, a detail view keyed
+      on `instructor_name`, and a name search, mirroring the student routes. The
+      instructor profile page below is blocked on this.
 
 ### Deployment
 
@@ -346,4 +351,19 @@ pipeline = [
 
 - [ ] **React dashboard.** Blocked on session authentication above, not on the API
       surface.
-
+- [ ] **Search page for students and instructors.** One entry point managers land on.
+      Student search exists (`/api/students/search?q=`, minimum 2 characters); instructor
+      search does not yet. Results link through to the profile pages below.
+- [ ] **Student profile landing page.** The full record for one student — profile,
+      centers, instructors, topics mastered, session history. `/api/students/<key>`
+      already returns all of it, so this is frontend-only.
+- [ ] **Instructor profile landing page.** Sessions taught, unique students, roster,
+      centers, days taught, and `unfinalized_sessions` as a follow-up list. **Blocked on
+      the instructor endpoints above** — the collection is built and current, but nothing
+      serves it.
+- [ ] **Session count panel on the student record.** Show how many sessions a student
+      attended over a selectable period, with the visit dates, so a manager can tell a
+      parent how much of their prepaid package has been used. Backed by
+      `GET /api/students/<student_key>/attendance?start=&end=`, which returns totals, a
+      per-month breakdown and the dates. Counts sessions rather than days, since a day
+      with two sessions draws down two.

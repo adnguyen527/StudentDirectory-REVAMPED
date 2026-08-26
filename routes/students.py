@@ -1,14 +1,40 @@
+from datetime import datetime
+
 from flask import Blueprint, jsonify, request
-from models import Student, DigitalWorkoutPlan
+from models import Attendance, Student, DigitalWorkoutPlan
 from bson import json_util
 import json
 
 students_bp = Blueprint('students', __name__, url_prefix='/api')
 
+DATE_FORMAT = '%Y-%m-%d'
+
 
 def _serialize(value):
     """BSON (ObjectId, datetime) -> JSON-safe structures."""
     return json.loads(json_util.dumps(value))
+
+
+def _parse_period(args):
+    """(start, end, error) from ?start=&end=, both YYYY-MM-DD and both required.
+
+    No default period. The obvious one -- "this month" -- silently returns nothing
+    whenever the imported data lags the calendar, which reads as a broken endpoint
+    rather than an empty month. The caller names the window it means.
+    """
+    raw_start, raw_end = args.get('start'), args.get('end')
+    if not raw_start or not raw_end:
+        return None, None, 'start and end are required, as YYYY-MM-DD'
+
+    try:
+        start = datetime.strptime(raw_start, DATE_FORMAT)
+        end = datetime.strptime(raw_end, DATE_FORMAT)
+    except ValueError:
+        return None, None, 'start and end must be YYYY-MM-DD dates'
+
+    if start > end:
+        return None, None, 'start must not be after end'
+    return start, end, None
 
 
 @students_bp.route('/students', methods=['GET'])
@@ -33,6 +59,39 @@ def search_students():
         return jsonify({'error': 'Query must be at least 2 characters'}), 400
 
     return jsonify(_serialize(Student.search(query))), 200
+
+
+@students_bp.route('/students/<student_key>/attendance', methods=['GET'])
+def get_student_attendance(student_key):
+    """Sessions one student attended in a period, for a manager talking to a parent.
+
+    Consumption, not balance: how many sessions were used. How many were purchased lives
+    in billing, which this system does not hold.
+    """
+    student = Student.find_by_key(student_key)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
+
+    start, end, error = _parse_period(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
+    summary = Attendance.period_summary(student_key, start, end)
+
+    return jsonify({
+        'student': {
+            'student_key': student['student_key'],
+            'student_name': student['student_name'],
+            'account_id': student['account_id'],
+        },
+        'period': {
+            'start': start.strftime(DATE_FORMAT),
+            'end': end.strftime(DATE_FORMAT),
+        },
+        'totals': summary['totals'],
+        'by_month': summary['by_month'],
+        'visits': _serialize(summary['visits']),
+    }), 200
 
 
 @students_bp.route('/students/<student_key>', methods=['GET'])

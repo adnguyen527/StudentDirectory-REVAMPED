@@ -131,6 +131,76 @@ class TestGetStudent:
         assert response.get_json() == {'error': 'Student not found'}
 
 
+class TestStudentAttendance:
+    """GET /api/students/<key>/attendance -- what a manager reads to a parent."""
+
+    def url(self, key, start='2026-03-01', end='2026-03-31'):
+        return f'/api/students/{key}/attendance?start={start}&end={end}'
+
+    def test_returns_sessions_days_and_the_dates(self, client):
+        body = client.get(self.url(ANTHONY_KEY)).get_json()
+
+        assert body['student']['student_name'] == 'Anthony Nguyen'
+        assert body['period'] == {'start': '2026-03-01', 'end': '2026-03-31'}
+        assert body['totals'] == {'sessions': 3, 'days': 2}
+        assert body['by_month'] == [{'month': '2026-03', 'sessions': 3, 'days': 2}]
+        assert len(body['visits']) == 2
+
+    def test_the_dates_are_present_and_chronological(self, client):
+        """The dates are the substance of the conversation, not just the total."""
+        visits = client.get(self.url(ANTHONY_KEY)).get_json()['visits']
+        dates = [v['date']['$date'] for v in visits]
+        assert dates == sorted(dates)
+
+    def test_a_student_with_no_sessions_in_the_period_is_a_zero_not_a_404(self, client):
+        """'Zero this period' is the answer the manager is calling about."""
+        response = client.get(self.url(ANTHONY_KEY, '2026-05-01', '2026-05-31'))
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['totals'] == {'sessions': 0, 'days': 0}
+        assert body['by_month'] == []
+        assert body['visits'] == []
+
+    def test_an_unknown_student_is_a_404(self, client):
+        response = client.get(self.url('no-such-account_nobody'))
+        assert response.status_code == 404
+
+    def test_siblings_are_not_mixed_in(self, client):
+        """Ava attended on 3/10 and shares Anthony's account."""
+        visits = client.get(self.url(ANTHONY_KEY)).get_json()['visits']
+        assert {v['student_name'] for v in visits} == {'Anthony Nguyen'}
+
+    @pytest.mark.parametrize('params', [
+        '',
+        '?start=2026-03-01',
+        '?end=2026-03-31',
+        '?start=2026-03-01&end=notadate',
+        '?start=03/01/2026&end=03/31/2026',
+    ])
+    def test_a_missing_or_malformed_period_is_rejected(self, client, params):
+        response = client.get(f'/api/students/{ANTHONY_KEY}/attendance{params}')
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    def test_a_backwards_period_is_rejected(self, client):
+        response = client.get(self.url(ANTHONY_KEY, '2026-03-31', '2026-03-01'))
+        assert response.status_code == 400
+        assert 'after end' in response.get_json()['error']
+
+    def test_there_is_no_default_period(self, client):
+        """A 'this month' default would silently return nothing whenever the imported
+        data lags the calendar, which reads as a broken endpoint."""
+        assert client.get(f'/api/students/{ANTHONY_KEY}/attendance').status_code == 400
+
+    def test_private_fields_are_not_served_here_either(self, client):
+        visits = client.get(self.url(CHLOE_KEY, '2026-02-01', '2026-02-28')).get_json()['visits']
+        assert visits, 'no visits -- the assertion below is vacuous'
+        assert all('dwp_report_ids' not in v for v in visits)
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get(self.url(ANTHONY_KEY)).status_code == 401
+
+
 class TestMetrics:
 
     def test_totals(self, client):

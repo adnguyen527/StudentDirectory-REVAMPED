@@ -10,6 +10,7 @@ from tests.sample_data import (
     ANTHONY_KEY,
     AVA_KEY,
     CHLOE_KEY,
+    _attendance,
     _day,
 )
 
@@ -207,6 +208,72 @@ class TestAttendance:
         assert len(in_center) == 3
         assert len(at_home) == 1
         assert at_home[0]['student_name'] == 'Chloe Tan'
+
+    def test_period_summary_counts_sessions_not_days(self, seeded_db):
+        """Anthony's 3/14 is two sessions on one day. A prepaid package draws down two,
+        so the totals must differ."""
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        assert summary['totals'] == {'sessions': 3, 'days': 2}
+
+    def test_period_summary_is_chronological(self, seeded_db):
+        """Oldest first -- this reads as a statement, not a feed."""
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        dates = [v['date'] for v in summary['visits']]
+        assert dates == sorted(dates)
+
+    def test_period_summary_buckets_by_month(self, seeded_db):
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 1, 1), _day(2026, 12, 31)
+        )
+        assert summary['by_month'] == [{'month': '2026-03', 'sessions': 3, 'days': 2}]
+
+    def test_period_summary_months_are_ordered(self, seeded_db):
+        """A list, not a dict -- clients should not have to trust JSON key order."""
+        summary = Attendance.period_summary(
+            CHLOE_KEY, _day(2026, 1, 1), _day(2026, 12, 31)
+        )
+        months = [b['month'] for b in summary['by_month']]
+        assert months == sorted(months)
+
+    def test_period_summary_excludes_siblings(self, seeded_db):
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        assert {v['student_name'] for v in summary['visits']} == {'Anthony Nguyen'}
+
+    @pytest.mark.parametrize('start,end,expected', [
+        (_day(2026, 3, 7), _day(2026, 3, 14), 3),    # both bounds inclusive
+        (_day(2026, 3, 8), _day(2026, 3, 14), 2),    # start excludes the 7th
+        (_day(2026, 3, 7), _day(2026, 3, 13), 1),    # end excludes the 14th
+    ])
+    def test_period_summary_bounds_are_inclusive(self, seeded_db, start, end, expected):
+        """date is stored at midnight, so an end of the 14th includes the 14th."""
+        summary = Attendance.period_summary(ANTHONY_KEY, start, end)
+        assert summary['totals']['sessions'] == expected
+
+    def test_period_summary_of_an_empty_window_is_zero_not_missing(self, seeded_db):
+        """A student who attended nothing is a real answer -- 'zero this period' is what
+        the manager is calling about."""
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 5, 1), _day(2026, 5, 31)
+        )
+        assert summary == {'totals': {'sessions': 0, 'days': 0}, 'by_month': [], 'visits': []}
+
+    def test_period_summary_counts_unfinalized_sessions(self, seeded_db):
+        """The student attended. Whether the instructor closed the report is a staffing
+        matter, not a reason to hand the family back a session."""
+        seeded_db['attendance_reports'].insert_one(_attendance(
+            ANTHONY_KEY, ACCOUNT_NGUYEN, 'Anthony Nguyen', _day(2026, 3, 20),
+            sessions_timed=0, minutes_present=None, pages_completed=0,
+        ))
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        assert summary['totals'] == {'sessions': 4, 'days': 3}
 
     def test_unmeasured_presence_is_null_not_zero(self, seeded_db):
         """0 would read as 'attended, stayed no time' -- a different claim."""

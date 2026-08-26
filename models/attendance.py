@@ -46,6 +46,46 @@ class Attendance:
                     .sort('date', -1))
 
     @staticmethod
+    def period_summary(student_key, start, end):
+        """One student's attendance across [start, end], oldest first.
+
+        Counts SESSIONS, not days. Families prepay a set number of sessions, so a day
+        with two sessions draws down two -- 70 student-days in the current data carry
+        more than one. `days` is reported alongside because they are not the same number
+        and a reader will want to know which they are looking at.
+
+        Unfinalized sessions count. The student attended; whether the instructor ever
+        completed the report is a staffing matter, not a reason to hand the family back a
+        session.
+
+        Both bounds are inclusive. `date` is stored at midnight, so an end of 2025-06-30
+        includes everything on the 30th.
+        """
+        visits = list(Attendance._collection()
+                      .find({'student_key': student_key,
+                             'date': {'$gte': start, '$lte': end}},
+                            LIST_PROJECTION)
+                      .sort('date', 1))
+
+        by_month = {}
+        for visit in visits:
+            month = visit['date'].strftime('%Y-%m')
+            bucket = by_month.setdefault(month, {'month': month, 'sessions': 0, 'days': 0})
+            bucket['sessions'] += visit.get('sessions') or 0
+            bucket['days'] += 1
+
+        return {
+            'totals': {
+                'sessions': sum(v.get('sessions') or 0 for v in visits),
+                'days': len(visits),
+            },
+            # A list, not a dict: JSON object key order is not something a client should
+            # have to trust, and the frontend wants to iterate these in order.
+            'by_month': [by_month[m] for m in sorted(by_month)],
+            'visits': visits,
+        }
+
+    @staticmethod
     def count_all():
         return Attendance._collection().count_documents({})
 
