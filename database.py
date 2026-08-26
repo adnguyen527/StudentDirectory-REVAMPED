@@ -22,12 +22,12 @@ class Database:
                 # back a None database for the rest of the process.
                 if client is not None:
                     client.close()
-                print(f"✗ Failed to connect to MongoDB: {e}")
+                print(f"[!!] Failed to connect to MongoDB: {e}")
                 raise
 
             cls._client = client
             cls._db = client[db_name]
-            print("✓ Connected to MongoDB")
+            print("[ok] Connected to MongoDB")
         return cls._db
 
     @classmethod
@@ -44,7 +44,7 @@ class Database:
             cls._client.close()
             cls._client = None
             cls._db = None
-            print("✓ MongoDB connection closed")
+            print("[ok] MongoDB connection closed")
 
 # Create a global database instance
 db = Database()
