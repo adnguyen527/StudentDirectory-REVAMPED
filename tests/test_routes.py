@@ -2,6 +2,8 @@
 
 import pytest
 
+from config import DEFAULT_ORIGINS, parse_origins
+from tests.conftest import TEST_API_KEY
 from tests.sample_data import ACCOUNT_NGUYEN, ACCOUNT_TAN, ANTHONY_KEY, CHLOE_KEY
 
 
@@ -101,6 +103,26 @@ class TestGetStudent:
         body = client.get(f'/api/students/{CHLOE_KEY}').get_json()
         assert body['stats']['total_dwp_reports'] == 1
 
+    @pytest.mark.parametrize('field', [
+        'row_hash',
+        'lead_id',
+        'internal_notes',
+        'notes_from_center_director',
+        'notes_for_center_director',
+    ])
+    def test_private_fields_are_not_served(self, client, field):
+        """End-to-end: whatever the model withholds must not reappear over HTTP."""
+        body = client.get(f'/api/students/{CHLOE_KEY}').get_json()
+        assert body['dwp_reports'], 'no reports -- the assertion below is vacuous'
+        assert all(field not in report for report in body['dwp_reports'])
+
+    def test_the_response_is_not_empty_of_everything(self, client):
+        """Guards the guard: a projection that withheld the whole document would make
+        every leak assertion above pass for the wrong reason."""
+        report = client.get(f'/api/students/{CHLOE_KEY}').get_json()['dwp_reports'][0]
+        assert report['session_summary_notes'] == 'worked through angle pairs'
+        assert report['pages_completed'] == 7
+
     def test_unknown_student_is_404(self, client):
         response = client.get('/api/students/no-such-account_nobody')
         assert response.status_code == 404
@@ -126,7 +148,10 @@ class TestMetrics:
 
         app = create_app()
         app.config['TESTING'] = True
-        body = app.test_client().get('/api/metrics').get_json()
+        # Own client, so it needs the credential the shared fixture would have supplied.
+        body = app.test_client().get(
+            '/api/metrics', headers={'X-API-Key': TEST_API_KEY}
+        ).get_json()
 
         assert body['total_students'] == 0
         assert body['avg_dwp_per_student'] == 0
@@ -144,15 +169,82 @@ class TestMetrics:
         assert 'cluster down' in response.get_json()['error']
 
 
-@pytest.mark.parametrize('origin', ['http://localhost:3000', 'https://example.test'])
-def test_cors_allows_any_frontend_origin(client, origin):
-    """origins='*' -- Flask-CORS echoes the caller's Origin rather than a literal '*',
-    so any origin must come back allowed."""
-    response = client.get('/api/health', headers={'Origin': origin})
-    assert response.headers.get('Access-Control-Allow-Origin') in (origin, '*')
+class TestCors:
+    """The API is unauthenticated to a browser only in the sense that a page cannot
+    supply X-API-Key -- but a permissive origin list is still what decides whether a
+    drive-by page may READ a response. These assert the closed default."""
+
+    @pytest.mark.parametrize('origin', [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    ])
+    def test_the_dev_origins_are_allowed(self, client, origin):
+        response = client.get('/api/health', headers={'Origin': origin})
+        assert response.headers.get('Access-Control-Allow-Origin') == origin
+
+    @pytest.mark.parametrize('origin', [
+        'https://evil.test',
+        'http://localhost:5174',            # neighbouring port is a different origin
+        'https://localhost:5173',           # scheme is part of the origin
+        'http://sub.localhost:5173',
+    ])
+    def test_an_unlisted_origin_gets_no_allow_header(self, client, origin):
+        """No header means the browser refuses to hand the body to the page. The
+        response still has a body -- CORS is enforced by the browser, not the server."""
+        response = client.get('/api/health', headers={'Origin': origin})
+        assert 'Access-Control-Allow-Origin' not in response.headers
+
+    def test_no_origin_header_is_unaffected(self, client):
+        """curl and server-to-server callers send no Origin and are not CORS-governed."""
+        assert client.get('/api/health').status_code == 200
+
+    def test_cors_is_scoped_to_the_api_prefix(self, client):
+        """The rule is r'/api/*'; a non-API path must not pick up the header."""
+        response = client.get('/', headers={'Origin': 'http://localhost:5173'})
+        assert 'Access-Control-Allow-Origin' not in response.headers
+
+    def test_preflight_permits_the_api_key_header(self, anonymous_client):
+        """X-API-Key is not a CORS-simple header, so every browser call preflights. If
+        the header is not allowed by name, the real request is never sent."""
+        response = anonymous_client.options(
+            '/api/students',
+            headers={
+                'Origin': 'http://localhost:5173',
+                'Access-Control-Request-Method': 'GET',
+                'Access-Control-Request-Headers': 'X-API-Key',
+            },
+        )
+        assert response.status_code < 400
+        allowed = response.headers.get('Access-Control-Allow-Headers', '')
+        assert 'X-API-Key'.lower() in allowed.lower()
+
+    def test_preflight_from_an_unlisted_origin_is_not_approved(self, anonymous_client):
+        response = anonymous_client.options(
+            '/api/students',
+            headers={
+                'Origin': 'https://evil.test',
+                'Access-Control-Request-Method': 'GET',
+                'Access-Control-Request-Headers': 'X-API-Key',
+            },
+        )
+        assert 'Access-Control-Allow-Origin' not in response.headers
 
 
-def test_cors_is_scoped_to_the_api_prefix(client):
-    """The rule is r'/api/*'; a non-API path must not pick up the header."""
-    response = client.get('/', headers={'Origin': 'http://localhost:3000'})
-    assert 'Access-Control-Allow-Origin' not in response.headers
+class TestParseOrigins:
+
+    def test_a_comma_separated_list(self):
+        assert parse_origins('http://a, http://b') == ['http://a', 'http://b']
+
+    def test_trailing_slashes_are_stripped(self):
+        """A browser's Origin header never has one, so a configured slash would mean
+        the entry silently never matches."""
+        assert parse_origins('http://a/') == ['http://a']
+
+    @pytest.mark.parametrize('value', [None, '', '   ', ','])
+    def test_unset_falls_back_to_the_dev_origins(self, value):
+        assert parse_origins(value) == DEFAULT_ORIGINS
+
+    def test_wildcard_is_available_but_must_be_explicit(self):
+        assert parse_origins('*') == '*'

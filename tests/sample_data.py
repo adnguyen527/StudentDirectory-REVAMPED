@@ -115,8 +115,16 @@ DWP_REPORTS = [
         'topics': [{'id': 'T-050', 'name': 'Counting', 'status': 'In Progress'}],
     },
     {
+        # Carries every private field, in both spellings the source has used, so the
+        # projection is tested against what it is actually meant to withhold.
         '_id': CHLOE_DWP_IDS[0],
         'account_id': ACCOUNT_TAN,
+        'lead_id': 'lead-0002',
+        'row_hash': 'deadbeef',
+        'internal_notes': 'parent behind on payment',
+        'notes_from_center_director': 'move to the 4pm slot',
+        'notes_for_center_director': 'older spelling, still populated on 3,655 rows',
+        'session_summary_notes': 'worked through angle pairs',
         'student_name': 'Chloe Tan',
         'date': _day(2026, 2, 1),
         'centers': ['Eastside'],

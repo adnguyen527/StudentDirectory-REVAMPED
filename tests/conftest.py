@@ -28,6 +28,11 @@ REAL_DB_NAME = os.getenv('MONGODB_DB', 'StudentDirectory')
 os.environ['MONGODB_URI'] = 'mongodb://unit-tests.invalid:27017/'
 os.environ['MONGODB_DB'] = 'StudentDirectoryTest'
 
+# Set before config is imported, so the app under test is configured rather than
+# answering 500 on every protected route.
+TEST_API_KEY = 'test-api-key-not-a-real-secret'
+os.environ['API_KEY'] = TEST_API_KEY
+
 import database  # noqa: E402  -- must follow the env setup above
 from database import Database  # noqa: E402
 
@@ -105,11 +110,22 @@ def seeded_db(mongo):
 
 
 @pytest.fixture
-def client(seeded_db):
-    """Flask test client wired to the seeded in-memory database."""
+def anonymous_client(seeded_db):
+    """Test client that sends no credentials -- for the auth tests themselves."""
     from app import create_app
 
     app = create_app()
     app.config['TESTING'] = True
     with app.test_client() as test_client:
         yield test_client
+
+
+@pytest.fixture
+def client(anonymous_client):
+    """Authenticated test client wired to the seeded in-memory database.
+
+    Every route but /api/health requires a credential, so the default client carries one
+    and the tests below stay about behaviour rather than about authentication.
+    """
+    anonymous_client.environ_base['HTTP_X_API_KEY'] = TEST_API_KEY
+    return anonymous_client

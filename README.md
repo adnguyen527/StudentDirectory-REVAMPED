@@ -22,10 +22,18 @@ The connection string carries cluster credentials and is **not** in source. Copy
 template and fill it in:
 
 ```bash
-cp .env.example .env      # then set MONGODB_URI
+cp .env.example .env      # then set MONGODB_URI and API_KEY
 pip install -r requirements.txt
 python app.py
 ```
+
+`API_KEY` is required. Generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. Without it the API
+answers `500` on every route except `/api/health` — an unconfigured server costs
+availability rather than serving student data openly.
+
+`ALLOWED_ORIGINS` is optional and defaults to the local dev servers. Set it when the
+frontend is served from anywhere else.
 
 Starts Flask on `http://0.0.0.0:5000` in debug mode. `.env` is gitignored — never commit it.
 
@@ -326,8 +334,9 @@ pipeline = [
   original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
 - **No pagination on `/api/students`.** The full list is 1.72 MB across 893 students, and
   every call ships all of it.
-- **`CORS(origins="*")` on all `/api/*` routes**, which serve student names and session
-  notes. Any origin a browser visits can read them.
+- **No user accounts.** The shared `API_KEY` authenticates a *caller*, not a person, so
+  there is nothing to audit and nothing to revoke short of rotating the key for everyone.
+  A browser client will need session auth regardless — see the API section.
 - **`app.run(debug=True, host='0.0.0.0')`** is hardcoded — the debugger console, bound to
   every interface.
 - **Four collisions on the natural key.** Four student-days have two rows sharing a

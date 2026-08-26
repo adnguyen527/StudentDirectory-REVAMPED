@@ -116,6 +116,37 @@ class TestDigitalWorkoutPlan:
     def test_count_all(self, seeded_db):
         assert DigitalWorkoutPlan.count_all() == 4
 
+    @pytest.mark.parametrize('field', [
+        'row_hash',
+        'lead_id',
+        'internal_notes',
+        'notes_from_center_director',
+        'notes_for_center_director',
+    ])
+    def test_private_fields_never_leave_the_model(self, seeded_db, field):
+        """These are staff-internal or pure plumbing. The API has no client that needs
+        them, so they are withheld at the query rather than filtered downstream."""
+        for finder in (
+            DigitalWorkoutPlan.find_by_student(ACCOUNT_TAN, 'Chloe Tan'),
+            DigitalWorkoutPlan.find_by_account(ACCOUNT_TAN),
+        ):
+            assert finder, 'fixture returned nothing -- the assertion below is vacuous'
+            assert all(field not in report for report in finder)
+
+    def test_both_spellings_of_the_director_note_are_withheld(self, seeded_db):
+        """The source renamed this column partway through the dataset. A filter written
+        for the newer name alone still leaks the 23 populated older rows."""
+        report = DigitalWorkoutPlan.find_by_student(ACCOUNT_TAN, 'Chloe Tan')[0]
+        assert 'notes_from_center_director' not in report
+        assert 'notes_for_center_director' not in report
+
+    def test_the_work_itself_still_comes_through(self, seeded_db):
+        """Withholding must not take the session with it."""
+        report = DigitalWorkoutPlan.find_by_student(ACCOUNT_TAN, 'Chloe Tan')[0]
+        assert report['session_summary_notes'] == 'worked through angle pairs'
+        assert report['pages_completed'] == 7
+        assert report['student_name'] == 'Chloe Tan'
+
 
 class TestAttendance:
 
