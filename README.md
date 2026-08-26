@@ -35,7 +35,33 @@ availability rather than serving student data openly.
 `ALLOWED_ORIGINS` is optional and defaults to the local dev servers. Set it when the
 frontend is served from anywhere else.
 
-Starts Flask on `http://0.0.0.0:5000` in debug mode. `.env` is gitignored — never commit it.
+Starts Flask on `http://127.0.0.1:5000` with the debugger **off**. `.env` is gitignored —
+never commit it.
+
+`HOST`, `PORT` and `FLASK_DEBUG` are all optional and default to the safe values above.
+To debug:
+
+```bash
+FLASK_DEBUG=1 python app.py
+```
+
+⚠️ **Do not combine `FLASK_DEBUG=1` with a non-loopback `HOST`.** `FLASK_DEBUG=1` installs
+the Werkzeug debugger, whose traceback pages carry a console that executes arbitrary
+Python *in the server process* — `os.environ` there holds `MONGODB_URI` and `API_KEY`, so
+it is full credential compromise, not an error page. `HOST=0.0.0.0` binds every interface,
+putting that console on the local network. The PIN Werkzeug prints is not a security
+control: it is written to stdout and derived from machine characteristics, and Werkzeug's
+own documentation says so.
+
+The API's `X-API-Key` guard does not cover this. `DebuggedApplication` intercepts
+`?__debugger__=yes` before Flask routes the request, so `auth.py` never runs for it.
+
+`FLASK_DEBUG` accepts `1`/`true`/`yes`/`on`; **anything else is False**, so a typo turns
+the debugger off rather than on.
+
+`app.run()` is Werkzeug's development server either way — no request timeouts, no
+slow-client protection, and it says as much on startup. A deployment needs a real WSGI
+server in front of `create_app()`.
 
 `MONGODB_URI` is a full Atlas SRV string. The host has **four** labels
 (`<cluster>.<hash>.mongodb.net`) — dropping the cluster label leaves a hostname with no
@@ -337,8 +363,10 @@ pipeline = [
 - **No user accounts.** The shared `API_KEY` authenticates a *caller*, not a person, so
   there is nothing to audit and nothing to revoke short of rotating the key for everyone.
   A browser client will need session auth regardless — see the API section.
-- **`app.run(debug=True, host='0.0.0.0')`** is hardcoded — the debugger console, bound to
-  every interface.
+- **`app.run()` is a development server**, whatever `HOST` and `FLASK_DEBUG` are set to.
+  Nothing enforces that `FLASK_DEBUG=1` and a non-loopback `HOST` are never combined —
+  the defaults are safe and the danger is documented, but it is still two env vars away.
+  A deployment needs a real WSGI server instead.
 - **Four collisions on the natural key.** Four student-days have two rows sharing a
   `session_start`. Three are an abandoned draft beside the real record, and the
   `finalized` flag now separates those; the fourth (2025-07-01) is two completed reports

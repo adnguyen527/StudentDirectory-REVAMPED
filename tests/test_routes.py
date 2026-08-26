@@ -1,8 +1,10 @@
 """HTTP surface, end to end over the in-memory database."""
 
+import os
+
 import pytest
 
-from config import DEFAULT_ORIGINS, parse_origins
+from config import DEFAULT_ORIGINS, parse_bool, parse_origins, parse_port
 from tests.conftest import TEST_API_KEY
 from tests.sample_data import ACCOUNT_NGUYEN, ACCOUNT_TAN, ANTHONY_KEY, CHLOE_KEY
 
@@ -230,6 +232,59 @@ class TestCors:
             },
         )
         assert 'Access-Control-Allow-Origin' not in response.headers
+
+
+class TestParseBool:
+    """FLASK_DEBUG decides whether the Werkzeug debugger runs, and its console executes
+    arbitrary Python with MONGODB_URI and API_KEY in reach. Anything unrecognised has to
+    resolve to False -- a typo must fail towards off."""
+
+    @pytest.mark.parametrize('value', ['1', 'true', 'TRUE', 'True', 'yes', 'on', ' on '])
+    def test_recognised_truthy_values(self, value):
+        assert parse_bool(value) is True
+
+    @pytest.mark.parametrize('value', ['0', 'false', 'no', 'off'])
+    def test_recognised_falsey_values(self, value):
+        assert parse_bool(value) is False
+
+    @pytest.mark.parametrize('value', ['ture', 'y', 'enabled', 'sure', '2', 'debug'])
+    def test_an_unrecognised_value_is_false(self, value):
+        """'ture' is the typo that matters: it must not enable the debugger."""
+        assert parse_bool(value) is False
+
+    @pytest.mark.parametrize('value', [None, '', '   '])
+    def test_unset_takes_the_default(self, value):
+        assert parse_bool(value) is False
+        assert parse_bool(value, default=True) is True
+
+
+class TestParsePort:
+
+    def test_reads_a_number(self):
+        assert parse_port('8080') == 8080
+
+    @pytest.mark.parametrize('value', ['abc', '', None, '80.5'])
+    def test_a_non_number_is_rejected_loudly(self, value):
+        """Silently defaulting would bind a port the operator did not ask for."""
+        with pytest.raises(ValueError, match='must be a number'):
+            parse_port(value)
+
+    @pytest.mark.parametrize('value', ['0', '65536', '-1'])
+    def test_an_out_of_range_port_is_rejected(self, value):
+        with pytest.raises(ValueError, match='between 1 and 65535'):
+            parse_port(value)
+
+
+class TestServerDefaults:
+
+    def test_the_default_host_is_loopback(self, monkeypatch):
+        """0.0.0.0 binds every interface, putting the dev server on the local network."""
+        monkeypatch.delenv('HOST', raising=False)
+        assert os.getenv('HOST', '127.0.0.1') == '127.0.0.1'
+
+    def test_debug_is_off_unless_asked_for(self):
+        """The shipped default must not be the debugger."""
+        assert parse_bool(os.getenv('FLASK_DEBUG')) is False
 
 
 class TestParseOrigins:

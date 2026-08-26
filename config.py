@@ -30,11 +30,42 @@ def parse_origins(value):
     return origins or DEFAULT_ORIGINS
 
 
+TRUTHY = {'1', 'true', 'yes', 'on'}
+
+
+def parse_bool(value, default=False):
+    """Anything unrecognised is False, deliberately.
+
+    This decides whether the Werkzeug debugger runs, and the debugger is a Python console
+    with the cluster credentials in reach. A typo in .env must fail towards off.
+    """
+    if value is None or str(value).strip() == '':
+        return default
+    return str(value).strip().lower() in TRUTHY
+
+
+def parse_port(value, default=5000):
+    try:
+        port = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f'PORT must be a number, got {value!r}') from None
+    if not 1 <= port <= 65535:
+        raise ValueError(f'PORT must be between 1 and 65535, got {port}')
+    return port
+
+
 class Config:
     """Base configuration"""
-    DEBUG = False
+    # Off unless asked for. debug=True installs the interactive debugger, whose console
+    # executes arbitrary Python in this process -- see the README.
+    DEBUG = parse_bool(os.getenv('FLASK_DEBUG'))
     TESTING = False
     JSON_SORT_KEYS = False
+
+    # Loopback unless asked otherwise. '0.0.0.0' binds every interface, which puts the
+    # dev server on the local network.
+    HOST = os.getenv('HOST', '127.0.0.1')
+    PORT = parse_port(os.getenv('PORT') or 5000)
 
     # CORS settings
     CORS_HEADERS = 'Content-Type'
@@ -45,8 +76,12 @@ class Config:
     API_KEY = os.getenv('API_KEY')
 
 class DevelopmentConfig(Config):
-    """Development configuration"""
-    DEBUG = True
+    """Development configuration.
+
+    DEBUG is deliberately NOT forced on here. This class is the default below, so
+    hardcoding it would make the debugger the default state of the app rather than
+    something FLASK_DEBUG=1 opts into.
+    """
     ENV = 'development'
 
 class ProductionConfig(Config):
