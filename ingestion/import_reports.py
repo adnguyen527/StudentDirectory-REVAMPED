@@ -12,7 +12,7 @@ Note that a row edited at the source produces a different hash, so it is importe
 new document rather than replacing the original. Correcting an already-imported row is
 a separate operation from re-importing a file.
 
-Run ingestion/backfill_row_hash.py once before the first import, to hash documents
+Run ingestion/migrations/backfill_row_hash.py once before the first import, to hash documents
 loaded before this mechanism existed.
 """
 

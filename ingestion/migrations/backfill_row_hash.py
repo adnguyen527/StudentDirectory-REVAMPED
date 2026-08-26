@@ -14,11 +14,12 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Repo root, three levels up now that these live in ingestion/migrations/.
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from pymongo import MongoClient, ASCENDING, UpdateOne
 from mongo_url import uri, db_name
-from import_reports import row_hash
+from ingestion.import_reports import row_hash
 
 
 TARGET_COLLECTIONS = ['dwp_reports']

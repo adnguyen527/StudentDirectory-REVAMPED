@@ -154,7 +154,7 @@ def test_no_session_time_holds_the_string_none(live_db):
     """A time-shaped field must hold a time or a null, never the word 'None'.
 
     parse_session guarantees this for anything imported after the _none() fix. Rows
-    imported before it need ingestion/backfill_session_times.py --apply; until that has
+    imported before it need ingestion/migrations/backfill_session_times.py --apply; until that has
     been run, this fails with the 217 rows it will correct.
     """
     stuck = live_db['dwp_reports'].count_documents(
@@ -162,7 +162,7 @@ def test_no_session_time_holds_the_string_none(live_db):
     )
     assert stuck == 0, (
         f"{stuck} row(s) still store 'None' as a session time -- "
-        f"run ingestion/backfill_session_times.py --apply"
+        f"run ingestion/migrations/backfill_session_times.py --apply"
     )
 
 
@@ -175,7 +175,7 @@ def test_center_names_are_locations_not_location_plus_brand(live_db):
     Every location rebranded from 'Mann Mathematics' to 'Math Made Simple' on
     2025-09-05, so a brand left inside the name splits one location's history into
     three. Rows imported before the parse_center fix need
-    ingestion/backfill_center_split.py --apply.
+    ingestion/migrations/backfill_center_split.py --apply.
     """
     for name in ['dwp_reports', 'students', 'instructors', 'attendance_reports']:
         found = set()
@@ -302,7 +302,7 @@ def test_attendance_minutes_are_plausible(attendance):
 
 def test_the_finalized_flag_agrees_with_the_page_count(live_db):
     """finalized is defined as `pages_completed is not None` and nothing else. Rows
-    imported before the flag existed need ingestion/backfill_finalized.py --apply."""
+    imported before the flag existed need ingestion/migrations/backfill_finalized.py --apply."""
     wrong = live_db['dwp_reports'].count_documents({
         '$or': [
             {'finalized': True, 'pages_completed': None},

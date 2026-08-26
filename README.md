@@ -83,9 +83,10 @@ fields (`Session`, `General Information`, `Digital Reward System`, `Student Mate
 `Schoolwork`, `LP Assignment`, `Center`) are split into discrete typed fields at import
 time by `transform_dwp_row()`.
 
-Identity and timing: `account_id`, `lead_id`, `student_name`, `date` (native `Date`),
-`finalized_date` (native `Date`), `session_start`, `session_end`, `sessions_this_month`,
-`delivery_method`, `centers[]`, `center_orgs[]`, `instructors[]`.
+Identity and timing: `account_id`, `lead_id`, `student_name`, `sessions_this_month`,
+`delivery_method`, `centers[]`, `center_orgs[]`, `instructors[]`, and four native `Date`
+fields — `date` (midnight on the session day), `session_start`, `session_end`, and
+`finalized_date` (when the report was closed out).
 
 `instructors[]` is empty on 73 rows whose instructor was blank in the source — the session
 happened and counts for the student, but it is attributed to nobody. `build_instructors.py`
@@ -98,7 +99,8 @@ Work: `finalized`, `pages_completed`, `session_page_goal`, `mathlete_score`, `to
 Notes: `session_summary_notes`, `student_notes`, `internal_notes`,
 `notes_from_center_director`, `assessment`.
 
-**Indexes**: `date`, `account_id`.
+**Indexes**: `date`, `account_id`, `row_hash` (**unique** — this is what enforces import
+idempotency), `finalized`.
 
 **Sparse fields** — present on every document but rarely populated:
 `internet_rating` and `secondary_deck_next_page` are null in 100% of records;
@@ -119,20 +121,21 @@ dashboard view. Rebuilt by `ingestion/build_students.py`.
 
 Totals reconcile exactly to `dwp_reports`: 29,382 sessions, 153,360 pages.
 
-### `instructors` — 104 documents
+### `instructors` — 103 documents
 
 Aggregated instructor profiles built from `dwp_reports`. Rebuilt by
 `ingestion/build_instructors.py`.
 
-`instructor_name`, `total_sessions_taught`, `co_taught_sessions`, `total_pages_completed`,
-`total_days_taught`, `days_taught[]`, `last_session_date`, `unique_students`,
-`students[]` (roster keyed by `student_key`), `centers[]`, `last_modified`.
+`instructor_name`, `total_sessions_taught`, `co_taught_sessions`, `unfinalized_sessions`,
+`total_pages_completed`, `total_days_taught`, `days_taught[]`, `last_session_date`,
+`unique_students`, `students[]` (roster keyed by `student_key`), `centers[]`,
+`last_modified`.
 
 **Index**: `instructor_name` (unique).
 
 **Co-taught sessions credit each instructor the full page count** — pages are copied, not
 split. 2,563 of 29,382 sessions have more than one instructor, so summing
-`total_pages_completed` across instructors comes to 168,720 against the 153,360 pages
+`total_pages_completed` across instructors comes to 168,623 against the 153,360 pages
 actually recorded. That overshoot is intended: these are per-instructor figures answering
 "how much work happened in sessions I ran". **Do not sum them for a center-wide total** —
 aggregate `dwp_reports` directly for that.
@@ -164,13 +167,9 @@ collection that dropped them at build time.
 last end, so a student who came in twice with a gap between visits is not credited with
 the gap. It is `null` — not `0` — on a day whose times could not be trusted, since `0`
 would read as "attended, stayed no time". `sessions_timed` says how many of the day's
-sessions were actually measured. Two sources of untrusted times: 217 rows carry the
-literal string `'None'` as `session_end` instead of a null, and 5 pairs end before they
-start. The builder treats both as unmeasured either way, so it is unaffected by whether
-the `'None'` rows have been migrated yet.
+sessions were actually measured. 224 sessions go unmeasured: 217 have no `session_end` at
+all, 5 pairs end before they start, and 2 run past the 12-hour plausibility cap.
 
-`first_session_start` and `last_session_end` are stored as full datetimes, not the
-source's clock strings, so they sort and range-query without reparsing.
 
 ---
 
@@ -196,12 +195,13 @@ constant — point it at a scratch name (`students_v2`), verify, then swap and r
 One-time scripts, both dry-run by default and committed with `--apply`:
 
 ```bash
-python ingestion/backfill_row_hash.py --apply               # hash pre-idempotency rows
-python ingestion/backfill_session_times.py --apply          # 'None' times -> null
-python ingestion/backfill_center_split.py --apply           # 'Loc, Org' -> centers + center_orgs
-python ingestion/backfill_finalized.py --apply              # add the finalized flag
-python ingestion/backfill_placeholder_instructors.py --apply  # drop anonymization placeholders
-python ingestion/backfill_finalized_date.py --apply         # finalized_date -> datetime
+python ingestion/migrations/backfill_row_hash.py --apply               # hash pre-idempotency rows
+python ingestion/migrations/backfill_session_times.py --apply          # 'None' times -> null
+python ingestion/migrations/backfill_center_split.py --apply           # 'Loc, Org' -> centers + center_orgs
+python ingestion/migrations/backfill_finalized.py --apply              # add the finalized flag
+python ingestion/migrations/backfill_placeholder_instructors.py --apply  # drop anonymization placeholders
+python ingestion/migrations/backfill_finalized_date.py --apply         # finalized_date -> datetime
+python ingestion/migrations/backfill_session_datetimes.py --apply      # session times -> datetime
 ```
 
 Each one rewrites `row_hash` alongside the value it changes, proves every rewritten hash
