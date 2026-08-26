@@ -306,3 +306,44 @@ pipeline = [
   272 per instructor, and instructor rosters to 304. All grow with the dataset, and all
   are far from MongoDB's 16 MB document limit — accepted, not a pending fix.
 
+---
+
+## TODO
+
+### Data integrity
+
+- [ ] **Add the partial unique index** on `(account_id, student_name, date, session_start)`
+      where `finalized: true`, once the above is resolved. Finalized-only leaves exactly
+      one collision today, so this is a one-line change behind a one-row decision.
+- [ ] **Switch `_upsert()` to the natural key.** Then an edited source row updates its
+      document instead of landing beside it. Query count is unchanged — batched lookups
+      by key instead of by hash, with the hash demoted to change detection.
+- [ ] **Check the anonymization mapping for other placeholders.** One instructor name was
+      a stand-in for an empty field, and it went unnoticed for 73 rows because it looked
+      like a person. If other names, students, or centers were mapped from blanks, they
+      have the same problem. Add them to `PLACEHOLDER_INSTRUCTORS` or its equivalent.
+
+### API
+
+- [ ] **Session authentication** for the React client. Append an authenticator to
+      `AUTHENTICATORS` in `auth.py`; also needs `supports_credentials` on the CORS config
+      and a signing secret. `ALLOWED_ORIGINS` is already restricted, which cookie auth
+      requires.
+- [ ] **Decide who sees `student_notes`.** Personal interests collected for rapport, on
+      3,594 rows. Fine for an instructor view, questionable in anything parent-facing.
+      `internal_notes` and both spellings of the director note are already withheld.
+
+### Deployment
+
+- [ ] **Serve `create_app()` from a real WSGI server** (`waitress` on Windows, `gunicorn`
+      elsewhere) and document the production command, so `python app.py` is unambiguously
+      the dev-only path.
+- [ ] **Consider a startup interlock** refusing `FLASK_DEBUG=1` together with a
+      non-loopback `HOST`, so the dangerous combination takes a code change rather than
+      an env var.
+
+### Frontend
+
+- [ ] **React dashboard.** Blocked on session authentication above, not on the API
+      surface.
+
