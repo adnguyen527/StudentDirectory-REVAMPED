@@ -53,55 +53,9 @@ putting that console on the local network. The PIN Werkzeug prints is not a secu
 control: it is written to stdout and derived from machine characteristics, and Werkzeug's
 own documentation says so.
 
-The API's `X-API-Key` guard does not cover this. `DebuggedApplication` intercepts
-`?__debugger__=yes` before Flask routes the request, so `auth.py` never runs for it.
-
-`FLASK_DEBUG` accepts `1`/`true`/`yes`/`on`; **anything else is False**, so a typo turns
-the debugger off rather than on.
-
 `app.run()` is Werkzeug's development server either way — no request timeouts, no
 slow-client protection, and it says as much on startup. A deployment needs a real WSGI
 server in front of `create_app()`.
-
-`MONGODB_URI` is a full Atlas SRV string. The host has **four** labels
-(`<cluster>.<hash>.mongodb.net`) — dropping the cluster label leaves a hostname with no
-SRV record, and `pymongo` fails at `MongoClient()` with `ConfigurationError: The DNS query
-name does not exist` before any auth is attempted.
-
-To work on the code, install the dev dependencies as well and run the tests:
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
----
-
-## Student identity: `account_id` is a household, not a student
-
-This is the single most important thing to know about the schema.
-
-`account_id` (and `lead_id`, which is 1:1 with it) identifies a **billing household**.
-191 accounts carry 2–5 siblings — 664 accounts hold 893 students. Grouping by
-`account_id` alone silently merges siblings into one profile named after whichever
-session row was read first.
-
-Student identity is therefore **`student_key`**, defined once in `util.py`:
-
-```python
-student_key = f"{account_id}_{slug(student_name)}"
-# 75619a85-d16e-4f94-bd1e-4b88cbe249d0_anthony-williams
-```
-
-`account_id`s are UUIDs (hyphens, never underscores) and `slug()` never emits an
-underscore, so `split_student_key()` recovers the pair exactly.
-
-**Consequences for any new code:**
-
-- Group aggregates by `(account_id, student_name)`, never `account_id` alone.
-- Never put a unique index on `account_id` in `students`.
-- Filtering sessions for one student needs **both** fields — `account_id` alone returns
-  the whole household.
 
 ---
 
@@ -119,12 +73,8 @@ time by `transform_dwp_row()`.
 
 Identity and timing: `account_id`, `lead_id`, `student_name`, `sessions_this_month`,
 `delivery_method`, `centers[]`, `center_orgs[]`, `instructors[]`, and four native `Date`
-fields — `date` (midnight on the session day), `session_start`, `session_end`, and
-`finalized_date` (when the report was closed out).
-
-`instructors[]` is empty on 73 rows whose instructor was blank in the source — the session
-happened and counts for the student, but it is attributed to nobody. `build_instructors.py`
-skips those rows.
+fields — `date`, `session_start`, `session_end`, and
+`finalized_date`.
 
 Work: `finalized`, `pages_completed`, `session_page_goal`, `mathlete_score`, `topics[]` (each
 `{id, name, status}` where status is `Worked On` / `Mastered` / `Completed`),
@@ -136,11 +86,6 @@ Notes: `session_summary_notes`, `student_notes`, `internal_notes`,
 **Indexes**: `date`, `account_id`, `row_hash` (**unique** — this is what enforces import
 idempotency), `finalized`.
 
-**Sparse fields** — present on every document but rarely populated:
-`internet_rating` and `secondary_deck_next_page` are null in 100% of records;
-`primary_deck_next_page` and `schoolwork_start_time` in ~99%; `card_level`/`stars_max`
-in 91%; `assessment` in 97%.
-
 ### `students` — 893 documents
 
 Aggregated per-student profiles built from `dwp_reports`. Each document is a full
@@ -150,8 +95,24 @@ dashboard view. Rebuilt by `ingestion/build_students.py`.
 `last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics_mastered[]`,
 `total_unique_topics_mastered`, `dwp_report_ids[]`, `last_modified`.
 
-**Indexes**: `student_key` (unique), `account_id` (**not** unique — siblings share one),
+**Indexes**: `student_key` (unique), `account_id` (**not** unique — represents household),
 `student_name`.
+
+Defined once in `util.py`:
+
+```python
+student_key = f"{account_id}_{slug(student_name)}"
+# 75619a85-d16e-4f94-bd1e-4b88cbe249d0_anthony-williams
+```
+
+`split_student_key()` recovers the pair exactly.
+
+**Consequences for any new code:**
+
+- Group aggregates by `(account_id, student_name)`, never `account_id` alone.
+- Never put a unique index on `account_id` in `students`.
+- Filtering sessions for one student needs **both** fields — `account_id` alone returns
+  the whole household.
 
 Totals reconcile exactly to `dwp_reports`: 29,382 sessions, 153,360 pages.
 
@@ -165,17 +126,15 @@ Aggregated instructor profiles built from `dwp_reports`. Rebuilt by
 `unique_students`, `students[]` (roster keyed by `student_key`), `centers[]`,
 `last_modified`.
 
-**Index**: `instructor_name` (unique).
+**Index**: `instructor_name` (**unique** - Instructors are identified by name alone, because that is all the source data carries.
+Two distinct people sharing a name would merge into one document.).
 
 **Co-taught sessions credit each instructor the full page count** — pages are copied, not
 split. 2,563 of 29,382 sessions have more than one instructor, so summing
 `total_pages_completed` across instructors comes to 168,623 against the 153,360 pages
 actually recorded. That overshoot is intended: these are per-instructor figures answering
-"how much work happened in sessions I ran". **Do not sum them for a center-wide total** —
+"how much work happened in sessions I ran". **IMPORTANT - Do not sum them for a center-wide total** —
 aggregate `dwp_reports` directly for that.
-
-Instructors are identified by name alone, because that is all the source data carries.
-Two distinct people sharing a name would merge into one document.
 
 ### `attendance_reports` — 29,311 documents
 
@@ -191,19 +150,6 @@ One document per student per **day attended**, built from `dwp_reports` by
 **A day is not a session.** 70 student-days carry more than one DWP row (69 with two, one
 with three), so 29,382 sessions collapse to 29,311 days. Counting rows overstates
 attendance by exactly those 71 extra sessions.
-
-**@Home sessions are attendance.** 723 of 29,382 rows are `@Home` rather than `In-Center`,
-and they are kept and tagged rather than filtered out — an in-center-only view is
-`find({'delivery_methods': 'In-Center'})`. The reverse is not recoverable from a
-collection that dropped them at build time.
-
-`minutes_present` sums each session's own duration rather than spanning first start to
-last end, so a student who came in twice with a gap between visits is not credited with
-the gap. It is `null` — not `0` — on a day whose times could not be trusted, since `0`
-would read as "attended, stayed no time". `sessions_timed` says how many of the day's
-sessions were actually measured. 224 sessions go unmeasured: 217 have no `session_end` at
-all, 5 pairs end before they start, and 2 run past the 12-hour plausibility cap.
-
 
 ---
 
@@ -221,8 +167,7 @@ python ingestion/build_attendance.py    # dwp_reports -> attendance_reports
 ```
 
 Each builder `drop()`s and recreates its target collection, and creates indexes **before**
-inserting so a bad build fails ahead of the write. Each exposes a `TARGET_COLLECTION`
-constant — point it at a scratch name (`students_v2`), verify, then swap and re-run.
+inserting so a bad build fails ahead of the write.
 
 ### Migrations
 
@@ -243,21 +188,10 @@ is still distinct before writing, and aborts untouched if not. `backfill_center_
 and `backfill_placeholder_instructors.py` change data the aggregates embed, so rebuild
 after those two.
 
-`backfill_session_times.py` cleans up rows imported before `parse_session` ran
-`session_start` / `session_end` through `_none()`, which stored the literal string
-`'None'` in 217 documents. It rewrites `row_hash` alongside the value — the hash covers
-the whole document, so correcting a field without rehashing would leave a document its
-stored hash no longer describes, and the next import of that row would insert a duplicate
-beside it. Two rows that differ only in this field become identical once corrected, so the
-script proves every corrected hash is distinct before writing and aborts untouched if not.
-
 **`import_reports.py` is idempotent for unchanged files.** Every row carries a `row_hash`
 content fingerprint, `_upsert()` skips hashes already stored, and a unique index on
 `row_hash` enforces it at the database. Re-importing a file that is already loaded reports
 its rows as already present rather than duplicating them.
-
-The lookup is batched, not per row: hashes go out in `$in` chunks of 1,000, so a full
-29,382-row import costs 30 queries and a daily file costs one.
 
 ⚠️ **A row edited at the source is imported as a new document.** The hash covers the whole
 document, so a corrected row hashes differently, fails to match, and lands beside the
@@ -303,15 +237,6 @@ ingestion run before the API serves it:
 These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
 
-⚠️ **The instructor checks assume one name is one person.** A DWP row carries an
-instructor's name and no uid, so `instructors` is keyed on `instructor_name` and every
-instructor assertion inherits that. Two people who share a name are already merged into a
-single, internally consistent document by the time the tests run —
-`test_instructor_names_are_unique` catches a broken build, not a collision, and no
-assertion here can see one. Separating them requires a uid in the source data, not a
-stricter test. Students are not exposed this way: `make_student_key` scopes the name to an
-account, so a collision needs two same-named students in the *same household*.
-
 ---
 
 ## API
@@ -324,12 +249,8 @@ account, so a collision needs two same-named students in the *same household*.
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 
-List responses project out `dwp_report_ids`. `/api/students/<student_key>` scopes its
-`dwp_reports` to that student, not the household.
-
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
-`attendance_reports`, so both count **days attended**, not sessions. They read `0` until
-`ingestion/build_attendance.py` has been run against the cluster.
+`attendance_reports`, so both count **days attended**, not sessions.
 
 ---
 
