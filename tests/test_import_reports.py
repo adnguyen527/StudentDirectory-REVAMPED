@@ -14,6 +14,7 @@ from ingestion.import_reports import (
     _int,
     _none,
     _parse_date,
+    _parse_finalized_date,
     _split,
     _to_snake,
     is_finalized,
@@ -66,6 +67,25 @@ class TestHelpers:
     @pytest.mark.parametrize('value', [None, '', 'not a date', '2025-01-02'])
     def test_parse_date_rejects_what_it_cannot_read(self, value):
         assert _parse_date(value) is None
+
+    @pytest.mark.parametrize('value,expected', [
+        (' 01/02/2025 \n 3:59 PM', datetime(2025, 1, 2, 15, 59)),
+        (' 9/21/2024 \n 12:06 PM', datetime(2024, 9, 21, 12, 6)),
+        ('12/14/2024 \n 12:27 AM', datetime(2024, 12, 14, 0, 27)),
+        ('01/02/2025', datetime(2025, 1, 2)),
+    ])
+    def test_parse_finalized_date(self, value, expected):
+        """The source packs date and time into one cell separated by a newline."""
+        assert _parse_finalized_date(value) == expected
+
+    @pytest.mark.parametrize('value', [None, '', '   ', 'None', 'not a date'])
+    def test_parse_finalized_date_of_nothing(self, value):
+        assert _parse_finalized_date(value) is None
+
+    def test_parse_finalized_date_is_idempotent(self):
+        """Re-running the backfill must not re-parse what it already converted."""
+        already = datetime(2025, 1, 2, 15, 59)
+        assert _parse_finalized_date(already) is already
 
     def test_to_snake(self):
         assert _to_snake('Account Id') == 'account_id'
