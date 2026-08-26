@@ -1,7 +1,7 @@
 """
 Import anonymized data from Excel files into MongoDB.
 
-DWP rows are parsed at import time — compound string fields are split into
+DWP rows are parsed at import time -- compound string fields are split into
 discrete typed fields before insertion.
 
 Imports are idempotent: every row carries a row_hash content fingerprint, writes are
@@ -12,7 +12,7 @@ Note that a row edited at the source produces a different hash, so it is importe
 new document rather than replacing the original. Correcting an already-imported row is
 a separate operation from re-importing a file.
 
-Run ingestion/backfill_row_hash.py once before the first import, to hash documents
+Run ingestion/migrations/backfill_row_hash.py once before the first import, to hash documents
 loaded before this mechanism existed.
 """
 
@@ -30,7 +30,7 @@ import openpyxl
 # ── DWP parsing helpers ───────────────────────────────────────────────────────
 
 def _split(value):
-    """'Key: Value;  Key: Value' → dict"""
+    """'Key: Value;  Key: Value' -> dict"""
     if not value:
         return {}
     result = {}
@@ -69,14 +69,93 @@ def _parse_date(value):
         return None
 
 
+def _parse_clock(value):
+    """'3:58 PM' -> datetime.time, or None if the cell holds nothing usable."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == 'None':
+        return None
+    try:
+        return datetime.strptime(text.upper(), '%I:%M %p').time()
+    except ValueError:
+        return None
+
+
+def combine_session_time(session_date, value):
+    """The session date plus a clock reading -> one datetime.
+
+    A time with no date attached cannot be sorted, ranged or subtracted without knowing
+    which day it belongs to, so the two halves are joined once here rather than rejoined
+    by every consumer. Returns None if either half is missing: a time on no date is not
+    a moment.
+    """
+    if isinstance(value, datetime):
+        return value
+    clock = _parse_clock(value)
+    if clock is None or session_date is None:
+        return None
+    return datetime.combine(session_date.date(), clock)
+
+
+def _parse_finalized_date(value):
+    """' 01/02/2025 \\n 3:59 PM' -> datetime(2025, 1, 2, 15, 59)
+
+    The source packs the date and the time of finalization into one cell, separated by a
+    newline and padded with spaces. Stored raw, it is a string nobody can range-query --
+    'when was this report actually closed out' needs a real datetime.
+
+    Whitespace is collapsed rather than split on '\\n' specifically, so a cell that uses
+    a different separator still parses. A date with no time is accepted as midnight.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = ' '.join(str(value).split())
+    if not text or text == 'None':
+        return None
+    for fmt in ('%m/%d/%Y %I:%M %p', '%m/%d/%Y'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+# ONE TIME BACKFILL
+# Anonymization artifacts. The name mapping assigned a person's name to rows whose
+# instructor was empty in the source, so an unattributed session became one belonging to
+# someone who does not exist -- 73 rows, and no row anywhere with an empty instructors
+# list, which silently disabled the "no instructor named" guard in build_instructors.py.
+# Names here are dropped at parse time so the emptiness survives into the database.
+PLACEHOLDER_INSTRUCTORS = {'Elizabeth Griffin'}
+
+
+def parse_instructors(value):
+    """'Dana Reyes, Sam Ortiz' -> ['Dana Reyes', 'Sam Ortiz'], placeholders removed.
+
+    A row left with no instructors is unattributed, which is a fact about the row and
+    not a reason to drop it: the session still happened and still counts for the student.
+    """
+    if not value:
+        return []
+    names = [name.strip() for name in str(value).split(',')]
+    return [n for n in names if n and n not in PLACEHOLDER_INSTRUCTORS]
+
+
 def parse_session(value):
     p = _split(value)
     instructors_str = p.get('Instructors', '')
     return {
         'sessions_this_month': _int(p.get('Sessions This Month')),
-        'session_start':       p.get('Session Start'),
-        'session_end':         p.get('Session End'),
-        'instructors':         [i.strip() for i in instructors_str.split(',')] if instructors_str else []
+        # _none(), like every other optional field here: the source writes the literal
+        # string 'None' for a session with no recorded time, and it has to land as a
+        # null. Without this, 'None' is stored as a value and every consumer has to know
+        # to special-case it.
+        'session_start':       _none(p.get('Session Start')),
+        'session_end':         _none(p.get('Session End')),
+        'instructors':         parse_instructors(instructors_str),
     }
 
 def parse_general_information(value):
@@ -148,9 +227,37 @@ def parse_lp_assignment(value):
 COMPOUND_FIELDS = ['Session', 'General Information', 'Digital Reward System', 'Student Materials', 'LP Assignment', 'Schoolwork', 'Center']
 
 def parse_center(value):
+    """'Southlake, Mann Mathematics' -> {'centers': ['Southlake'],
+                                         'center_orgs': ['Mann Mathematics']}
+
+    The Center cell is '<location>, <organization>'. The organization is the operating
+    brand on the date of the session, not a property of the student or the session:
+    every location switched from 'Mann Mathematics' to 'Math Made Simple' on 2025-09-05,
+    so a student attending either side of that date would otherwise appear to have
+    attended two different centers. 1,438 rows carry a bare location and no organization.
+
+    '@Home Classroom 1' (37 rows, Southlake, Aug-Dec 2024) sits in the organization
+    position but names a room rather than a brand. It is kept as-is rather than special
+    cased -- the position is what this function knows about.
+    """
     if not value:
-        return []
-    return [c.strip() for c in str(value).split(';  ') if c.strip()]
+        return {'centers': [], 'center_orgs': []}
+
+    centers, orgs = [], []
+    for entry in str(value).split(';  '):
+        entry = entry.strip()
+        if not entry:
+            continue
+        # partition, not split: a location containing a comma would otherwise lose
+        # everything past the first one.
+        location, _, org = entry.partition(', ')
+        location = location.strip()
+        org = org.strip()
+        if location and location not in centers:
+            centers.append(location)
+        if org and org not in orgs:
+            orgs.append(org)
+    return {'centers': centers, 'center_orgs': orgs}
 
 def row_hash(doc):
     """Content fingerprint of a document, used as its idempotency key.
@@ -181,15 +288,38 @@ def _is_row_hash_conflict(write_error):
 def transform_dwp_row(row):
     doc = {_to_snake(k): v for k, v in row.items() if k not in COMPOUND_FIELDS}
     doc['date'] = _parse_date(row.get('Date'))
+    # Read back off the snake-cased doc rather than the raw row, so this does not depend
+    # on the source's column heading staying spelled the way it is today.
+    doc['finalized_date'] = _parse_finalized_date(doc.get('finalized_date'))
     doc.update(parse_session(row.get('Session')))
+    # parse_session sees only the Session cell, so it cannot know the date. Join the two
+    # halves here, where both are in hand.
+    doc['session_start'] = combine_session_time(doc['date'], doc.get('session_start'))
+    doc['session_end'] = combine_session_time(doc['date'], doc.get('session_end'))
     doc.update(parse_general_information(row.get('General Information')))
     doc.update(parse_digital_reward_system(row.get('Digital Reward System')))
     doc.update(parse_student_materials(row.get('Student Materials')))
     doc.update(parse_schoolwork(row.get('Schoolwork')))
-    doc['centers'] = parse_center(row.get('Center'))
+    doc.update(parse_center(row.get('Center')))
     doc['topics'] = parse_lp_assignment(row.get('LP Assignment'))
+    doc['finalized'] = is_finalized(doc)
     doc['row_hash'] = row_hash(doc)
     return doc
+
+
+def is_finalized(doc):
+    """Was this session's report actually completed?
+
+    Keyed on pages_completed, not finalized_date. 1,068 rows have no page count; 996 of
+    them also have no finalized_date, but 547 other rows carry a finalized_date with a
+    real page count missing from neither -- and 72 rows (all December 2024) are the
+    reverse, finalized with no pages. A page count is the signal that survives both.
+
+    An unfinalized row is still a session that happened: 968 of the 996 are the only
+    record of that student-day, and all 996 name an instructor. They belong in
+    attendance and out of any pages-per-session rate, which is what this flag is for.
+    """
+    return doc.get('pages_completed') is not None
 
 
 # ── Importer ──────────────────────────────────────────────────────────────────
@@ -241,12 +371,12 @@ class DataImporter:
         filename = Path(path).name
         collection_name = self._collection_name(filename)
         if not collection_name:
-            print(f"    ⚠ Unknown file type, skipping: {filename}")
+            print(f"    [warn] Unknown file type, skipping: {filename}")
             return
 
         rows = self._read_excel(path)
         if not rows:
-            print(f"    ⚠ No data: {filename}")
+            print(f"    [warn] No data: {filename}")
             return
 
         if collection_name == 'dwp_reports':
@@ -258,14 +388,14 @@ class DataImporter:
         try:
             inserted, already, repeated = self._upsert(collection_name, rows)
             note = f", {repeated} repeated in file" if repeated else ""
-            print(f"    ✓ {inserted} new, {already} already present{note} "
-                  f"→ {collection_name}")
+            print(f"    [ok] {inserted} new, {already} already present{note} "
+                  f"-> {collection_name}")
             self.stats[collection_name] += inserted
             self.stats['total_documents'] += inserted
             self.stats['already_present'] += already
             self.stats['repeated_in_file'] += repeated
         except Exception as e:
-            print(f"    ✗ Insert error: {e}")
+            print(f"    [!!] Insert error: {e}")
             self.stats['errors'] += 1
 
     def _upsert(self, collection_name, docs):
@@ -322,18 +452,18 @@ class DataImporter:
         print(f"\n{'='*60}\nIMPORTING FROM {directory}\n{'='*60}")
         files = sorted(Path(directory).glob('**/*.xlsx'))
         if not files:
-            print(f"✗ No Excel files found in {directory}")
+            print(f"[!!] No Excel files found in {directory}")
             return False
 
         self.stats['total_files'] = len(files)
-        print(f"✓ Found {len(files)} files\n")
+        print(f"[ok] Found {len(files)} files\n")
 
         for i, f in enumerate(files, 1):
             print(f"[{i}/{len(files)}] {f.name}")
             try:
                 self.import_file(str(f))
             except Exception as e:
-                print(f"    ✗ {e}")
+                print(f"    [!!] {e}")
                 self.stats['errors'] += 1
 
         return True
@@ -364,12 +494,12 @@ def main():
     importer = DataImporter()
     try:
         importer.db.command('ping')
-        print("✓ Connected to MongoDB")
+        print("[ok] Connected to MongoDB")
         if importer.import_all('anonymized_data'):
             importer.print_stats()
             importer.verify()
     except Exception as e:
-        print(f"✗ {e}")
+        print(f"[!!] {e}")
     finally:
         importer.close()
 

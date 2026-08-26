@@ -1,6 +1,25 @@
 from database import db
 
 
+# Fields that never leave the server.
+#
+# row_hash and lead_id are internal plumbing -- an idempotency fingerprint and a household
+# id the API already exposes as account_id. internal_notes and the director's notes are
+# staff-to-staff commentary about a named child, which no client of this API needs in
+# order to render a student's work.
+#
+# The source renamed two note columns partway through the dataset, so both spellings are
+# excluded: notes_for_center_director survives on 3,655 older rows and would otherwise
+# carry 23 populated notes straight past a filter written for the newer name only.
+PRIVATE_FIELDS = {
+    'row_hash': 0,
+    'lead_id': 0,
+    'internal_notes': 0,
+    'notes_from_center_director': 0,
+    'notes_for_center_director': 0,
+}
+
+
 class DigitalWorkoutPlan:
 
     @staticmethod
@@ -18,13 +37,13 @@ class DigitalWorkoutPlan:
         return list(DigitalWorkoutPlan._collection().find({
             'account_id': account_id,
             'student_name': student_name,
-        }).sort('date', -1))
+        }, PRIVATE_FIELDS).sort('date', -1))
 
     @staticmethod
     def find_by_account(account_id):
         """Sessions for every student on a household account."""
         return list(DigitalWorkoutPlan._collection()
-                    .find({'account_id': account_id})
+                    .find({'account_id': account_id}, PRIVATE_FIELDS)
                     .sort('date', -1))
 
     @staticmethod
