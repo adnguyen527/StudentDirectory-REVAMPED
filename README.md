@@ -336,6 +336,14 @@ pipeline = [
   for one session by two instructors, which needs a human decision. Scoped to finalized
   rows, only that one remains — so a partial unique index is available once it is
   resolved.
+- **217 sessions have no recorded end time.** The source writes the literal string
+  `'None'` into `session_end` rather than leaving it blank. `parse_session` now nulls it
+  on the way in and `backfill_session_times.py` cleaned the stored rows, so nothing
+  downstream sees the string any more — but the underlying gap is untouched: those 217
+  sessions cannot be given a duration, and they are counted in `sessions_timed` as
+  unmeasured rather than assumed. **To address:** find out why the source omits the end
+  time (a session closed by timeout? an unfinished punch-out?), and decide whether an
+  unended session should be flagged for follow-up rather than silently unmeasurable.
 - **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student, `days_taught` to
   272 per instructor, and instructor rosters to 304. All grow with the dataset, and all
   are far from MongoDB's 16 MB document limit — accepted, not a pending fix.

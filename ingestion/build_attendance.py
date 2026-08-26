@@ -18,22 +18,26 @@ collection that dropped them at build time.
 `minutes_present` sums each session's own duration rather than spanning first start to
 last end, so a student who came in twice with a three-hour gap is not credited with the
 gap. Times that cannot be trusted are left out of the sum and counted in `sessions_timed`:
-217 rows carry the literal string 'None' as session_end (parse_session does not run
-session_start/session_end through _none(), unlike the fields around them), and a handful
-of pairs end before they start.
+217 rows have no session_end at all, and a handful of pairs end before they start.
+
+Session times arrive from dwp_reports as datetimes, so this builder no longer reconstructs
+them from clock strings and a date -- see combine_session_time in import_reports.py.
 
 Safe to re-run -- drops and rebuilds the target collection each time.
 """
 
 import sys
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pymongo import MongoClient, ASCENDING
 from mongo_url import uri, db_name
 from util import make_student_key
+# Absolute, unlike the bare imports in the script-only backfills: the tests import this
+# module as ingestion.build_attendance, and only the repo root is on sys.path then.
+from ingestion.import_reports import combine_session_time
 
 
 TARGET_COLLECTION = 'attendance_reports'
@@ -44,28 +48,22 @@ TARGET_COLLECTION = 'attendance_reports'
 MAX_SESSION_MINUTES = 12 * 60
 
 
-def parse_clock(value):
-    """'3:58 PM' -> datetime.time, or None if the cell holds nothing usable.
+def session_time(session_date, value):
+    """One session time as a datetime.
 
-    The string 'None' is a real value in this data, not a null -- see the module note.
+    dwp_reports stores these as datetimes; combine_session_time passes those straight
+    through and rebuilds one from a clock string for any row imported before that was
+    true, so a build run before backfill_session_datetimes.py still produces the same
+    answer.
     """
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text or text == 'None':
-        return None
-    try:
-        return datetime.strptime(text.upper(), '%I:%M %p').time()
-    except ValueError:
-        return None
+    return combine_session_time(session_date, value)
 
 
 def session_minutes(start, end):
     """Length of one session, or None if the pair cannot be trusted."""
     if start is None or end is None:
         return None
-    delta = datetime.combine(date.min, end) - datetime.combine(date.min, start)
-    minutes = delta.total_seconds() / 60
+    minutes = (end - start).total_seconds() / 60
     # Negative means the pair is wrong (or crossed midnight, which no session here
     # does); either way it is not a length.
     if minutes < 0 or minutes > MAX_SESSION_MINUTES:
@@ -134,8 +132,8 @@ def build_attendance():
         if method and method not in day['delivery_methods']:
             day['delivery_methods'].append(method)
 
-        start = parse_clock(doc.get('session_start'))
-        end = parse_clock(doc.get('session_end'))
+        start = session_time(session_date, doc.get('session_start'))
+        end = session_time(session_date, doc.get('session_end'))
         minutes = session_minutes(start, end)
         if minutes is None:
             untimed_sessions += 1
@@ -143,9 +141,9 @@ def build_attendance():
             day['sessions_timed'] += 1
             day['minutes_present'] += minutes
         if start:
-            day['_starts'].append(datetime.combine(session_date.date(), start))
+            day['_starts'].append(start)
         if end:
-            day['_ends'].append(datetime.combine(session_date.date(), end))
+            day['_ends'].append(end)
 
     print(f"Found {len(days)} student-days. Building collection...")
     if skipped:

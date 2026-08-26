@@ -16,6 +16,7 @@ from ingestion.import_reports import (
     _parse_date,
     _parse_finalized_date,
     _split,
+    combine_session_time,
     _to_snake,
     is_finalized,
     parse_center,
@@ -95,6 +96,8 @@ class TestHelpers:
 class TestParseSession:
 
     def test_reads_a_full_session(self):
+        """parse_session sees only the Session cell, so it yields clock strings.
+        transform_dwp_row joins them to the date -- see TestCombineSessionTime."""
         assert parse_session(SESSION) == {
             'sessions_this_month': 4,
             'session_start': '3:58 PM',
@@ -132,6 +135,39 @@ class TestParseSession:
             'session_end': None,
             'instructors': [],
         }
+
+
+class TestCombineSessionTime:
+    """A clock reading and the session date are two halves of one moment. Joining them
+    once at import is what makes session times sortable and subtractable."""
+
+    def test_joins_a_clock_reading_to_its_date(self):
+        assert combine_session_time(datetime(2025, 1, 2), '3:58 PM') == datetime(2025, 1, 2, 15, 58)
+
+    def test_a_datetime_passes_through_unchanged(self):
+        """Re-running the backfill must not re-join what it already joined."""
+        already = datetime(2025, 1, 2, 15, 58)
+        assert combine_session_time(datetime(2025, 1, 2), already) is already
+
+    @pytest.mark.parametrize('value', [None, 'None', '', 'not a time'])
+    def test_no_usable_time_is_none(self, value):
+        assert combine_session_time(datetime(2025, 1, 2), value) is None
+
+    def test_no_date_means_no_moment(self):
+        assert combine_session_time(None, '3:58 PM') is None
+
+    def test_transform_stores_datetimes_not_strings(self):
+        doc = transform_dwp_row({'Date': '01/02/2025', 'Session': SESSION})
+        assert doc['session_start'] == datetime(2025, 1, 2, 15, 58)
+        assert doc['session_end'] == datetime(2025, 1, 2, 17, 5)
+
+    def test_a_row_with_no_end_time_keeps_its_start(self):
+        doc = transform_dwp_row({
+            'Date': '01/02/2025',
+            'Session': 'Session Start: 3:58 PM;  Session End: None',
+        })
+        assert doc['session_start'] == datetime(2025, 1, 2, 15, 58)
+        assert doc['session_end'] is None
 
 
 class TestOtherParsers:

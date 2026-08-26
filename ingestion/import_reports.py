@@ -69,6 +69,35 @@ def _parse_date(value):
         return None
 
 
+def _parse_clock(value):
+    """'3:58 PM' -> datetime.time, or None if the cell holds nothing usable."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == 'None':
+        return None
+    try:
+        return datetime.strptime(text.upper(), '%I:%M %p').time()
+    except ValueError:
+        return None
+
+
+def combine_session_time(session_date, value):
+    """The session date plus a clock reading -> one datetime.
+
+    A time with no date attached cannot be sorted, ranged or subtracted without knowing
+    which day it belongs to, so the two halves are joined once here rather than rejoined
+    by every consumer. Returns None if either half is missing: a time on no date is not
+    a moment.
+    """
+    if isinstance(value, datetime):
+        return value
+    clock = _parse_clock(value)
+    if clock is None or session_date is None:
+        return None
+    return datetime.combine(session_date.date(), clock)
+
+
 def _parse_finalized_date(value):
     """' 01/02/2025 \\n 3:59 PM' -> datetime(2025, 1, 2, 15, 59)
 
@@ -263,6 +292,10 @@ def transform_dwp_row(row):
     # on the source's column heading staying spelled the way it is today.
     doc['finalized_date'] = _parse_finalized_date(doc.get('finalized_date'))
     doc.update(parse_session(row.get('Session')))
+    # parse_session sees only the Session cell, so it cannot know the date. Join the two
+    # halves here, where both are in hand.
+    doc['session_start'] = combine_session_time(doc['date'], doc.get('session_start'))
+    doc['session_end'] = combine_session_time(doc['date'], doc.get('session_end'))
     doc.update(parse_general_information(row.get('General Information')))
     doc.update(parse_digital_reward_system(row.get('Digital Reward System')))
     doc.update(parse_student_materials(row.get('Student Materials')))

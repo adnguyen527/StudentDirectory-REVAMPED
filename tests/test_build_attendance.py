@@ -1,66 +1,91 @@
-"""The attendance builder's parsing rules.
+"""The attendance builder's timing rules.
 
 The build itself talks to a real cluster, so what is unit-tested here is the logic that
 decides what a session's times mean -- which is where this data is actually messy.
+
+Session times reach the builder as datetimes from dwp_reports. The clock-string path is
+still exercised because a build run before backfill_session_datetimes.py must produce the
+same answer as one run after it.
 """
 
-from datetime import time
+from datetime import datetime
 
 import pytest
 
-from ingestion.build_attendance import MAX_SESSION_MINUTES, parse_clock, session_minutes
+from ingestion.build_attendance import MAX_SESSION_MINUTES, session_minutes, session_time
+
+DAY = datetime(2026, 3, 14)
 
 
-class TestParseClock:
+class TestSessionTime:
+
+    def test_a_datetime_passes_straight_through(self):
+        already = datetime(2026, 3, 14, 15, 58)
+        assert session_time(DAY, already) is already
 
     @pytest.mark.parametrize('value,expected', [
-        ('3:58 PM', time(15, 58)),
-        ('12:00 AM', time(0, 0)),
-        ('12:00 PM', time(12, 0)),
-        ('9:05 am', time(9, 5)),
-        ('  5:00 PM  ', time(17, 0)),
+        ('3:58 PM', datetime(2026, 3, 14, 15, 58)),
+        ('12:00 AM', datetime(2026, 3, 14, 0, 0)),
+        ('12:00 PM', datetime(2026, 3, 14, 12, 0)),
+        ('9:05 am', datetime(2026, 3, 14, 9, 5)),
+        ('  5:00 PM  ', datetime(2026, 3, 14, 17, 0)),
     ])
-    def test_parses_clock_strings(self, value, expected):
-        assert parse_clock(value) == expected
+    def test_a_clock_string_is_joined_to_the_session_date(self, value, expected):
+        assert session_time(DAY, value) == expected
 
-    @pytest.mark.parametrize('value', [None, '', '   '])
-    def test_empty_values_are_none(self, value):
-        assert parse_clock(value) is None
-
-    def test_the_literal_string_none_is_not_a_time(self):
-        """217 rows carry 'None' as session_end -- a string, not a null."""
-        assert parse_clock('None') is None
+    @pytest.mark.parametrize('value', [None, '', '   ', 'None'])
+    def test_nothing_usable_is_none(self, value):
+        """217 rows have no session_end; 'None' is how the source spelled that."""
+        assert session_time(DAY, value) is None
 
     @pytest.mark.parametrize('value', ['17:00', 'lunchtime', '25:00 PM', '3:58'])
     def test_unparseable_values_are_none_not_errors(self, value):
-        assert parse_clock(value) is None
+        assert session_time(DAY, value) is None
+
+    def test_a_time_without_a_date_is_not_a_moment(self):
+        assert session_time(None, '3:58 PM') is None
 
 
 class TestSessionMinutes:
 
     def test_measures_a_normal_session(self):
-        assert session_minutes(time(15, 58), time(17, 5)) == 67
+        assert session_minutes(
+            datetime(2026, 3, 14, 15, 58), datetime(2026, 3, 14, 17, 5)
+        ) == 67
 
     def test_a_zero_length_session_is_zero_not_none(self):
         """Nothing to distrust here -- it is a real, if odd, measurement."""
-        assert session_minutes(time(16, 0), time(16, 0)) == 0
+        at = datetime(2026, 3, 14, 16, 0)
+        assert session_minutes(at, at) == 0
 
     @pytest.mark.parametrize('start,end', [
-        (None, time(17, 0)),
-        (time(16, 0), None),
+        (None, datetime(2026, 3, 14, 17, 0)),
+        (datetime(2026, 3, 14, 16, 0), None),
         (None, None),
     ])
     def test_a_missing_half_means_no_measurement(self, start, end):
         assert session_minutes(start, end) is None
 
     def test_an_end_before_its_start_is_rejected(self):
-        """5 pairs in the data do this. It is not a length, and it is not a
-        midnight crossing -- no session here runs past midnight."""
-        assert session_minutes(time(17, 0), time(16, 0)) is None
+        """5 pairs in the data do this. It is not a length, and it is not a midnight
+        crossing -- no session here runs past midnight."""
+        assert session_minutes(
+            datetime(2026, 3, 14, 17, 0), datetime(2026, 3, 14, 16, 0)
+        ) is None
 
     def test_an_implausibly_long_session_is_rejected(self):
-        assert session_minutes(time(1, 0), time(23, 0)) is None
+        assert session_minutes(
+            datetime(2026, 3, 14, 1, 0), datetime(2026, 3, 14, 23, 0)
+        ) is None
 
     def test_the_boundary_is_inclusive(self):
-        assert session_minutes(time(0, 0), time(12, 0)) == MAX_SESSION_MINUTES
-        assert session_minutes(time(0, 0), time(12, 1)) is None
+        midnight = datetime(2026, 3, 14, 0, 0)
+        assert session_minutes(midnight, datetime(2026, 3, 14, 12, 0)) == MAX_SESSION_MINUTES
+        assert session_minutes(midnight, datetime(2026, 3, 14, 12, 1)) is None
+
+    def test_it_measures_across_the_join_the_way_the_strings_did(self):
+        """The refactor must not change any answer: same two clock readings, same
+        duration, whether they arrived as strings or datetimes."""
+        start = session_time(DAY, '3:58 PM')
+        end = session_time(DAY, '5:05 PM')
+        assert session_minutes(start, end) == 67
