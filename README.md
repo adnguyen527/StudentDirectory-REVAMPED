@@ -84,10 +84,14 @@ fields (`Session`, `General Information`, `Digital Reward System`, `Student Mate
 time by `transform_dwp_row()`.
 
 Identity and timing: `account_id`, `lead_id`, `student_name`, `date` (native `Date`),
-`finalized_date`, `session_start`, `session_end`, `sessions_this_month`,
+`finalized_date` (native `Date`), `session_start`, `session_end`, `sessions_this_month`,
 `delivery_method`, `centers[]`, `center_orgs[]`, `instructors[]`.
 
-Work: `pages_completed`, `session_page_goal`, `mathlete_score`, `topics[]` (each
+`instructors[]` is empty on 73 rows whose instructor was blank in the source — the session
+happened and counts for the student, but it is attributed to nobody. `build_instructors.py`
+skips those rows.
+
+Work: `finalized`, `pages_completed`, `session_page_goal`, `mathlete_score`, `topics[]` (each
 `{id, name, status}` where status is `Worked On` / `Mastered` / `Completed`),
 `schoolwork_*`, `card_level`, `stars_current`, `stars_max`, `session_stars_added`.
 
@@ -192,9 +196,18 @@ constant — point it at a scratch name (`students_v2`), verify, then swap and r
 One-time scripts, both dry-run by default and committed with `--apply`:
 
 ```bash
-python ingestion/backfill_row_hash.py --apply       # hash pre-idempotency documents
-python ingestion/backfill_session_times.py --apply  # 'None' session times -> null
+python ingestion/backfill_row_hash.py --apply               # hash pre-idempotency rows
+python ingestion/backfill_session_times.py --apply          # 'None' times -> null
+python ingestion/backfill_center_split.py --apply           # 'Loc, Org' -> centers + center_orgs
+python ingestion/backfill_finalized.py --apply              # add the finalized flag
+python ingestion/backfill_placeholder_instructors.py --apply  # drop anonymization placeholders
+python ingestion/backfill_finalized_date.py --apply         # finalized_date -> datetime
 ```
+
+Each one rewrites `row_hash` alongside the value it changes, proves every rewritten hash
+is still distinct before writing, and aborts untouched if not. `backfill_center_split.py`
+and `backfill_placeholder_instructors.py` change data the aggregates embed, so rebuild
+after those two.
 
 `backfill_session_times.py` cleans up rows imported before `parse_session` ran
 `session_start` / `session_end` through `_none()`, which stored the literal string
@@ -204,9 +217,20 @@ stored hash no longer describes, and the next import of that row would insert a 
 beside it. Two rows that differ only in this field become identical once corrected, so the
 script proves every corrected hash is distinct before writing and aborts untouched if not.
 
-⚠️ **`import_reports.py` is not idempotent.** It does a plain `insert_many` with no unique
-index on `dwp_reports`, so re-importing the same spreadsheet silently duplicates every row,
-and both aggregate collections inherit the inflation.
+**`import_reports.py` is idempotent for unchanged files.** Every row carries a `row_hash`
+content fingerprint, `_upsert()` skips hashes already stored, and a unique index on
+`row_hash` enforces it at the database. Re-importing a file that is already loaded reports
+its rows as already present rather than duplicating them.
+
+The lookup is batched, not per row: hashes go out in `$in` chunks of 1,000, so a full
+29,382-row import costs 30 queries and a daily file costs one.
+
+⚠️ **A row edited at the source is imported as a new document.** The hash covers the whole
+document, so a corrected row hashes differently, fails to match, and lands beside the
+original — both versions then count in the aggregates. Correcting an already-imported row
+is a separate operation from re-importing a file. Fixing this needs a *natural* key
+(`account_id + student_name + date + session_start` is the only stable candidate) to
+identify the session, with the hash demoted to change-detection.
 
 ---
 
@@ -298,15 +322,23 @@ pipeline = [
 
 ## Known Issues
 
-- `import_reports.py` is not idempotent — see above.
-- No pagination on `/api/students`; the full list is ~1.8 MB.
-- `CORS(origins="*")` on all `/api/*` routes, which serve student names and session notes.
-- `app.run(debug=True, host='0.0.0.0')`.
-- `database.py` prints `✓`/`✗`, which raises `UnicodeEncodeError` on a default Windows
-  console (cp1252) and surfaces as a false "Could not connect" *after* the connection
-  has already succeeded. The client and database are now cached before that print runs,
-  so the app keeps working — the warning is cosmetic, but it is still a lie.
-- `dwp_report_ids` (up to 582 entries) and `days_taught` (up to 209) are unbounded arrays
-  that grow with the dataset.
-- `finalized_date`, `session_start`, and `session_end` are stored as strings, so duration
-  and time-of-day analysis requires reparsing at query time.
+- **A row edited at the source imports as a new document** rather than replacing the
+  original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
+- **No pagination on `/api/students`.** The full list is 1.72 MB across 893 students, and
+  every call ships all of it.
+- **`CORS(origins="*")` on all `/api/*` routes**, which serve student names and session
+  notes. Any origin a browser visits can read them.
+- **`app.run(debug=True, host='0.0.0.0')`** is hardcoded — the debugger console, bound to
+  every interface.
+- **Four collisions on the natural key.** Four student-days have two rows sharing a
+  `session_start`. Three are an abandoned draft beside the real record, and the
+  `finalized` flag now separates those; the fourth (2025-07-01) is two completed reports
+  for one session by two instructors, which needs a human decision. Scoped to finalized
+  rows, only that one remains — so a partial unique index is available once it is
+  resolved.
+- **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student, `days_taught` to
+  272 per instructor, and instructor rosters to 304. All grow with the dataset, and all
+  are far from MongoDB's 16 MB document limit — accepted, not a pending fix.
+- **`session_start` and `session_end` are still clock strings** (`'3:58 PM'`), so duration
+  and time-of-day analysis reparses at query time. `attendance_reports` already stores
+  real datetimes derived from them, and `finalized_date` is now a datetime too.

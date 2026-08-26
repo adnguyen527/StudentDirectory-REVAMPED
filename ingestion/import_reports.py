@@ -1,7 +1,7 @@
 """
 Import anonymized data from Excel files into MongoDB.
 
-DWP rows are parsed at import time — compound string fields are split into
+DWP rows are parsed at import time -- compound string fields are split into
 discrete typed fields before insertion.
 
 Imports are idempotent: every row carries a row_hash content fingerprint, writes are
@@ -30,7 +30,7 @@ import openpyxl
 # ── DWP parsing helpers ───────────────────────────────────────────────────────
 
 def _split(value):
-    """'Key: Value;  Key: Value' → dict"""
+    """'Key: Value;  Key: Value' -> dict"""
     if not value:
         return {}
     result = {}
@@ -67,6 +67,31 @@ def _parse_date(value):
         return datetime.strptime(str(value).strip(), '%m/%d/%Y')
     except ValueError:
         return None
+
+
+def _parse_finalized_date(value):
+    """' 01/02/2025 \\n 3:59 PM' -> datetime(2025, 1, 2, 15, 59)
+
+    The source packs the date and the time of finalization into one cell, separated by a
+    newline and padded with spaces. Stored raw, it is a string nobody can range-query --
+    'when was this report actually closed out' needs a real datetime.
+
+    Whitespace is collapsed rather than split on '\\n' specifically, so a cell that uses
+    a different separator still parses. A date with no time is accepted as midnight.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = ' '.join(str(value).split())
+    if not text or text == 'None':
+        return None
+    for fmt in ('%m/%d/%Y %I:%M %p', '%m/%d/%Y'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 # ONE TIME BACKFILL
@@ -234,6 +259,9 @@ def _is_row_hash_conflict(write_error):
 def transform_dwp_row(row):
     doc = {_to_snake(k): v for k, v in row.items() if k not in COMPOUND_FIELDS}
     doc['date'] = _parse_date(row.get('Date'))
+    # Read back off the snake-cased doc rather than the raw row, so this does not depend
+    # on the source's column heading staying spelled the way it is today.
+    doc['finalized_date'] = _parse_finalized_date(doc.get('finalized_date'))
     doc.update(parse_session(row.get('Session')))
     doc.update(parse_general_information(row.get('General Information')))
     doc.update(parse_digital_reward_system(row.get('Digital Reward System')))
@@ -310,12 +338,12 @@ class DataImporter:
         filename = Path(path).name
         collection_name = self._collection_name(filename)
         if not collection_name:
-            print(f"    ⚠ Unknown file type, skipping: {filename}")
+            print(f"    [warn] Unknown file type, skipping: {filename}")
             return
 
         rows = self._read_excel(path)
         if not rows:
-            print(f"    ⚠ No data: {filename}")
+            print(f"    [warn] No data: {filename}")
             return
 
         if collection_name == 'dwp_reports':
@@ -327,14 +355,14 @@ class DataImporter:
         try:
             inserted, already, repeated = self._upsert(collection_name, rows)
             note = f", {repeated} repeated in file" if repeated else ""
-            print(f"    ✓ {inserted} new, {already} already present{note} "
-                  f"→ {collection_name}")
+            print(f"    [ok] {inserted} new, {already} already present{note} "
+                  f"-> {collection_name}")
             self.stats[collection_name] += inserted
             self.stats['total_documents'] += inserted
             self.stats['already_present'] += already
             self.stats['repeated_in_file'] += repeated
         except Exception as e:
-            print(f"    ✗ Insert error: {e}")
+            print(f"    [!!] Insert error: {e}")
             self.stats['errors'] += 1
 
     def _upsert(self, collection_name, docs):
@@ -391,18 +419,18 @@ class DataImporter:
         print(f"\n{'='*60}\nIMPORTING FROM {directory}\n{'='*60}")
         files = sorted(Path(directory).glob('**/*.xlsx'))
         if not files:
-            print(f"✗ No Excel files found in {directory}")
+            print(f"[!!] No Excel files found in {directory}")
             return False
 
         self.stats['total_files'] = len(files)
-        print(f"✓ Found {len(files)} files\n")
+        print(f"[ok] Found {len(files)} files\n")
 
         for i, f in enumerate(files, 1):
             print(f"[{i}/{len(files)}] {f.name}")
             try:
                 self.import_file(str(f))
             except Exception as e:
-                print(f"    ✗ {e}")
+                print(f"    [!!] {e}")
                 self.stats['errors'] += 1
 
         return True
@@ -433,12 +461,12 @@ def main():
     importer = DataImporter()
     try:
         importer.db.command('ping')
-        print("✓ Connected to MongoDB")
+        print("[ok] Connected to MongoDB")
         if importer.import_all('anonymized_data'):
             importer.print_stats()
             importer.verify()
     except Exception as e:
-        print(f"✗ {e}")
+        print(f"[!!] {e}")
     finally:
         importer.close()
 

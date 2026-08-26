@@ -71,8 +71,8 @@ def build_instructors():
                     'unfinalized_sessions':  0,
                     'total_pages_completed': 0,
                     'days_taught':           set(),
-                    'students':              {},   # student_key → roster entry
-                    'centers':               {},   # center name → session count
+                    'students':              {},   # student_key -> roster entry
+                    'centers':               {},   # center name -> session count
                 }
 
             inst = instructors[name]

@@ -53,7 +53,7 @@ def backfill(collection_name, apply=False):
         print(f"\n  *** ABORTED: {len(collisions)} hash collisions -- these documents are")
         print(f"      byte-identical and a unique index would reject them.")
         for h, ids in list(collisions.items())[:5]:
-            print(f"        {h[:12]}… x{len(ids)}: {[str(i) for i in ids[:4]]}")
+            print(f"        {h[:12]}... x{len(ids)}: {[str(i) for i in ids[:4]]}")
         print(f"      Resolve the duplicates first, then re-run.")
         client.close()
         return False

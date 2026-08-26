@@ -73,9 +73,9 @@ def backfill(apply=False):
     if internal or external:
         print(f"\n  *** ABORTED: stripping these rows would create duplicates.")
         for h, ids in list(internal.items())[:5]:
-            print(f"      {h[:12]}… x{len(ids)}: {[str(i) for i in ids[:4]]}")
+            print(f"      {h[:12]}... x{len(ids)}: {[str(i) for i in ids[:4]]}")
         for h, mine in external[:5]:
-            print(f"      {h[:12]}… {mine} would equal a row left untouched")
+            print(f"      {h[:12]}... {mine} would equal a row left untouched")
         client.close()
         return False
 

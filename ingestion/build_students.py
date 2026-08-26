@@ -50,20 +50,20 @@ def build_students():
                 'student_key':              key,
                 'account_id':               account_id,
                 'student_name':             student_name,
-                'centers':                  {},     # name → session count
+                'centers':                  {},     # name -> session count
                 'total_sessions':           0,
                 'last_session_date':        None,
                 '_last_session_dt':         None,   # for comparison only
                 'last_assessment':          None,
                 'total_pages_completed':    0,
-                'topics_mastered':          {},     # id → {id, name, times_mastered}
-                'instructors':              {},     # name → {sessions, pages_completed}
+                'topics_mastered':          {},     # id -> {id, name, times_mastered}
+                'instructors':              {},     # name -> {sessions, pages_completed}
                 'dwp_report_ids':           [],
             }
 
         s = students[key]
 
-        # Centers — doc.centers is now a list from import parsing
+        # Centers -- doc.centers is now a list from import parsing
         for center in doc.get('centers', []):
             if center:
                 s['centers'][center] = s['centers'].get(center, 0) + 1
@@ -72,7 +72,7 @@ def build_students():
         s['total_sessions'] += 1
         s['dwp_report_ids'].append(doc['_id'])
 
-        # Most recent session — date is now a datetime object
+        # Most recent session -- date is now a datetime object
         dt = doc.get('date')
         if dt and (s['_last_session_dt'] is None or dt > s['_last_session_dt']):
             s['_last_session_dt'] = dt
@@ -106,7 +106,7 @@ def build_students():
 
     print(f"Found {len(students)} unique students. Building collection...")
     if skipped:
-        print(f"  ({skipped} dwp_reports skipped — missing account_id or student_name)")
+        print(f"  ({skipped} dwp_reports skipped -- missing account_id or student_name)")
 
     # Drop and rebuild
     students_collection.drop()
@@ -144,7 +144,7 @@ def build_students():
 
     if documents:
         # Indexes first, so a key-derivation bug fails before the write rather than after.
-        # account_id is deliberately NOT unique — siblings share one.
+        # account_id is deliberately NOT unique -- siblings share one.
         students_collection.create_index([('student_key', ASCENDING)], unique=True)
         students_collection.create_index([('account_id', ASCENDING)])
         students_collection.create_index([('student_name', ASCENDING)])
