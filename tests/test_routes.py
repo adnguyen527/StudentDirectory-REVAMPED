@@ -13,6 +13,10 @@ def names(payload):
     return sorted(s['student_name'] for s in payload)
 
 
+def instructor_names(payload):
+    return sorted(i['instructor_name'] for i in payload)
+
+
 class TestHealth:
 
     def test_health_is_ok(self, client):
@@ -201,13 +205,127 @@ class TestStudentAttendance:
         assert anonymous_client.get(self.url(ANTHONY_KEY)).status_code == 401
 
 
+class TestListInstructors:
+
+    def test_lists_every_instructor(self, client):
+        response = client.get('/api/instructors')
+        assert response.status_code == 200
+        assert instructor_names(response.get_json()) == [
+            'Dana Reyes', 'Marcus Reyes', 'Sam Ortiz'
+        ]
+
+    def test_query_filter_searches_by_name(self, client):
+        response = client.get('/api/instructors', query_string={'query': 'Ortiz'})
+        assert instructor_names(response.get_json()) == ['Sam Ortiz']
+
+    def test_the_growing_arrays_are_not_shipped_in_a_list(self, client):
+        """A roster per row is what makes a list response balloon."""
+        listed = client.get('/api/instructors').get_json()
+        assert all('students' not in i and 'days_taught' not in i for i in listed)
+        assert all(i['unique_students'] >= 1 for i in listed)
+
+    def test_bson_is_serialised(self, client):
+        dana = next(
+            i for i in client.get('/api/instructors').get_json()
+            if i['instructor_name'] == 'Dana Reyes'
+        )
+        assert '$oid' in dana['_id']
+        assert '$date' in dana['last_session_date']
+
+    def test_empty_result_is_an_empty_list(self, client):
+        response = client.get('/api/instructors', query_string={'query': 'nobody'})
+        assert response.status_code == 200
+        assert response.get_json() == []
+
+
+class TestSearchInstructors:
+
+    def test_search_returns_matches(self, client):
+        response = client.get('/api/instructors/search', query_string={'q': 'Reyes'})
+        assert response.status_code == 200
+        assert instructor_names(response.get_json()) == ['Dana Reyes', 'Marcus Reyes']
+
+    @pytest.mark.parametrize('params', [{}, {'q': ''}, {'q': 'a'}])
+    def test_short_or_missing_query_is_rejected(self, client, params):
+        response = client.get('/api/instructors/search', query_string=params)
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    def test_regex_metacharacters_do_not_error(self, client):
+        response = client.get('/api/instructors/search', query_string={'q': '(('})
+        assert response.status_code == 200
+        assert response.get_json() == []
+
+
+class TestGetInstructor:
+
+    def test_returns_the_instructor_with_roster_and_days(self, client):
+        response = client.get('/api/instructors/Dana Reyes')
+        assert response.status_code == 200
+
+        instructor = response.get_json()['instructor']
+        assert instructor['total_sessions_taught'] == 3
+        assert instructor['co_taught_sessions'] == 1
+        assert len(instructor['days_taught']) == 3
+        assert [s['student_name'] for s in instructor['students']] == [
+            'Anthony Nguyen', 'Ava Nguyen'
+        ]
+
+    def test_a_name_with_a_space_survives_url_encoding(self, client):
+        """The key is a human name, so every lookup goes through percent-encoding."""
+        response = client.get('/api/instructors/Marcus%20Reyes')
+        assert response.status_code == 200
+        assert response.get_json()['instructor']['instructor_name'] == 'Marcus Reyes'
+
+    def test_the_roster_links_to_students_that_exist(self, client):
+        """student_key is the join back to the student profile page."""
+        roster = client.get('/api/instructors/Sam Ortiz').get_json()['instructor']['students']
+        assert roster[0]['student_key'] == CHLOE_KEY
+        assert client.get(f'/api/students/{CHLOE_KEY}').status_code == 200
+
+    def test_unknown_instructor_is_404(self, client):
+        response = client.get('/api/instructors/Nobody At All')
+        assert response.status_code == 404
+        assert response.get_json() == {'error': 'Instructor not found'}
+
+    def test_a_partial_name_is_404_not_a_lucky_match(self, client):
+        assert client.get('/api/instructors/Dana').status_code == 404
+
+    def test_search_is_not_shadowed_by_the_name_route(self, client):
+        """/instructors/search would otherwise read as an instructor called 'search'."""
+        response = client.get('/api/instructors/search', query_string={'q': 'Reyes'})
+        assert response.status_code == 200
+        assert isinstance(response.get_json(), list)
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/instructors/Dana Reyes').status_code == 401
+
+
 class TestMetrics:
 
     def test_totals(self, client):
         body = client.get('/api/metrics').get_json()
         assert body['total_students'] == 3
+        assert body['total_instructors'] == 3
         assert body['total_dwp_reports'] == 4
         assert body['total_attendance_records'] == 4
+
+    def test_instructor_count_is_independent_of_the_student_count(self, mongo):
+        """Equal in the fixtures by coincidence -- so prove the number is its own."""
+        from app import create_app
+        from tests.sample_data import INSTRUCTORS, STUDENTS
+
+        mongo['students'].insert_many(STUDENTS)
+        mongo['instructors'].insert_many(INSTRUCTORS[:2])
+
+        app = create_app()
+        app.config['TESTING'] = True
+        body = app.test_client().get(
+            '/api/metrics', headers={'X-API-Key': TEST_API_KEY}
+        ).get_json()
+
+        assert body['total_students'] == 3
+        assert body['total_instructors'] == 2
 
     def test_averages(self, client):
         body = client.get('/api/metrics').get_json()
@@ -226,6 +344,7 @@ class TestMetrics:
         ).get_json()
 
         assert body['total_students'] == 0
+        assert body['total_instructors'] == 0
         assert body['avg_dwp_per_student'] == 0
         assert body['avg_attendance_per_student'] == 0
 

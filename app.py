@@ -3,7 +3,7 @@ from flask_cors import CORS
 import auth
 from config import config
 from database import db
-from routes import students_bp, metrics_bp
+from routes import students_bp, instructors_bp, metrics_bp
 
 def create_app():
     app = Flask(__name__)
@@ -23,6 +23,7 @@ def create_app():
         print(f"Warning: Could not connect to database: {e}")
 
     app.register_blueprint(students_bp)
+    app.register_blueprint(instructors_bp)
     app.register_blueprint(metrics_bp)
 
     # After the blueprints: the guard resolves request.endpoint, which needs the routes

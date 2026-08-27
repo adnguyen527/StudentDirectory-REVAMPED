@@ -206,8 +206,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 82 offline tests -- no network, no credentials (~0.5s)
-pytest --integration    # + 19 read-only checks against the real cluster
+pytest                  # 335 offline tests -- no network, no credentials (~3s)
+pytest --integration    # + 38 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -217,7 +217,9 @@ anywhere. `Database`'s class-level client cache is reset around every test.
 
 The fixture directory in `tests/sample_data.py` is three students, two of them siblings on
 one account, because that is where this schema breaks. Most assertions turn on that pair —
-a household with 3 sessions in which one student owns 2.
+a household with 3 sessions in which one student owns 2. Three instructors sit beside them,
+two sharing one session so that co-taught page double-counting is visible in the fixtures
+rather than only on the cluster.
 
 **`--integration`.** Read-only checks (`tests/test_live_database.py`) that catch a bad
 ingestion run before the API serves it:
@@ -249,9 +251,17 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
+| GET | `/api/instructors` | all instructors; `?query=` to search by name |
+| GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
+| GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
+
+List responses drop the arrays that grow with the dataset — `dwp_report_ids` on a student,
+`days_taught` and the roster on an instructor — and keep the counts stored beside them.
+The detail routes serve them in full: one busy instructor is 48.9 KB against 38.8 KB for
+all 103 listed.
 
 ---
 
@@ -335,14 +345,17 @@ Items are listed in priority order within each group.
 - [ ] `P3` **Partial unique index** on `(account_id, student_name, date, session_start)`
       where `finalized: true` — blocked on the one 2025-07-01 duplicate under *Known
       Issues*.
+- [ ] `P3` **A rename map for centers**, so a rebrand merges into one identity instead of
+      taking a parser change and a backfill each time. The 2025-09-05 `Mann Mathematics` →
+      `Math Made Simple` cutover is normalized at import today, and the next one would be
+      handled the same way. Low priority — the data already in the cluster is merged.
 - [ ] `P3` **Check the anonymization mapping for other placeholders** mapped from blank
       fields. One instructor name already found; students and centers not yet checked.
 
 ### API
 
-- [ ] `P1` **Expose the `instructors` collection** — model, list, detail by
-      `instructor_name`, name search. 103 documents no route touches. Two frontend pages
-      wait on this.
+- [x] `P1` **Expose the `instructors` collection** — `Instructor` model, list, detail by
+      `instructor_name`, name search. Done; see the API table.
 - [ ] `P1` **Session authentication** for the React client — an authenticator in
       `AUTHENTICATORS`, `supports_credentials` on CORS, a signing secret. The shared
       `API_KEY` cannot go in a browser.
@@ -352,6 +365,11 @@ Items are listed in priority order within each group.
       validation the importer never needed. Needs the natural-key switch above.
       *Open:* whether drafts live in `dwp_reports` as `finalized: false` or their own
       collection.
+- [ ] `P2` **Center-wide metrics.** Sessions, students, pages and instructors per location
+      — the four centers have no rollup and no route. Has to aggregate `dwp_reports`
+      directly: instructor totals double-count co-taught pages, so they cannot be summed
+      into a center figure. *Open:* a built `centers` collection like the other aggregates,
+      or computed per request, which is what would make a date range possible.
 - [ ] `P2` **Decide who sees `student_notes`** (3,594 rows). Fine for instructors,
       questionable parent-facing. Needed before anything reaches a parent.
 - [ ] `P3` **Prompt-driven agent for niche stats.** Hard requirement: it reads only what the
@@ -386,9 +404,10 @@ hard-coded. Each card owns its header controls: a period dropdown where the data
 time-scoped, and an overflow menu in the corner, which is where the pin button lives.
 
 - [ ] `P1` **Search for students and instructors.** The entry point everything else is
-      reached from. Student search exists; instructor search does not. *Open:* a page of
-      its own, or the persistent top-bar search the layout reference uses — the reference
-      implies results appear as a dropdown, with a full page only for "see all".
+      reached from. Both searches now exist — `/api/students/search?q=` and
+      `/api/instructors/search?q=`, minimum 2 characters. *Open:* a page of its own, or
+      the persistent top-bar search the layout reference uses — the reference implies
+      results appear as a dropdown, with a full page only for "see all".
 - [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
       completed, session history. `/api/students/<key>` already serves everything except
       the completed topics above.
@@ -397,8 +416,8 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which
       already exists.
 - [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
-      most-taught topics, `unfinalized_sessions` as a follow-up list. *Blocked on the
-      instructor endpoints.*
+      most-taught topics, `unfinalized_sessions` as a follow-up list.
+      `/api/instructors/<name>` now serves everything except the topics.
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*

@@ -1,18 +1,13 @@
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
+
 from models import Attendance, Student, DigitalWorkoutPlan
-from bson import json_util
-import json
+from routes.serialization import serialize
 
 students_bp = Blueprint('students', __name__, url_prefix='/api')
 
 DATE_FORMAT = '%Y-%m-%d'
-
-
-def _serialize(value):
-    """BSON (ObjectId, datetime) -> JSON-safe structures."""
-    return json.loads(json_util.dumps(value))
 
 
 def _parse_period(args):
@@ -49,7 +44,7 @@ def get_students():
     else:
         students = Student.find_all()
 
-    return jsonify(_serialize(students)), 200
+    return jsonify(serialize(students)), 200
 
 
 @students_bp.route('/students/search', methods=['GET'])
@@ -58,7 +53,7 @@ def search_students():
     if not query or len(query) < 2:
         return jsonify({'error': 'Query must be at least 2 characters'}), 400
 
-    return jsonify(_serialize(Student.search(query))), 200
+    return jsonify(serialize(Student.search(query))), 200
 
 
 @students_bp.route('/students/<student_key>/attendance', methods=['GET'])
@@ -90,7 +85,7 @@ def get_student_attendance(student_key):
         },
         'totals': summary['totals'],
         'by_month': summary['by_month'],
-        'visits': _serialize(summary['visits']),
+        'visits': serialize(summary['visits']),
     }), 200
 
 
@@ -106,9 +101,9 @@ def get_student(student_key):
     )
 
     return jsonify({
-        'student': _serialize(student),
+        'student': serialize(student),
         'stats': {
             'total_dwp_reports': len(dwp_reports),
         },
-        'dwp_reports': _serialize(dwp_reports),
+        'dwp_reports': serialize(dwp_reports),
     }), 200
