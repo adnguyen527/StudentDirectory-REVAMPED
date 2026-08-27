@@ -377,8 +377,18 @@ Items are listed in priority order within each group.
 
 ### Frontend
 
-- [ ] `P1` **Search page for students and instructors.** The entry point everything else
-      is reached from. Student search exists; instructor search does not.
+**Layout reference.** The target shape is a conventional admin shell: a fixed left sidebar
+(logo, one primary action button, icon nav, settings at the bottom), a top bar carrying
+global search and the user menu, and a content area of cards — a top row of small tiles
+above a mixed grid of chart, list and highlight cards. Where that reference puts fixed KPI
+tiles, **this app puts the user's pinned stats** — the top row is assembled by pinning, not
+hard-coded. Each card owns its header controls: a period dropdown where the data is
+time-scoped, and an overflow menu in the corner, which is where the pin button lives.
+
+- [ ] `P1` **Search for students and instructors.** The entry point everything else is
+      reached from. Student search exists; instructor search does not. *Open:* a page of
+      its own, or the persistent top-bar search the layout reference uses — the reference
+      implies results appear as a dropdown, with a full page only for "see all".
 - [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
       completed, session history. `/api/students/<key>` already serves everything except
       the completed topics above.
@@ -393,8 +403,9 @@ Items are listed in priority order within each group.
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
 - [ ] `P3` **Home dashboard the user assembles.** A pin button on any stat in the app puts
-      that module on the board. Every stat has to render standalone, and the layout is per
-      person — browser storage until session auth lands. Wants pinnable stats to exist
-      first.
+      that module in the top row of the home page — the row the reference layout fills with
+      fixed KPI tiles. Every stat has to render standalone at tile size, and the layout is
+      per person — browser storage until session auth lands. Not every stat will be
+      pinnable; which ones qualify gets decided as the elements are built.
 - [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
       The command-line import already works.
