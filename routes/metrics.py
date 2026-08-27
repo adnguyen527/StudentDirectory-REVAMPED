@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from models import Student, DigitalWorkoutPlan, Attendance
+from models import Student, Instructor, DigitalWorkoutPlan, Attendance
 
 metrics_bp = Blueprint('metrics', __name__, url_prefix='/api')
 
@@ -11,11 +11,13 @@ def health_check():
 def get_metrics():
     try:
         total_students = Student.count_all()
+        total_instructors = Instructor.count_all()
         total_dwp_reports = DigitalWorkoutPlan.count_all()
         total_attendance_records = Attendance.count_all()
 
         return jsonify({
             'total_students': total_students,
+            'total_instructors': total_instructors,
             'total_dwp_reports': total_dwp_reports,
             'total_attendance_records': total_attendance_records,
             'avg_dwp_per_student': round(total_dwp_reports / total_students, 2) if total_students else 0,

@@ -26,6 +26,12 @@ REQUIRED_STUDENT_FIELDS = [
     'total_pages_completed', 'dwp_report_ids',
 ]
 
+# The three rungs of the topic ladder. Anything else the source writes is not rolled up.
+KNOWN_TOPIC_STATUSES = {'Worked On', 'Completed', 'Mastered'}
+
+# Where a topic stands after its most recent assignment.
+KNOWN_TOPIC_STATES = {'finished', 'on_plan', 'removed'}
+
 
 @pytest.fixture(scope='module')
 def students(live_db):
@@ -142,6 +148,170 @@ def test_every_dwp_report_belongs_to_a_known_student(live_db, students):
             orphans.append(doc['_id'])
 
     assert not orphans, f'{len(orphans)} dwp_report(s) with no student, e.g. {orphans[:5]}'
+
+
+def test_topic_rollup_counts_match_their_history(students):
+    """The two summary counts are 'ever reached this status', derived from topics[]."""
+    drifted = [
+        s['student_key'] for s in students
+        if s.get('total_unique_topics_mastered')
+        != sum(1 for t in s.get('topics', []) if t.get('times_mastered'))
+        or s.get('total_unique_topics_completed')
+        != sum(1 for t in s.get('topics', []) if t.get('times_completed'))
+    ]
+    assert not drifted, f'{len(drifted)} topic count(s) out of sync, e.g. {drifted[:5]}'
+
+
+def test_finished_topics_count_completed_and_mastered(students):
+    """The figure a profile page shows. Mastered implies completed, and the source writes
+    one status per session, so a topic mastered but never marked Completed still counts."""
+    drifted = [
+        s['student_key'] for s in students
+        if s.get('total_unique_topics_finished')
+        != sum(1 for t in s.get('topics', [])
+               if t.get('times_completed') or t.get('times_mastered'))
+    ]
+    assert not drifted, f'{len(drifted)} finished count(s) out of sync, e.g. {drifted[:5]}'
+
+
+def test_finished_is_never_smaller_than_mastered_or_completed(students):
+    """It is a union of the two, so it cannot be below either part -- and it is well
+    above the completed count, because 8,739 topics were mastered without ever being
+    written as Completed."""
+    impossible = [
+        s['student_key'] for s in students
+        if s.get('total_unique_topics_finished', 0) < s.get('total_unique_topics_mastered', 0)
+        or s.get('total_unique_topics_finished', 0) < s.get('total_unique_topics_completed', 0)
+    ]
+    assert not impossible, f'{len(impossible)} impossible finished count(s), e.g. {impossible[:5]}'
+
+    assert (
+        sum(s.get('total_unique_topics_finished', 0) for s in students)
+        > sum(s.get('total_unique_topics_completed', 0) for s in students)
+    ), 'finished should far exceed completed -- most topics are mastered, not completed'
+
+
+def test_topic_sessions_account_for_every_status(students):
+    """sessions is the whole history, so the three status counts must exhaust it."""
+    drifted = [
+        (s['student_key'], t.get('id')) for s in students for t in s.get('topics', [])
+        if t.get('sessions') != (t.get('times_worked_on', 0)
+                                 + t.get('times_completed', 0)
+                                 + t.get('times_mastered', 0))
+    ]
+    assert not drifted, f'{len(drifted)} topic(s) with unaccounted sessions, e.g. {drifted[:5]}'
+
+
+def test_topics_reconcile_to_dwp_reports(live_db, students):
+    """Every (student, topic) pair on a session must appear in that student's topics[],
+    with the same number of sessions behind it, and nothing may appear that no session
+    backs. A mismatch means students was built from an older snapshot of dwp_reports."""
+    from_reports = {}
+    for doc in live_db['dwp_reports'].find(
+        {'topics.0': {'$exists': True}},
+        {'account_id': 1, 'student_name': 1, 'topics': 1},
+    ):
+        account_id, name = doc.get('account_id'), doc.get('student_name')
+        if not account_id or not name or not str(name).strip():
+            continue  # build_students.py skips these by design
+        key = make_student_key(account_id, str(name).strip())
+        for topic in doc.get('topics', []):
+            if topic.get('status') not in KNOWN_TOPIC_STATUSES:
+                continue  # not rolled up, by design
+            pair = (key, topic.get('id') or topic.get('raw', ''))
+            from_reports[pair] = from_reports.get(pair, 0) + 1
+
+    from_students = {
+        (s['student_key'], t.get('id')): t.get('sessions')
+        for s in students for t in s.get('topics', [])
+    }
+    assert from_students == from_reports, (
+        f'{len(set(from_reports) - set(from_students))} pair(s) missing from students, '
+        f'{len(set(from_students) - set(from_reports))} with no session to back them'
+    )
+
+
+def test_a_topic_may_be_both_mastered_and_completed(students):
+    """Not a bug: the source moves a topic between statuses over time, and one history
+    entry records every status it held rather than only the last."""
+    overlapping = [
+        s['student_key'] for s in students for t in s.get('topics', [])
+        if t.get('times_mastered') and t.get('times_completed')
+    ]
+    assert overlapping, 'expected at least one topic both mastered and completed'
+
+
+def test_every_topic_was_assigned_at_least_once(students):
+    impossible = [
+        (s['student_key'], t.get('id')) for s in students for t in s.get('topics', [])
+        if not t.get('times_assigned') or t['times_assigned'] < 1
+    ]
+    assert not impossible, f'{len(impossible)} topic(s) never assigned, e.g. {impossible[:5]}'
+
+
+def test_reassignments_are_recorded(students):
+    """A topic taken off the plan and given back later. If this ever reads zero the build
+    stopped reading a student's days in order, and an assignment is a sequence or it is
+    nothing."""
+    reassigned = [
+        (s['student_key'], t.get('id')) for s in students for t in s.get('topics', [])
+        if t.get('times_assigned', 1) > 1
+    ]
+    assert reassigned, 'no repeat assignments found -- are the days still being ordered?'
+
+
+def test_reassignment_totals_match_the_history(students):
+    drifted = [
+        s['student_key'] for s in students
+        if s.get('total_topic_reassignments')
+        != sum(t.get('times_assigned', 1) - 1 for t in s.get('topics', []))
+    ]
+    assert not drifted, f'{len(drifted)} reassignment total(s) out of sync, e.g. {drifted[:5]}'
+
+
+def test_every_topic_has_a_known_status_and_state(students):
+    impossible = [
+        (s['student_key'], t.get('id')) for s in students for t in s.get('topics', [])
+        if t.get('status') not in KNOWN_TOPIC_STATUSES
+        or t.get('state') not in KNOWN_TOPIC_STATES
+    ]
+    assert not impossible, f'{len(impossible)} topic(s) in an unknown state, e.g. {impossible[:5]}'
+
+
+def test_topic_states_partition_the_history(students):
+    """Every topic is finished, still on the plan, or gone -- exactly one of the three."""
+    drifted = [
+        s['student_key'] for s in students
+        if s.get('total_topics_on_plan', 0) + s.get('total_topics_removed', 0)
+        + sum(1 for t in s.get('topics', []) if t.get('state') == 'finished')
+        != len(s.get('topics', []))
+    ]
+    assert not drifted, f'{len(drifted)} student(s) whose states do not add up, e.g. {drifted[:5]}'
+
+
+def test_a_finished_state_means_the_last_assignment_finished(students):
+    """Not the same question as total_unique_topics_finished, which asks 'ever'. A topic
+    mastered and then assigned again is not finished now, so the state count must be at or
+    below the ever count -- and strictly below it somewhere, or the two are measuring the
+    same thing and one of them is redundant."""
+    state_finished = sum(
+        1 for s in students for t in s.get('topics', []) if t.get('state') == 'finished'
+    )
+    ever_finished = sum(s.get('total_unique_topics_finished', 0) for s in students)
+    assert state_finished <= ever_finished
+    assert state_finished < ever_finished, (
+        'no topic was finished and then assigned again -- expected some, given '
+        'reassignment after a failed assessment is routine'
+    )
+
+
+def test_topic_dates_are_ordered(students):
+    dated = [
+        (s['student_key'], t.get('id')) for s in students for t in s.get('topics', [])
+        if t.get('first_seen') and t.get('last_seen')
+        and t['first_seen'] > t['last_seen']
+    ]
+    assert not dated, f'{len(dated)} topic(s) seen last before first, e.g. {dated[:5]}'
 
 
 def test_totals_are_non_negative(students):

@@ -39,6 +39,7 @@ from database import Database  # noqa: E402
 from tests.sample_data import (  # noqa: E402
     ATTENDANCE_REPORTS,
     DWP_REPORTS,
+    INSTRUCTORS,
     STUDENTS,
 )
 
@@ -104,6 +105,8 @@ def seeded_db(mongo):
     """The empty database, populated with the sample directory."""
     mongo['students'].create_index('student_key', unique=True)
     mongo['students'].insert_many(STUDENTS)
+    mongo['instructors'].create_index('instructor_name', unique=True)
+    mongo['instructors'].insert_many(INSTRUCTORS)
     mongo['dwp_reports'].insert_many(DWP_REPORTS)
     mongo['attendance_reports'].insert_many(ATTENDANCE_REPORTS)
     return mongo

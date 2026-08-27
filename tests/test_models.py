@@ -1,8 +1,8 @@
-"""Query layer: the students, dwp_reports and attendance_reports collections."""
+"""Query layer: the students, instructors, dwp_reports and attendance_reports collections."""
 
 import pytest
 
-from models import Attendance, DigitalWorkoutPlan, Student
+from models import Attendance, DigitalWorkoutPlan, Instructor, Student
 from tests.sample_data import (
     ACCOUNT_NGUYEN,
     ACCOUNT_TAN,
@@ -10,12 +10,17 @@ from tests.sample_data import (
     ANTHONY_KEY,
     AVA_KEY,
     CHLOE_KEY,
+    _attendance,
     _day,
 )
 
 
 def names(students):
     return sorted(s['student_name'] for s in students)
+
+
+def instructor_names(instructors):
+    return sorted(i['instructor_name'] for i in instructors)
 
 
 class TestStudent:
@@ -85,6 +90,77 @@ class TestStudent:
                 'account_id': ACCOUNT_NGUYEN,
                 'student_name': 'Anthony Nguyen',
             })
+
+
+class TestInstructor:
+
+    def test_find_all_returns_every_instructor(self, seeded_db):
+        assert instructor_names(Instructor.find_all()) == [
+            'Dana Reyes', 'Marcus Reyes', 'Sam Ortiz'
+        ]
+
+    def test_find_all_omits_the_growing_arrays(self, seeded_db):
+        """days_taught and the roster are detail-view data; a list must not carry them."""
+        listed = Instructor.find_all()
+        assert all('days_taught' not in i for i in listed)
+        assert all('students' not in i for i in listed)
+        # The counts that stand in for them have to survive the projection.
+        assert all('total_days_taught' in i and 'unique_students' in i for i in listed)
+
+    def test_find_by_name_returns_the_roster_and_the_days(self, seeded_db):
+        """The detail view is the one place those arrays are actually wanted."""
+        dana = Instructor.find_by_name('Dana Reyes')
+        assert dana['total_sessions_taught'] == 3
+        assert dana['days_taught'] == [_day(2026, 3, 7), _day(2026, 3, 10), _day(2026, 3, 14)]
+        assert [s['student_name'] for s in dana['students']] == [
+            'Anthony Nguyen', 'Ava Nguyen'
+        ]
+
+    def test_find_by_name_is_exact_not_a_prefix(self, seeded_db):
+        """Keyed on the unique index: 'Dana' is not an instructor, 'Dana Reyes' is."""
+        assert Instructor.find_by_name('Dana') is None
+
+    def test_find_by_name_unknown_returns_none(self, seeded_db):
+        assert Instructor.find_by_name('Nobody At All') is None
+
+    def test_search_matches_partial_names(self, seeded_db):
+        assert instructor_names(Instructor.search('Reyes')) == ['Dana Reyes', 'Marcus Reyes']
+
+    def test_search_is_case_insensitive(self, seeded_db):
+        assert instructor_names(Instructor.search('ortiz')) == ['Sam Ortiz']
+
+    @pytest.mark.parametrize('query', ['(', '[a-z', '*', '\\', '(?i)reyes'])
+    def test_search_treats_regex_metacharacters_as_literals(self, seeded_db, query):
+        assert Instructor.search(query) == []
+
+    def test_search_respects_the_limit(self, seeded_db):
+        assert len(Instructor.search('Reyes', limit=1)) == 1
+
+    def test_search_omits_the_growing_arrays(self, seeded_db):
+        assert all('students' not in i for i in Instructor.search('Reyes'))
+
+    def test_count_all(self, seeded_db):
+        assert Instructor.count_all() == 3
+
+    def test_count_all_on_an_empty_collection(self, mongo):
+        assert Instructor.count_all() == 0
+
+    def test_instructor_name_is_unique(self, seeded_db):
+        """A name is the whole key, so nothing else stops a rebuild from splitting one
+        instructor across two documents."""
+        from pymongo.errors import DuplicateKeyError
+
+        with pytest.raises(DuplicateKeyError):
+            seeded_db['instructors'].insert_one({'instructor_name': 'Dana Reyes'})
+
+    def test_co_taught_pages_are_credited_twice_on_purpose(self, seeded_db):
+        """Anthony's 3/14 gives its 7 pages to both instructors, so instructor pages
+        sum to more than the 23 actually recorded. Summing these for a center total is
+        the mistake this documents."""
+        credited = sum(i['total_pages_completed'] for i in Instructor.find_all())
+        recorded = sum(s['total_pages_completed'] for s in Student.find_all())
+        assert credited == 30
+        assert recorded == 23
 
 
 class TestDigitalWorkoutPlan:
@@ -207,6 +283,72 @@ class TestAttendance:
         assert len(in_center) == 3
         assert len(at_home) == 1
         assert at_home[0]['student_name'] == 'Chloe Tan'
+
+    def test_period_summary_counts_sessions_not_days(self, seeded_db):
+        """Anthony's 3/14 is two sessions on one day. A prepaid package draws down two,
+        so the totals must differ."""
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        assert summary['totals'] == {'sessions': 3, 'days': 2}
+
+    def test_period_summary_is_chronological(self, seeded_db):
+        """Oldest first -- this reads as a statement, not a feed."""
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        dates = [v['date'] for v in summary['visits']]
+        assert dates == sorted(dates)
+
+    def test_period_summary_buckets_by_month(self, seeded_db):
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 1, 1), _day(2026, 12, 31)
+        )
+        assert summary['by_month'] == [{'month': '2026-03', 'sessions': 3, 'days': 2}]
+
+    def test_period_summary_months_are_ordered(self, seeded_db):
+        """A list, not a dict -- clients should not have to trust JSON key order."""
+        summary = Attendance.period_summary(
+            CHLOE_KEY, _day(2026, 1, 1), _day(2026, 12, 31)
+        )
+        months = [b['month'] for b in summary['by_month']]
+        assert months == sorted(months)
+
+    def test_period_summary_excludes_siblings(self, seeded_db):
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        assert {v['student_name'] for v in summary['visits']} == {'Anthony Nguyen'}
+
+    @pytest.mark.parametrize('start,end,expected', [
+        (_day(2026, 3, 7), _day(2026, 3, 14), 3),    # both bounds inclusive
+        (_day(2026, 3, 8), _day(2026, 3, 14), 2),    # start excludes the 7th
+        (_day(2026, 3, 7), _day(2026, 3, 13), 1),    # end excludes the 14th
+    ])
+    def test_period_summary_bounds_are_inclusive(self, seeded_db, start, end, expected):
+        """date is stored at midnight, so an end of the 14th includes the 14th."""
+        summary = Attendance.period_summary(ANTHONY_KEY, start, end)
+        assert summary['totals']['sessions'] == expected
+
+    def test_period_summary_of_an_empty_window_is_zero_not_missing(self, seeded_db):
+        """A student who attended nothing is a real answer -- 'zero this period' is what
+        the manager is calling about."""
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 5, 1), _day(2026, 5, 31)
+        )
+        assert summary == {'totals': {'sessions': 0, 'days': 0}, 'by_month': [], 'visits': []}
+
+    def test_period_summary_counts_unfinalized_sessions(self, seeded_db):
+        """The student attended. Whether the instructor closed the report is a staffing
+        matter, not a reason to hand the family back a session."""
+        seeded_db['attendance_reports'].insert_one(_attendance(
+            ANTHONY_KEY, ACCOUNT_NGUYEN, 'Anthony Nguyen', _day(2026, 3, 20),
+            sessions_timed=0, minutes_present=None, pages_completed=0,
+        ))
+        summary = Attendance.period_summary(
+            ANTHONY_KEY, _day(2026, 3, 1), _day(2026, 3, 31)
+        )
+        assert summary['totals'] == {'sessions': 4, 'days': 3}
 
     def test_unmeasured_presence_is_null_not_zero(self, seeded_db):
         """0 would read as 'attended, stayed no time' -- a different claim."""

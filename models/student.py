@@ -3,10 +3,12 @@ import re
 from database import db
 
 
-# dwp_report_ids is internal plumbing -- a list of ObjectId references that grows with
-# every session and is only needed when assembling a single student's detail view.
-# Excluding it from list results keeps them from ballooning.
-LIST_PROJECTION = {'dwp_report_ids': 0}
+# Both of these grow with every session and are only read on one student's detail view:
+# dwp_report_ids is a list of ObjectId references, and topics is the per-topic history,
+# which runs to ~15 entries of 10 fields per student. Excluding them from list results
+# keeps those from ballooning; total_unique_topics_mastered and its siblings stay behind
+# to answer the summary questions a list view actually asks.
+LIST_PROJECTION = {'dwp_report_ids': 0, 'topics': 0}
 
 
 class Student:

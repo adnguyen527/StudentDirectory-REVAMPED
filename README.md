@@ -92,8 +92,60 @@ Aggregated per-student profiles built from `dwp_reports`. Each document is a ful
 dashboard view. Rebuilt by `ingestion/build_students.py`.
 
 `student_key`, `account_id`, `student_name`, `total_sessions`, `total_pages_completed`,
-`last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics_mastered[]`,
-`total_unique_topics_mastered`, `dwp_report_ids[]`, `last_modified`.
+`last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics[]`,
+`total_unique_topics_mastered`, `total_unique_topics_completed`,
+`total_unique_topics_finished`, `total_topic_reassignments`, `total_topics_on_plan`,
+`total_topics_removed`, `dwp_report_ids[]`, `last_modified`.
+
+**Topic status is a ladder, not three labels.** `Worked On` means worked on but not
+completed; `Completed` means completed but not mastered; `Mastered` means completed *and*
+mastered. The data bears that out — of 13,598 (student, topic) pairs, 94.3% start at
+`Worked On` and 62.8% end at `Mastered`, forward moves outnumber backward ones roughly ten
+to one (9,061 against 892), and mastery takes a median of three sessions from first sight.
+
+`topics[]` is one entry per topic holding the whole history, because a topic is worked
+through repeatedly rather than reached once:
+
+```python
+{'id': 'PK-3157-00', 'name': 'Distributive Property',
+ 'sessions': 16,              # times worked through
+ 'times_worked_on': 11, 'times_completed': 0, 'times_mastered': 5,
+ 'times_assigned': 5,         # times it was put on the plan
+ 'last_assignment_started': ...,
+ 'first_seen': ..., 'last_seen': ...,
+ 'status': 'Mastered',        # where it stands now
+ 'state': 'finished'}         # finished | on_plan | removed
+```
+
+Four things to know before reading it:
+
+- **A topic is never idle on a plan.** If a student is working other topics instead, this
+  one came off the plan; when it returns that is a **fresh assignment**, prompted by a new
+  assessment or lesson plan. So `times_assigned` counts assignments, and the boundary is
+  measured in *topics that displaced it* — six or more — not in days or sessions elapsed,
+  because students work at very different paces. A status dropping back down the ladder
+  also starts one, since that is a topic handed back with no gap at all.
+  Of the 37,121 returns to a topic, 97.1% had five or fewer others in between, so the rule
+  fires on the clearest 2.9% and would rather join two real assignments than split one.
+  14,833 assignments across 13,598 topics; 1,096 topics were assigned more than once, one
+  of them five times.
+- **`state` is the honest answer to "what is this student working on".** It reads the
+  **last** assignment only: `finished`, `on_plan`, or `removed`. 2,117 topics are removed
+  against 2,534 still on a plan — so treating every unfinished topic as open would
+  overstate by nearly half.
+- **The `total_unique_*` counts mean *ever*, not *currently*.** A topic mastered and then
+  assigned again still counts there, which is exactly when it disagrees with `state`.
+- **Show `total_unique_topics_finished`, not `..._completed`.** The source writes one
+  status per session rather than both, so a mastered topic is almost never also written as
+  `Completed` — 8,739 of the 13,598 entries were mastered without it. That makes the
+  completed count the rare **completed-but-not-mastered** remainder: 450 topics across 257
+  students, against **9,189 topics across 752 students** actually finished. A profile page
+  reading the wrong one understates a student's work about twentyfold. `Completed` is also
+  very nearly terminal — only 5 pairs in the whole dataset ever move `Completed` →
+  `Mastered`.
+
+`Worked On` is counted per topic but never on its own: it is the state of a topic still in
+progress, on 40,949 of the 50,900 topic entries.
 
 **Indexes**: `student_key` (unique), `account_id` (**not** unique — represents household),
 `student_name`.
@@ -206,8 +258,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 82 offline tests -- no network, no credentials (~0.5s)
-pytest --integration    # + 19 read-only checks against the real cluster
+pytest                  # 383 offline tests -- no network, no credentials (~2s)
+pytest --integration    # + 51 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -217,22 +269,13 @@ anywhere. `Database`'s class-level client cache is reset around every test.
 
 The fixture directory in `tests/sample_data.py` is three students, two of them siblings on
 one account, because that is where this schema breaks. Most assertions turn on that pair —
-a household with 3 sessions in which one student owns 2.
+a household with 3 sessions in which one student owns 2. Three instructors sit beside them,
+two sharing one session so that co-taught page double-counting is visible in the fixtures
+rather than only on the cluster.
 
 **`--integration`.** Read-only checks (`tests/test_live_database.py`) that catch a bad
 ingestion run before the API serves it:
 
-- `student_key` unique across `students`, and still re-derivable from that document's own
-  `account_id` + `student_name`
-- no `dwp_report_ids` pointing at a missing session, and no session without a profile —
-  the latter means `import_reports.py` ran and `build_students.py` did not
-- `total_sessions`, `unique_students` and `total_days_taught` matching the arrays
-  they claim to count
-- instructor page total overshooting the recorded total by no more than co-taught sessions
-  can explain
-- `attendance_reports` reconciling to `dwp_reports` exactly — one document per student-day,
-  sessions and pages summing to the rows they were built from, and `minutes_present` null
-  exactly when nothing on that day was measurable
 
 These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
@@ -248,9 +291,19 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 | GET | `/api/students` | all students; `?query=` to search, `?account_id=` for one household's siblings |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
+| GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
+| GET | `/api/instructors` | all instructors; `?query=` to search by name |
+| GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
+| GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
+
+List responses drop the arrays that grow with the dataset — `dwp_report_ids` and `topics`
+on a student, `days_taught` and the roster on an instructor — and keep the counts stored
+beside them. The detail routes serve them in full, and the gap is wide: one busy instructor
+is 48.9 KB against 38.8 KB for all 103 listed, and one student with 100 topics is 310.6 KB
+against 1.00 MB for all 893.
 
 ---
 
@@ -279,8 +332,20 @@ pipeline = [
 
 - **A row edited at the source imports as a new document** rather than replacing the
   original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
-- **No pagination on `/api/students`.** The full list is 1.72 MB across 893 students, and
-  every call ships all of it.
+- **No pagination on `/api/students`.** The full list is 1.00 MB across 893 students, and
+  every call ships all of it. It crossed a megabyte when the two topic-state counts were
+  added — roughly 70 KB for two integers, because they are paid 893 times — even though
+  `topics[]` itself is projected out. The per-student summary fields are what grow this
+  now, and a search page hitting the route on every keystroke will feel it long before
+  MongoDB's document limit is anywhere in sight.
+- **Two topic counts that sound alike and answer different questions.**
+  `total_unique_topics_finished` means a topic was **ever** completed or mastered;
+  `state == 'finished'` means its **most recent** assignment ended that way. They disagree
+  for 242 topics — the ones finished once and then assigned again. Both are correct and
+  both are wanted (one for "what has this student achieved", one for "what is open now"),
+  but the names do not advertise the difference, so a reader reaching for "finished" can
+  easily take the wrong one. A live check asserts the gap still exists; if it ever closed,
+  one of the two would be redundant.
 - **No user accounts.** The shared `API_KEY` authenticates a *caller*, not a person, so
   there is nothing to audit and nothing to revoke short of rotating the key for everyone.
   A browser client will need session auth regardless — see the API section.
@@ -302,48 +367,119 @@ pipeline = [
   unmeasured rather than assumed. **To address:** find out why the source omits the end
   time (a session closed by timeout? an unfinished punch-out?), and decide whether an
   unended session should be flagged for follow-up rather than silently unmeasurable.
-- **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student, `days_taught` to
-  272 per instructor, and instructor rosters to 304. All grow with the dataset, and all
-  are far from MongoDB's 16 MB document limit — accepted, not a pending fix.
+- **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student and `topics` to
+  100, `days_taught` to 272 per instructor, and instructor rosters to 304. All grow with
+  the dataset, and all are far from MongoDB's 16 MB document limit — accepted, not a
+  pending fix.
 
 ---
 
 ## TODO
 
+Priorities are relative to the next milestone — a frontend a manager can actually use.
+`P1` blocks it, `P2` comes straight after, `P3` is later or still being thought through.
+Items are listed in priority order within each group.
+
 ### Data integrity
 
-- [ ] **Add the partial unique index** on `(account_id, student_name, date, session_start)`
-      where `finalized: true`, once the above is resolved. Finalized-only leaves exactly
-      one collision today, so this is a one-line change behind a one-row decision.
-- [ ] **Switch `_upsert()` to the natural key.** Then an edited source row updates its
-      document instead of landing beside it. Query count is unchanged — batched lookups
-      by key instead of by hash, with the hash demoted to change detection.
-- [ ] **Check the anonymization mapping for other placeholders.** One instructor name was
-      a stand-in for an empty field, and it went unnoticed for 73 rows because it looked
-      like a person. If other names, students, or centers were mapped from blanks, they
-      have the same problem. Add them to `PLACEHOLDER_INSTRUCTORS` or its equivalent.
+- [x] `P2` **Add completed topics to `students`.** Done, as part of `topics[]` — one entry
+      per topic with per-status counts, reassignments and current standing. Rebuilt:
+      13,598 topic entries, 187 students with a reassigned topic.
+- [ ] `P2` **Add most-taught topics to `instructors`.** Ranked topic counts across the
+      sessions each instructor ran; the collection carries no topic data today. For the
+      instructor profile page.
+- [ ] `P2` **Switch `_upsert()` to the natural key**, so an edited row updates its document
+      instead of landing beside it. Hash demoted to change detection. The write endpoints
+      need this.
+- [ ] `P3` **Split restricted fields out of `dwp_reports`** so access is decided by what a
+      caller can reach, not by every reader remembering `PRIVATE_FIELDS`. Candidate axes:
+      sensitivity, center. *Exploring — not decided.*
+- [ ] `P3` **Keep aggregates current once the API writes reports.** `students`,
+      `instructors` and `attendance_reports` are batch-built; update on write, or show how
+      stale they are. Moot until something writes.
+- [ ] `P3` **Partial unique index** on `(account_id, student_name, date, session_start)`
+      where `finalized: true` — blocked on the one 2025-07-01 duplicate under *Known
+      Issues*.
+- [ ] `P3` **A rename map for centers**, so a rebrand merges into one identity instead of
+      taking a parser change and a backfill each time. The 2025-09-05 `Mann Mathematics` →
+      `Math Made Simple` cutover is normalized at import today, and the next one would be
+      handled the same way. Low priority — the data already in the cluster is merged.
+- [ ] `P3` **Check the anonymization mapping for other placeholders** mapped from blank
+      fields. One instructor name already found; students and centers not yet checked.
 
 ### API
 
-- [ ] **Session authentication** for the React client. Append an authenticator to
-      `AUTHENTICATORS` in `auth.py`; also needs `supports_credentials` on the CORS config
-      and a signing secret. `ALLOWED_ORIGINS` is already restricted, which cookie auth
-      requires.
-- [ ] **Decide who sees `student_notes`.** Personal interests collected for rapport, on
-      3,594 rows. Fine for an instructor view, questionable in anything parent-facing.
-      `internal_notes` and both spellings of the director note are already withheld.
+- [x] `P1` **Expose the `instructors` collection** — `Instructor` model, list, detail by
+      `instructor_name`, name search. Done; see the API table.
+- [ ] `P1` **Session authentication** for the React client — an authenticator in
+      `AUTHENTICATORS`, `supports_credentials` on CORS, a signing secret. The shared
+      `API_KEY` cannot go in a browser.
+- [ ] `P2` **Per-user permissions** on top of it. Identity alone does not say what a user
+      may read; everything that scopes data depends on this.
+- [ ] `P2` **Write endpoints for the report form** — create, update, finalize, plus the
+      validation the importer never needed. Needs the natural-key switch above.
+      *Open:* whether drafts live in `dwp_reports` as `finalized: false` or their own
+      collection.
+- [ ] `P2` **Center-wide metrics.** Sessions, students, pages and instructors per location
+      — the four centers have no rollup and no route. Has to aggregate `dwp_reports`
+      directly: instructor totals double-count co-taught pages, so they cannot be summed
+      into a center figure. *Open:* a built `centers` collection like the other aggregates,
+      or computed per request, which is what would make a date range possible.
+- [ ] `P2` **Decide who sees `student_notes`** (3,594 rows). Fine for instructors,
+      questionable parent-facing. Needed before anything reaches a parent.
+- [ ] `P3` **Prompt-driven agent for niche stats.** Hard requirement: it reads only what the
+      asking user may see, through a pre-projected, permission-scoped surface — never the
+      raw database. Blocked on permissions. Must encode the traps that make it answer
+      confidently wrong: a day is not a session, `account_id` is a household, and the
+      aggregates are all-time.
 
 ### Deployment
 
-- [ ] **Serve `create_app()` from a real WSGI server** (`waitress` on Windows, `gunicorn`
-      elsewhere) and document the production command, so `python app.py` is unambiguously
-      the dev-only path.
-- [ ] **Consider a startup interlock** refusing `FLASK_DEBUG=1` together with a
-      non-loopback `HOST`, so the dangerous combination takes a code change rather than
-      an env var.
+- [ ] `P2` **Serve `create_app()` from a real WSGI server** (`waitress` / `gunicorn`) and
+      document the production command, leaving `python app.py` as the dev-only path. Due
+      the moment anyone but you loads the frontend.
+- [ ] `P3` **Startup interlock** refusing `FLASK_DEBUG=1` together with a non-loopback
+      `HOST`.
+
+### Development
+
+- [ ] `P2` **Dev database for form writes**, so drafts can be saved, reopened and finalized
+      without test reports landing in the real collection. `MONGODB_DB` already selects it;
+      what is missing is a seed and a documented way to point at it. *Open:* anonymized
+      slice vs. hand-written fixtures.
 
 ### Frontend
 
-- [ ] **React dashboard.** Blocked on session authentication above, not on the API
-      surface.
+**Layout reference.** The target shape is a conventional admin shell: a fixed left sidebar
+(logo, one primary action button, icon nav, settings at the bottom), a top bar carrying
+global search and the user menu, and a content area of cards — a top row of small tiles
+above a mixed grid of chart, list and highlight cards. Where that reference puts fixed KPI
+tiles, **this app puts the user's pinned stats** — the top row is assembled by pinning, not
+hard-coded. Each card owns its header controls: a period dropdown where the data is
+time-scoped, and an overflow menu in the corner, which is where the pin button lives.
 
+- [ ] `P1` **Search for students and instructors.** The entry point everything else is
+      reached from. Both searches now exist — `/api/students/search?q=` and
+      `/api/instructors/search?q=`, minimum 2 characters. *Open:* a page of its own, or
+      the persistent top-bar search the layout reference uses — the reference implies
+      results appear as a dropdown, with a full page only for "see all".
+- [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
+      completed, session history. `/api/students/<key>` already returns all of it, so this
+      is frontend-only.
+- [ ] `P1` **Session count panel on the student record** — sessions attended over a
+      selectable period, with the dates, so a manager can tell a parent what their prepaid
+      package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which
+      already exists.
+- [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
+      most-taught topics, `unfinalized_sessions` as a follow-up list.
+      `/api/instructors/<name>` now serves everything except the topics.
+- [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
+      finalized into `dwp_reports` as a normal document. Needs a list of what is still
+      open. *Blocked on the write endpoints.*
+- [ ] `P3` **Home dashboard the user assembles.** A pin button on any stat in the app puts
+      that module in the top row of the home page — the row the reference layout fills with
+      fixed KPI tiles. Every stat has to render standalone at tile size, and the layout is
+      per person — browser storage until session auth lands. Not every stat will be
+      pinnable; which ones qualify gets decided as the elements are built.
+- [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
+      The command-line import already works.
