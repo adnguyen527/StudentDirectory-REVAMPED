@@ -311,59 +311,90 @@ pipeline = [
 
 ## TODO
 
+Priorities are relative to the next milestone — a frontend a manager can actually use.
+`P1` blocks it, `P2` comes straight after, `P3` is later or still being thought through.
+Items are listed in priority order within each group.
+
 ### Data integrity
 
-- [ ] **Add the partial unique index** on `(account_id, student_name, date, session_start)`
-      where `finalized: true`, once the above is resolved. Finalized-only leaves exactly
-      one collision today, so this is a one-line change behind a one-row decision.
-- [ ] **Switch `_upsert()` to the natural key.** Then an edited source row updates its
-      document instead of landing beside it. Query count is unchanged — batched lookups
-      by key instead of by hash, with the hash demoted to change detection.
-- [ ] **Check the anonymization mapping for other placeholders.** One instructor name was
-      a stand-in for an empty field, and it went unnoticed for 73 rows because it looked
-      like a person. If other names, students, or centers were mapped from blanks, they
-      have the same problem. Add them to `PLACEHOLDER_INSTRUCTORS` or its equivalent.
+- [ ] `P2` **Add completed topics to `students`.** `topics[]` carries `Worked On` /
+      `Mastered` / `Completed`, but `build_students.py` rolls up only `Mastered` —
+      `Completed` is dropped on the floor. For the student profile page.
+- [ ] `P2` **Add most-taught topics to `instructors`.** Ranked topic counts across the
+      sessions each instructor ran; the collection carries no topic data today. For the
+      instructor profile page.
+- [ ] `P2` **Switch `_upsert()` to the natural key**, so an edited row updates its document
+      instead of landing beside it. Hash demoted to change detection. The write endpoints
+      need this.
+- [ ] `P3` **Split restricted fields out of `dwp_reports`** so access is decided by what a
+      caller can reach, not by every reader remembering `PRIVATE_FIELDS`. Candidate axes:
+      sensitivity, center. *Exploring — not decided.*
+- [ ] `P3` **Keep aggregates current once the API writes reports.** `students`,
+      `instructors` and `attendance_reports` are batch-built; update on write, or show how
+      stale they are. Moot until something writes.
+- [ ] `P3` **Partial unique index** on `(account_id, student_name, date, session_start)`
+      where `finalized: true` — blocked on the one 2025-07-01 duplicate under *Known
+      Issues*.
+- [ ] `P3` **Check the anonymization mapping for other placeholders** mapped from blank
+      fields. One instructor name already found; students and centers not yet checked.
 
 ### API
 
-- [ ] **Session authentication** for the React client. Append an authenticator to
-      `AUTHENTICATORS` in `auth.py`; also needs `supports_credentials` on the CORS config
-      and a signing secret. `ALLOWED_ORIGINS` is already restricted, which cookie auth
-      requires.
-- [ ] **Decide who sees `student_notes`.** Personal interests collected for rapport, on
-      3,594 rows. Fine for an instructor view, questionable in anything parent-facing.
-      `internal_notes` and both spellings of the director note are already withheld.
-- [ ] **Expose the `instructors` collection.** 103 documents that no route touches —
-      there is no `Instructor` model and no endpoint. Needs a list, a detail view keyed
-      on `instructor_name`, and a name search, mirroring the student routes. The
-      instructor profile page below is blocked on this.
+- [ ] `P1` **Expose the `instructors` collection** — model, list, detail by
+      `instructor_name`, name search. 103 documents no route touches. Two frontend pages
+      wait on this.
+- [ ] `P1` **Session authentication** for the React client — an authenticator in
+      `AUTHENTICATORS`, `supports_credentials` on CORS, a signing secret. The shared
+      `API_KEY` cannot go in a browser.
+- [ ] `P2` **Per-user permissions** on top of it. Identity alone does not say what a user
+      may read; everything that scopes data depends on this.
+- [ ] `P2` **Write endpoints for the report form** — create, update, finalize, plus the
+      validation the importer never needed. Needs the natural-key switch above.
+      *Open:* whether drafts live in `dwp_reports` as `finalized: false` or their own
+      collection.
+- [ ] `P2` **Decide who sees `student_notes`** (3,594 rows). Fine for instructors,
+      questionable parent-facing. Needed before anything reaches a parent.
+- [ ] `P3` **Prompt-driven agent for niche stats.** Hard requirement: it reads only what the
+      asking user may see, through a pre-projected, permission-scoped surface — never the
+      raw database. Blocked on permissions. Must encode the traps that make it answer
+      confidently wrong: a day is not a session, `account_id` is a household, and the
+      aggregates are all-time.
 
 ### Deployment
 
-- [ ] **Serve `create_app()` from a real WSGI server** (`waitress` on Windows, `gunicorn`
-      elsewhere) and document the production command, so `python app.py` is unambiguously
-      the dev-only path.
-- [ ] **Consider a startup interlock** refusing `FLASK_DEBUG=1` together with a
-      non-loopback `HOST`, so the dangerous combination takes a code change rather than
-      an env var.
+- [ ] `P2` **Serve `create_app()` from a real WSGI server** (`waitress` / `gunicorn`) and
+      document the production command, leaving `python app.py` as the dev-only path. Due
+      the moment anyone but you loads the frontend.
+- [ ] `P3` **Startup interlock** refusing `FLASK_DEBUG=1` together with a non-loopback
+      `HOST`.
+
+### Development
+
+- [ ] `P2` **Dev database for form writes**, so drafts can be saved, reopened and finalized
+      without test reports landing in the real collection. `MONGODB_DB` already selects it;
+      what is missing is a seed and a documented way to point at it. *Open:* anonymized
+      slice vs. hand-written fixtures.
 
 ### Frontend
 
-- [ ] **React dashboard.** Blocked on session authentication above, not on the API
-      surface.
-- [ ] **Search page for students and instructors.** One entry point managers land on.
-      Student search exists (`/api/students/search?q=`, minimum 2 characters); instructor
-      search does not yet. Results link through to the profile pages below.
-- [ ] **Student profile landing page.** The full record for one student — profile,
-      centers, instructors, topics mastered, session history. `/api/students/<key>`
-      already returns all of it, so this is frontend-only.
-- [ ] **Instructor profile landing page.** Sessions taught, unique students, roster,
-      centers, days taught, and `unfinalized_sessions` as a follow-up list. **Blocked on
-      the instructor endpoints above** — the collection is built and current, but nothing
-      serves it.
-- [ ] **Session count panel on the student record.** Show how many sessions a student
-      attended over a selectable period, with the visit dates, so a manager can tell a
-      parent how much of their prepaid package has been used. Backed by
-      `GET /api/students/<student_key>/attendance?start=&end=`, which returns totals, a
-      per-month breakdown and the dates. Counts sessions rather than days, since a day
-      with two sessions draws down two.
+- [ ] `P1` **Search page for students and instructors.** The entry point everything else
+      is reached from. Student search exists; instructor search does not.
+- [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
+      completed, session history. `/api/students/<key>` already serves everything except
+      the completed topics above.
+- [ ] `P1` **Session count panel on the student record** — sessions attended over a
+      selectable period, with the dates, so a manager can tell a parent what their prepaid
+      package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which
+      already exists.
+- [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
+      most-taught topics, `unfinalized_sessions` as a follow-up list. *Blocked on the
+      instructor endpoints.*
+- [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
+      finalized into `dwp_reports` as a normal document. Needs a list of what is still
+      open. *Blocked on the write endpoints.*
+- [ ] `P3` **Home dashboard the user assembles.** A pin button on any stat in the app puts
+      that module on the board. Every stat has to render standalone, and the layout is per
+      person — browser storage until session auth lands. Wants pinnable stats to exist
+      first.
+- [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
+      The command-line import already works.
