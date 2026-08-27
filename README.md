@@ -276,25 +276,6 @@ rather than only on the cluster.
 **`--integration`.** Read-only checks (`tests/test_live_database.py`) that catch a bad
 ingestion run before the API serves it:
 
-- `student_key` unique across `students`, and still re-derivable from that document's own
-  `account_id` + `student_name`
-- no `dwp_report_ids` pointing at a missing session, and no session without a profile —
-  the latter means `import_reports.py` ran and `build_students.py` did not
-- `total_sessions`, `unique_students`, `total_days_taught` and the topic counts matching
-  the arrays they claim to count
-- every topic on a session appearing in that student's `topics[]` with the same number of
-  sessions behind it, and nothing there without a session to back it
-- repeat assignments still being recorded — zero would mean the build stopped reading a
-  student's days in order, and an assignment is a sequence or it is nothing
-- every topic being `finished`, `on_plan` or `removed`, with the three adding up to the
-  history they came from
-- `total_unique_topics_finished` holding the union of completed and mastered, and staying
-  above both parts
-- instructor page total overshooting the recorded total by no more than co-taught sessions
-  can explain
-- `attendance_reports` reconciling to `dwp_reports` exactly — one document per student-day,
-  sessions and pages summing to the rows they were built from, and `minutes_present` null
-  exactly when nothing on that day was measurable
 
 These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
