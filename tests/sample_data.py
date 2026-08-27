@@ -50,8 +50,30 @@ STUDENTS = [
             {'name': 'Dana Reyes', 'sessions': 2, 'pages_completed': 12},
             {'name': 'Marcus Reyes', 'sessions': 1, 'pages_completed': 7},
         ],
-        'topics_mastered': [{'id': 'T-100', 'name': 'Fractions', 'times_mastered': 2}],
-        'total_unique_topics_mastered': 1,
+        # Two topics over two sessions: Fractions climbs the ladder, Decimals was
+        # mastered on 3/7 and handed straight back on 3/14 -- assigned a second time.
+        'topics': [
+            {'id': 'T-110', 'name': 'Decimals', 'sessions': 2,
+             'times_worked_on': 1, 'times_completed': 0, 'times_mastered': 1,
+             'times_assigned': 2, 'first_seen': _day(2026, 3, 7),
+             'last_seen': _day(2026, 3, 14),
+             'last_assignment_started': _day(2026, 3, 14),
+             'status': 'Worked On', 'state': 'on_plan'},
+            {'id': 'T-100', 'name': 'Fractions', 'sessions': 2,
+             'times_worked_on': 1, 'times_completed': 0, 'times_mastered': 1,
+             'times_assigned': 1, 'first_seen': _day(2026, 3, 7),
+             'last_seen': _day(2026, 3, 14),
+             'last_assignment_started': _day(2026, 3, 7),
+             'status': 'Mastered', 'state': 'finished'},
+        ],
+        'total_unique_topics_mastered': 2,
+        'total_unique_topics_completed': 0,
+        # Both were mastered, neither was ever written as Completed -- which is exactly
+        # why the finished count cannot be read off total_unique_topics_completed.
+        'total_unique_topics_finished': 2,
+        'total_topic_reassignments': 1,
+        'total_topics_on_plan': 1,
+        'total_topics_removed': 0,
         'dwp_report_ids': ANTHONY_DWP_IDS,
         'last_modified': _day(2026, 3, 15),
     },
@@ -65,8 +87,14 @@ STUDENTS = [
         'last_assessment': 'Pre-Algebra',
         'total_pages_completed': 4,
         'instructors': [{'name': 'Dana Reyes', 'sessions': 1, 'pages_completed': 4}],
-        'topics_mastered': [],
+        # Her one topic carries a status outside the ladder, so nothing is rolled up.
+        'topics': [],
         'total_unique_topics_mastered': 0,
+        'total_unique_topics_completed': 0,
+        'total_unique_topics_finished': 0,
+        'total_topic_reassignments': 0,
+        'total_topics_on_plan': 0,
+        'total_topics_removed': 0,
         'dwp_report_ids': AVA_DWP_IDS,
         'last_modified': _day(2026, 3, 15),
     },
@@ -80,8 +108,21 @@ STUDENTS = [
         'last_assessment': 'Geometry',
         'total_pages_completed': 7,
         'instructors': [{'name': 'Sam Ortiz', 'sessions': 1, 'pages_completed': 7}],
-        'topics_mastered': [{'id': 'T-200', 'name': 'Angles', 'times_mastered': 1}],
-        'total_unique_topics_mastered': 1,
+        # Completed but not mastered -- the rarest of the three states, 398 pairs live.
+        'topics': [
+            {'id': 'T-200', 'name': 'Angles', 'sessions': 1,
+             'times_worked_on': 0, 'times_completed': 1, 'times_mastered': 0,
+             'times_assigned': 1, 'first_seen': _day(2026, 2, 1),
+             'last_seen': _day(2026, 2, 1),
+             'last_assignment_started': _day(2026, 2, 1),
+             'status': 'Completed', 'state': 'finished'},
+        ],
+        'total_unique_topics_mastered': 0,
+        'total_unique_topics_completed': 1,
+        'total_unique_topics_finished': 1,
+        'total_topic_reassignments': 0,
+        'total_topics_on_plan': 0,
+        'total_topics_removed': 0,
         'dwp_report_ids': CHLOE_DWP_IDS,
         'last_modified': _day(2026, 3, 15),
     },
@@ -97,7 +138,10 @@ DWP_REPORTS = [
         'instructors': ['Dana Reyes'],
         'pages_completed': 5,
         'assessment': 'Algebra I',
-        'topics': [{'id': 'T-100', 'name': 'Fractions', 'status': 'Mastered'}],
+        'topics': [
+            {'id': 'T-100', 'name': 'Fractions', 'status': 'Worked On'},
+            {'id': 'T-110', 'name': 'Decimals', 'status': 'Mastered'},
+        ],
     },
     {
         '_id': ANTHONY_DWP_IDS[1],
@@ -109,7 +153,11 @@ DWP_REPORTS = [
         'instructors': ['Dana Reyes', 'Marcus Reyes'],
         'pages_completed': 7,
         'assessment': 'Algebra I',
-        'topics': [{'id': 'T-100', 'name': 'Fractions', 'status': 'Mastered'}],
+        # Decimals goes backwards: mastered on 3/7, reassigned a week later.
+        'topics': [
+            {'id': 'T-100', 'name': 'Fractions', 'status': 'Mastered'},
+            {'id': 'T-110', 'name': 'Decimals', 'status': 'Worked On'},
+        ],
     },
     {
         '_id': AVA_DWP_IDS[0],
@@ -139,7 +187,7 @@ DWP_REPORTS = [
         'instructors': ['Sam Ortiz'],
         'pages_completed': 7,
         'assessment': 'Geometry',
-        'topics': [{'id': 'T-200', 'name': 'Angles', 'status': 'Mastered'}],
+        'topics': [{'id': 'T-200', 'name': 'Angles', 'status': 'Completed'}],
     },
 ]
 

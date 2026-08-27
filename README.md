@@ -92,8 +92,60 @@ Aggregated per-student profiles built from `dwp_reports`. Each document is a ful
 dashboard view. Rebuilt by `ingestion/build_students.py`.
 
 `student_key`, `account_id`, `student_name`, `total_sessions`, `total_pages_completed`,
-`last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics_mastered[]`,
-`total_unique_topics_mastered`, `dwp_report_ids[]`, `last_modified`.
+`last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics[]`,
+`total_unique_topics_mastered`, `total_unique_topics_completed`,
+`total_unique_topics_finished`, `total_topic_reassignments`, `total_topics_on_plan`,
+`total_topics_removed`, `dwp_report_ids[]`, `last_modified`.
+
+**Topic status is a ladder, not three labels.** `Worked On` means worked on but not
+completed; `Completed` means completed but not mastered; `Mastered` means completed *and*
+mastered. The data bears that out — of 13,598 (student, topic) pairs, 94.3% start at
+`Worked On` and 62.8% end at `Mastered`, forward moves outnumber backward ones roughly ten
+to one (9,061 against 892), and mastery takes a median of three sessions from first sight.
+
+`topics[]` is one entry per topic holding the whole history, because a topic is worked
+through repeatedly rather than reached once:
+
+```python
+{'id': 'PK-3157-00', 'name': 'Distributive Property',
+ 'sessions': 16,              # times worked through
+ 'times_worked_on': 11, 'times_completed': 0, 'times_mastered': 5,
+ 'times_assigned': 5,         # times it was put on the plan
+ 'last_assignment_started': ...,
+ 'first_seen': ..., 'last_seen': ...,
+ 'status': 'Mastered',        # where it stands now
+ 'state': 'finished'}         # finished | on_plan | removed
+```
+
+Four things to know before reading it:
+
+- **A topic is never idle on a plan.** If a student is working other topics instead, this
+  one came off the plan; when it returns that is a **fresh assignment**, prompted by a new
+  assessment or lesson plan. So `times_assigned` counts assignments, and the boundary is
+  measured in *topics that displaced it* — six or more — not in days or sessions elapsed,
+  because students work at very different paces. A status dropping back down the ladder
+  also starts one, since that is a topic handed back with no gap at all.
+  Of the 37,121 returns to a topic, 97.1% had five or fewer others in between, so the rule
+  fires on the clearest 2.9% and would rather join two real assignments than split one.
+  14,833 assignments across 13,598 topics; 1,096 topics were assigned more than once, one
+  of them five times.
+- **`state` is the honest answer to "what is this student working on".** It reads the
+  **last** assignment only: `finished`, `on_plan`, or `removed`. 2,117 topics are removed
+  against 2,534 still on a plan — so treating every unfinished topic as open would
+  overstate by nearly half.
+- **The `total_unique_*` counts mean *ever*, not *currently*.** A topic mastered and then
+  assigned again still counts there, which is exactly when it disagrees with `state`.
+- **Show `total_unique_topics_finished`, not `..._completed`.** The source writes one
+  status per session rather than both, so a mastered topic is almost never also written as
+  `Completed` — 8,739 of the 13,598 entries were mastered without it. That makes the
+  completed count the rare **completed-but-not-mastered** remainder: 450 topics across 257
+  students, against **9,189 topics across 752 students** actually finished. A profile page
+  reading the wrong one understates a student's work about twentyfold. `Completed` is also
+  very nearly terminal — only 5 pairs in the whole dataset ever move `Completed` →
+  `Mastered`.
+
+`Worked On` is counted per topic but never on its own: it is the state of a topic still in
+progress, on 40,949 of the 50,900 topic entries.
 
 **Indexes**: `student_key` (unique), `account_id` (**not** unique — represents household),
 `student_name`.
@@ -206,8 +258,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 335 offline tests -- no network, no credentials (~3s)
-pytest --integration    # + 38 read-only checks against the real cluster
+pytest                  # 383 offline tests -- no network, no credentials (~2s)
+pytest --integration    # + 51 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -228,8 +280,16 @@ ingestion run before the API serves it:
   `account_id` + `student_name`
 - no `dwp_report_ids` pointing at a missing session, and no session without a profile —
   the latter means `import_reports.py` ran and `build_students.py` did not
-- `total_sessions`, `unique_students` and `total_days_taught` matching the arrays
-  they claim to count
+- `total_sessions`, `unique_students`, `total_days_taught` and the topic counts matching
+  the arrays they claim to count
+- every topic on a session appearing in that student's `topics[]` with the same number of
+  sessions behind it, and nothing there without a session to back it
+- repeat assignments still being recorded — zero would mean the build stopped reading a
+  student's days in order, and an assignment is a sequence or it is nothing
+- every topic being `finished`, `on_plan` or `removed`, with the three adding up to the
+  history they came from
+- `total_unique_topics_finished` holding the union of completed and mastered, and staying
+  above both parts
 - instructor page total overshooting the recorded total by no more than co-taught sessions
   can explain
 - `attendance_reports` reconciling to `dwp_reports` exactly — one document per student-day,
@@ -258,10 +318,11 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
 
-List responses drop the arrays that grow with the dataset — `dwp_report_ids` on a student,
-`days_taught` and the roster on an instructor — and keep the counts stored beside them.
-The detail routes serve them in full: one busy instructor is 48.9 KB against 38.8 KB for
-all 103 listed.
+List responses drop the arrays that grow with the dataset — `dwp_report_ids` and `topics`
+on a student, `days_taught` and the roster on an instructor — and keep the counts stored
+beside them. The detail routes serve them in full, and the gap is wide: one busy instructor
+is 48.9 KB against 38.8 KB for all 103 listed, and one student with 100 topics is 310.6 KB
+against 1.00 MB for all 893.
 
 ---
 
@@ -290,8 +351,20 @@ pipeline = [
 
 - **A row edited at the source imports as a new document** rather than replacing the
   original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
-- **No pagination on `/api/students`.** The full list is 1.72 MB across 893 students, and
-  every call ships all of it.
+- **No pagination on `/api/students`.** The full list is 1.00 MB across 893 students, and
+  every call ships all of it. It crossed a megabyte when the two topic-state counts were
+  added — roughly 70 KB for two integers, because they are paid 893 times — even though
+  `topics[]` itself is projected out. The per-student summary fields are what grow this
+  now, and a search page hitting the route on every keystroke will feel it long before
+  MongoDB's document limit is anywhere in sight.
+- **Two topic counts that sound alike and answer different questions.**
+  `total_unique_topics_finished` means a topic was **ever** completed or mastered;
+  `state == 'finished'` means its **most recent** assignment ended that way. They disagree
+  for 242 topics — the ones finished once and then assigned again. Both are correct and
+  both are wanted (one for "what has this student achieved", one for "what is open now"),
+  but the names do not advertise the difference, so a reader reaching for "finished" can
+  easily take the wrong one. A live check asserts the gap still exists; if it ever closed,
+  one of the two would be redundant.
 - **No user accounts.** The shared `API_KEY` authenticates a *caller*, not a person, so
   there is nothing to audit and nothing to revoke short of rotating the key for everyone.
   A browser client will need session auth regardless — see the API section.
@@ -313,9 +386,10 @@ pipeline = [
   unmeasured rather than assumed. **To address:** find out why the source omits the end
   time (a session closed by timeout? an unfinished punch-out?), and decide whether an
   unended session should be flagged for follow-up rather than silently unmeasurable.
-- **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student, `days_taught` to
-  272 per instructor, and instructor rosters to 304. All grow with the dataset, and all
-  are far from MongoDB's 16 MB document limit — accepted, not a pending fix.
+- **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student and `topics` to
+  100, `days_taught` to 272 per instructor, and instructor rosters to 304. All grow with
+  the dataset, and all are far from MongoDB's 16 MB document limit — accepted, not a
+  pending fix.
 
 ---
 
@@ -327,9 +401,9 @@ Items are listed in priority order within each group.
 
 ### Data integrity
 
-- [ ] `P2` **Add completed topics to `students`.** `topics[]` carries `Worked On` /
-      `Mastered` / `Completed`, but `build_students.py` rolls up only `Mastered` —
-      `Completed` is dropped on the floor. For the student profile page.
+- [x] `P2` **Add completed topics to `students`.** Done, as part of `topics[]` — one entry
+      per topic with per-status counts, reassignments and current standing. Rebuilt:
+      13,598 topic entries, 187 students with a reassigned topic.
 - [ ] `P2` **Add most-taught topics to `instructors`.** Ranked topic counts across the
       sessions each instructor ran; the collection carries no topic data today. For the
       instructor profile page.
@@ -409,8 +483,8 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       the persistent top-bar search the layout reference uses — the reference implies
       results appear as a dropdown, with a full page only for "see all".
 - [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
-      completed, session history. `/api/students/<key>` already serves everything except
-      the completed topics above.
+      completed, session history. `/api/students/<key>` already returns all of it, so this
+      is frontend-only.
 - [ ] `P1` **Session count panel on the student record** — sessions attended over a
       selectable period, with the dates, so a manager can tell a parent what their prepaid
       package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which

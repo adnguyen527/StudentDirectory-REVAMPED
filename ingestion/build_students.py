@@ -9,6 +9,7 @@ Safe to re-run -- drops and rebuilds the target collection each time.
 """
 
 import sys
+from collections import Counter
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -20,6 +21,166 @@ from util import make_student_key
 
 
 TARGET_COLLECTION = 'students'
+
+# Topic status is a ladder: Worked On (worked, not completed) -> Completed (completed, not
+# mastered) -> Mastered (completed and mastered). Ranked so that a move down the ladder can
+# be recognised -- that is a topic being handed back to the student.
+STATUS_RANK = {'Worked On': 1, 'Completed': 2, 'Mastered': 3}
+
+STATUS_COUNTS = {
+    'Worked On': 'times_worked_on',
+    'Completed': 'times_completed',
+    'Mastered':  'times_mastered',
+}
+
+# A topic is never simply idle in a lesson plan. If the student is working other topics
+# instead, this one was taken off the plan; when it comes back it is a fresh assignment,
+# recommended by a new assessment or a new plan. So an assignment boundary is measured in
+# topics that displaced it, not in days or sessions elapsed -- students work at very
+# different paces, and displacement is what actually says the plan moved on.
+#
+# Six is deliberately conservative. Of the 37,121 times a topic was returned to, 97.1% had
+# five or fewer other topics in between, so only the clearest 2.9% read as a new
+# assignment: the rule would rather join two real assignments than split one in half.
+DISPLACED_TOPICS_THRESHOLD = 6
+
+
+def _new_entry(topic_id, name, status, date):
+    return {
+        'id':                      topic_id,
+        'name':                    name,
+        'sessions':                0,
+        'times_worked_on':         0,
+        'times_completed':         0,
+        'times_mastered':          0,
+        'times_assigned':          1,
+        'first_seen':              date,
+        'last_seen':               date,
+        'last_assignment_started': date,
+        'status':                  status,
+        # Working state, dropped before the entry is stored.
+        '_last_day':               None,
+        '_assignment_best':        STATUS_RANK[status],
+    }
+
+
+def build_topic_history(days):
+    """Per-topic history for one student, from every day they attended.
+
+    `days` is [(date, [(topic_id, name, status), ...]), ...] -- one tuple per date, holding
+    every topic entry recorded that day across however many sessions it held. Order does
+    not matter; the days are sorted here, because the whole notion of an assignment is a
+    sequence and reading it out of order would be meaningless.
+
+    A day is the unit for deciding assignments, but each entry still counts towards
+    `sessions`, so a topic covered twice in one day counts twice -- 70 student-days in the
+    current data carry more than one session.
+
+    Returns {topic_id: entry}. Topics are identified by id, falling back to the raw text
+    when the source gave none, and statuses outside the ladder are ignored.
+    """
+    days = sorted(days, key=lambda d: (d[0] is None, d[0]))
+    topics = {}
+    seen_per_day = []
+
+    for index, (date, entries) in enumerate(days):
+        best_today = {}
+
+        for topic_id, name, status in entries:
+            if status not in STATUS_COUNTS:
+                continue
+
+            entry = topics.get(topic_id)
+            if entry is None:
+                entry = topics[topic_id] = _new_entry(topic_id, name, status, date)
+            elif not entry['name'] and name:
+                entry['name'] = name
+
+            entry['sessions'] += 1
+            entry[STATUS_COUNTS[status]] += 1
+
+            # One day, one standing: if a topic was worked twice, the better result is
+            # what the day reached.
+            if STATUS_RANK[status] > STATUS_RANK.get(best_today.get(topic_id), 0):
+                best_today[topic_id] = status
+
+        seen_per_day.append(set(best_today))
+
+        for topic_id, status in best_today.items():
+            entry = topics[topic_id]
+
+            if entry['_last_day'] is not None:
+                displaced = _displaced_between(seen_per_day, entry['_last_day'], index)
+                displaced.discard(topic_id)
+                regressed = STATUS_RANK[status] < STATUS_RANK[entry['status']]
+
+                if len(displaced) >= DISPLACED_TOPICS_THRESHOLD or regressed:
+                    entry['times_assigned'] += 1
+                    entry['last_assignment_started'] = date
+                    entry['_assignment_best'] = STATUS_RANK[status]
+                else:
+                    entry['_assignment_best'] = max(
+                        entry['_assignment_best'], STATUS_RANK[status]
+                    )
+                if date is not None:
+                    entry['last_seen'] = date
+
+            entry['status'] = status
+            entry['_last_day'] = index
+
+    _finalize(topics, seen_per_day)
+    return topics
+
+
+def _displaced_between(seen_per_day, start, end):
+    """Distinct topics worked between two days, both excluded."""
+    displaced = set()
+    for i in range(start + 1, end):
+        displaced |= seen_per_day[i]
+    return displaced
+
+
+def _finalize(topics, seen_per_day):
+    """Settle each topic's state and drop the working fields.
+
+    `state` reads the *last* assignment only -- a topic finished long ago and assigned
+    again is not finished now. That is why it is not the same question as
+    total_unique_topics_finished, which asks whether a topic was ever finished at all.
+    """
+    # Suffix unions, so the trailing displacement is one lookup per topic rather than a
+    # walk to the end of the student's history for each of them.
+    suffix = [set() for _ in range(len(seen_per_day) + 1)]
+    for i in range(len(seen_per_day) - 1, -1, -1):
+        suffix[i] = suffix[i + 1] | seen_per_day[i]
+
+    for topic_id, entry in topics.items():
+        if entry['_assignment_best'] > STATUS_RANK['Worked On']:
+            entry['state'] = 'finished'
+        else:
+            displaced = suffix[entry['_last_day'] + 1] - {topic_id}
+            entry['state'] = (
+                'removed' if len(displaced) >= DISPLACED_TOPICS_THRESHOLD else 'on_plan'
+            )
+
+        del entry['_last_day']
+        del entry['_assignment_best']
+
+
+def topic_list(topics_by_id):
+    """Per-topic history, most worked through first, then alphabetical for stability."""
+    return sorted(
+        topics_by_id.values(),
+        key=lambda t: (-t['sessions'], t['name'] or '', t['id'] or ''),
+    )
+
+
+def count_topics(topics, *count_fields):
+    """How many distinct topics ever reached any of these statuses.
+
+    'Ever', not 'currently': a topic reassigned after mastery keeps its times_mastered.
+    Each entry's `status` is what says where the topic stands now.
+    """
+    return sum(1 for t in topics if any(t[field] for field in count_fields))
 
 
 def build_students():
@@ -56,7 +217,10 @@ def build_students():
                 '_last_session_dt':         None,   # for comparison only
                 'last_assessment':          None,
                 'total_pages_completed':    0,
-                'topics_mastered':          {},     # id -> {id, name, times_mastered}
+                # date -> the topic entries recorded that day. Buffered rather than folded
+                # in as it streams, because deciding where one assignment ends and the next
+                # begins needs the topics of the days in between.
+                'days':                     {},
                 'instructors':              {},     # name -> {sessions, pages_completed}
                 'dwp_report_ids':           [],
             }
@@ -92,17 +256,14 @@ def build_students():
                 s['instructors'][name]['sessions']        += 1
                 s['instructors'][name]['pages_completed'] += pages
 
-        # Topics mastered
-        for topic in doc.get('topics', []):
-            if topic.get('status') == 'Mastered':
-                topic_id = topic.get('id') or topic.get('raw', '')
-                if topic_id not in s['topics_mastered']:
-                    s['topics_mastered'][topic_id] = {
-                        'id':            topic.get('id'),
-                        'name':          topic.get('name'),
-                        'times_mastered': 0
-                    }
-                s['topics_mastered'][topic_id]['times_mastered'] += 1
+        # Topics, held by day until the whole student has been read
+        day = s['days'].setdefault(dt, [])
+        for topic in doc.get('topics') or []:
+            day.append((
+                topic.get('id') or topic.get('raw', ''),
+                topic.get('name'),
+                topic.get('status'),
+            ))
 
     print(f"Found {len(students)} unique students. Building collection...")
     if skipped:
@@ -113,11 +274,8 @@ def build_students():
 
     documents = []
     for s in students.values():
-        topics_list = sorted(
-            s['topics_mastered'].values(),
-            key=lambda t: t['times_mastered'],
-            reverse=True
-        )
+        topics = topic_list(build_topic_history(list(s['days'].items())))
+        states = Counter(t['state'] for t in topics)
         documents.append({
             'student_key':               s['student_key'],
             'account_id':                s['account_id'],
@@ -136,8 +294,24 @@ def build_students():
                 key=lambda i: i['sessions'],
                 reverse=True
             ),
-            'topics_mastered':           topics_list,
-            'total_unique_topics_mastered': len(topics_list),
+            'topics':                    topics,
+            'total_unique_topics_mastered':  count_topics(topics, 'times_mastered'),
+            'total_unique_topics_completed': count_topics(topics, 'times_completed'),
+            # What a parent means by "finished": Mastered implies completed, and the
+            # source writes one status per session rather than both, so a topic mastered
+            # but never marked Completed -- 8,739 of them -- is missing from the count
+            # above. This is the figure to show; that one is the rare completed-but-not-
+            # mastered remainder.
+            'total_unique_topics_finished':
+                count_topics(topics, 'times_completed', 'times_mastered'),
+            # Times a topic was assigned again after being taken off the plan. Not the
+            # same as a status regression, which is only the subset that had already been
+            # finished once -- 885 of the 1,235.
+            'total_topic_reassignments': sum(t['times_assigned'] - 1 for t in topics),
+            # For the profile page's "what is still open": filtering 100-entry arrays per
+            # student in the client is what these exist to avoid.
+            'total_topics_on_plan':      states['on_plan'],
+            'total_topics_removed':      states['removed'],
             'dwp_report_ids':            s['dwp_report_ids'],
             'last_modified':             datetime.now(timezone.utc),
         })
@@ -153,6 +327,16 @@ def build_students():
     print(f"Done. {len(documents)} students inserted into '{TARGET_COLLECTION}'.")
     print(f"  total_sessions:        {sum(d['total_sessions'] for d in documents)}")
     print(f"  total_pages_completed: {sum(d['total_pages_completed'] for d in documents)}")
+    entries = sum(len(d['topics']) for d in documents)
+    assignments = sum(t['times_assigned'] for d in documents for t in d['topics'])
+    repeated = sum(1 for d in documents for t in d['topics'] if t['times_assigned'] > 1)
+    finished = sum(d['total_unique_topics_finished'] for d in documents)
+    print(f"  topic entries:         {entries}")
+    print(f"  topic assignments:     {assignments}")
+    print(f"  topics assigned more than once: {repeated}")
+    print(f"  topics finished (completed or mastered): {finished}")
+    print(f"  topics still on plan:  {sum(d['total_topics_on_plan'] for d in documents)}")
+    print(f"  topics removed:        {sum(d['total_topics_removed'] for d in documents)}")
     client.close()
 
 
