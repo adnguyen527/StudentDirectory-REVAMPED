@@ -5,6 +5,22 @@ way. If the key format changes, it changes in exactly one place.
 """
 
 import re
+from datetime import timezone
+
+
+def as_utc(value):
+    """A datetime read back from the database, made safe to compare against now().
+
+    BSON has no timezone: pymongo stores UTC and hands the value back naive, while
+    mongomock returns the aware datetime it was given. Comparing the two spellings
+    raises TypeError, so anything read back is normalised here before it meets a
+    `datetime.now(timezone.utc)`.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def slug(value):

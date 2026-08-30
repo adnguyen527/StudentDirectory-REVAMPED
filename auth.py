@@ -3,17 +3,22 @@
 The API serves student names and staff commentary about named children, so every route
 is closed by default and opened deliberately -- see PUBLIC_ENDPOINTS.
 
-Today the only credential is a shared key in an X-API-Key header, which is enough for a
-server-side caller. It is deliberately NOT enough for the planned React frontend: a key
-shipped to a browser is readable in the bundle and in DevTools, so it is not a secret.
-When that frontend arrives, add a session-cookie authenticator to AUTHENTICATORS rather
-than reworking the routes -- the guard already walks a list and stops at the first
-identity, so a second mechanism is an append, not a rewrite. Note that cookie auth also
-requires a real ALLOWED_ORIGINS list, because browsers refuse to send credentials to a
-wildcard origin.
+Two credentials, in this order:
 
-Unconfigured means closed. If API_KEY is unset, protected routes answer 401 rather than
-running open -- a misconfiguration should cost availability, not disclosure.
+1. **A session cookie**, for the browser frontend. Issued by /api/auth/login against a
+   real staff account and validated by a lookup in `login_sessions`.
+2. **A shared key** in an X-API-Key header, for server-side callers and scripts. It is
+   deliberately NOT usable from a browser: a key shipped to the frontend is readable in
+   the bundle and in DevTools, so it is not a secret once it gets there.
+
+The guard walks AUTHENTICATORS and stops at the first identity, which is what made
+adding the cookie an append rather than a rewrite. Sessions come first so that a browser
+carrying both is identified as the person rather than as the anonymous shared key --
+the whole point of having accounts is that the logs can name someone.
+
+Unconfigured means closed: no credential is a 401, never a fallthrough. Note that cookie
+auth requires a real ALLOWED_ORIGINS list, because browsers refuse to send credentials
+to a wildcard origin -- app.py refuses to start on that combination.
 """
 
 import hmac
@@ -21,13 +26,45 @@ import hmac
 from flask import g, jsonify, request
 
 from config import config
+from models import LoginSession, User
 
 
 # Endpoints, not paths: a renamed route keeps its exemption, and a typo here fails closed
 # instead of silently opening a path that no longer matches.
+#
+# Logout is NOT here. It needs the session it is destroying, and an unauthenticated
+# logout would be a way to delete other people's sessions by guessing.
 PUBLIC_ENDPOINTS = {
     'metrics.health_check',
+    'auth.login',
 }
+
+
+def _session_identity():
+    """The staff account behind the session cookie, or None.
+
+    The user is loaded on every request rather than copied into the session row at login.
+    That is a second indexed lookup on a collection of a handful of documents, and it
+    buys two things a denormalised copy would not: disabling an account takes effect on
+    the next request instead of at the end of their session, and a renamed display name
+    is not stale until they log out.
+    """
+    session = LoginSession.find(request.cookies.get(config.SESSION_COOKIE_NAME))
+    if session is None:
+        return None
+
+    user = User.find_by_id(session['user_id'])
+    if user is None or user.get('disabled'):
+        return None
+
+    return {
+        'kind': 'session',
+        'user_id': user['_id'],
+        'username': user['username'],
+        # Carried on the identity because the frontend's user menu wants it on every
+        # page, and this way it costs no extra request.
+        'display_name': user.get('display_name') or user['username'],
+    }
 
 
 def _api_key_identity():
@@ -45,9 +82,8 @@ def _api_key_identity():
     return None
 
 
-# Ordered: the first authenticator to recognise the request wins. A session-cookie
-# reader belongs here, after the key.
-AUTHENTICATORS = [_api_key_identity]
+# Ordered: the first authenticator to recognise the request wins.
+AUTHENTICATORS = [_session_identity, _api_key_identity]
 
 
 def authenticate():
@@ -73,11 +109,17 @@ def _guard():
 
     identity = authenticate()
     if identity is None:
-        if not config.API_KEY:
-            return jsonify({
-                'error': 'Server is not configured for authentication',
-                'detail': 'Set API_KEY in .env -- see .env.example',
-            }), 500
+        # 401 for every failure, including an unset API_KEY. That used to be a 500 on the
+        # reasoning that a server nobody configured should cost availability rather than
+        # disclosure -- but a deployment serving only the browser frontend has no reason
+        # to set a shared key at all, so treating that as an error would report a correct
+        # configuration as broken. Both answers are closed; this one is also accurate.
+        # app.py warns at startup about the case that really is unreachable: no key AND
+        # no accounts.
+        #
+        # The challenge still names the key and not the cookie, because it is advice for
+        # whoever can act on it: a script author can add a header, while a browser client
+        # never reads this -- it sees the 401 and goes to the login page.
         return jsonify({'error': 'Unauthorized'}), 401, {'WWW-Authenticate': 'X-API-Key'}
 
     g.identity = identity

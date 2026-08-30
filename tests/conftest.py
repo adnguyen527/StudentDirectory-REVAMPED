@@ -29,9 +29,15 @@ os.environ['MONGODB_URI'] = 'mongodb://unit-tests.invalid:27017/'
 os.environ['MONGODB_DB'] = 'StudentDirectoryTest'
 
 # Set before config is imported, so the app under test is configured rather than
-# answering 500 on every protected route.
+# answering 401 on every protected route.
 TEST_API_KEY = 'test-api-key-not-a-real-secret'
 os.environ['API_KEY'] = TEST_API_KEY
+
+# scrypt's ~100ms is the point in production and pure tax here: the auth tests hash
+# several hundred times between them, which is a 3-second suite against a 20-second one.
+# Lowered only for the work factor -- the algorithm, the salting and the verification
+# path are all the ones that run in production.
+os.environ['PASSWORD_HASH_METHOD'] = 'scrypt:1024:8:1'
 
 import database  # noqa: E402  -- must follow the env setup above
 from database import Database  # noqa: E402
@@ -131,4 +137,35 @@ def client(anonymous_client):
     and the tests below stay about behaviour rather than about authentication.
     """
     anonymous_client.environ_base['HTTP_X_API_KEY'] = TEST_API_KEY
+    return anonymous_client
+
+
+# Long enough to clear MIN_PASSWORD_LENGTH, and obviously not a real one.
+TEST_USERNAME = 'test-manager'
+TEST_PASSWORD = 'not-a-real-password-1'
+TEST_DISPLAY_NAME = 'Test Manager'
+
+
+@pytest.fixture
+def staff_user(seeded_db):
+    """One staff account in the in-memory database."""
+    from models import User
+
+    User.ensure_indexes()
+    return User.create(TEST_USERNAME, TEST_PASSWORD, display_name=TEST_DISPLAY_NAME)
+
+
+@pytest.fixture
+def logged_in_client(anonymous_client, staff_user):
+    """A client holding a real session cookie, obtained by actually logging in.
+
+    Deliberately not a hand-built cookie: the value only ever exists in the login
+    response, so a fixture that fabricated one would be testing a session mechanism the
+    application does not have.
+    """
+    response = anonymous_client.post(
+        '/api/auth/login',
+        json={'username': TEST_USERNAME, 'password': TEST_PASSWORD},
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
     return anonymous_client
