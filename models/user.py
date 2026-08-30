@@ -23,12 +23,35 @@ from config import config
 from database import db
 from util import as_utc
 
-# Minimums, not a policy. Length is the only password rule worth enforcing in code:
-# composition rules ("one symbol, one digit") push people towards predictable
-# substitutions without adding real entropy.
-MIN_PASSWORD_LENGTH = 12
+# The password policy, in one place. Every caller goes through validate_password() rather
+# than checking length itself -- the rule used to be spelled out at three call sites, and
+# the CLI's copy is exactly the sort of thing that drifts from the model's.
+#
+# Six characters and a digit is a deliberately low bar, chosen for a small internal tool
+# where the operator sets every password by hand. What it leans on: scrypt makes each
+# guess expensive, and the lockout in verify() caps online guessing at ten attempts per
+# fifteen minutes. What it does not cover is an OFFLINE attack -- if login_sessions and
+# users ever leak, a six-character password does not survive long against a GPU. Raise
+# MIN_PASSWORD_LENGTH here if that ever stops being an acceptable trade.
+MIN_PASSWORD_LENGTH = 6
 
 _dummy_hash = None
+
+
+def validate_password(password):
+    """Raise ValueError unless the password meets the policy. Returns it unchanged.
+
+    Raises rather than returning a boolean so a caller cannot accept a bad password by
+    forgetting to check the result.
+    """
+    password = password or ''
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f'password must be at least {MIN_PASSWORD_LENGTH} characters'
+        )
+    if not any(character.isdigit() for character in password):
+        raise ValueError('password must contain at least one number')
+    return password
 
 
 def _dummy():
@@ -91,10 +114,7 @@ class User:
         username = normalize_username(username)
         if not username:
             raise ValueError('username is required')
-        if len(password or '') < MIN_PASSWORD_LENGTH:
-            raise ValueError(
-                f'password must be at least {MIN_PASSWORD_LENGTH} characters'
-            )
+        validate_password(password)
 
         document = {
             'username': username,
@@ -115,10 +135,7 @@ class User:
     def set_password(username, password):
         """Also clears the lockout: an administrator resetting a password is resolving
         exactly the situation a lockout exists to create."""
-        if len(password or '') < MIN_PASSWORD_LENGTH:
-            raise ValueError(
-                f'password must be at least {MIN_PASSWORD_LENGTH} characters'
-            )
+        validate_password(password)
         result = User._collection().update_one(
             {'username': normalize_username(username)},
             {'$set': {

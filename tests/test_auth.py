@@ -562,9 +562,36 @@ class TestUserRecords:
         assert TEST_PASSWORD not in repr(stored)
         assert stored['password_hash'].startswith('scrypt:')
 
-    def test_a_short_password_is_refused(self, seeded_db):
-        with pytest.raises(ValueError, match='at least'):
-            User.create('someone', 'short')
+    @pytest.mark.parametrize('password, complaint', [
+        ('a1b', 'at least 6'),          # too short, has a digit
+        ('', 'at least 6'),
+        (None, 'at least 6'),
+        ('abcdefgh', 'one number'),     # long enough, no digit
+        ('password', 'one number'),
+    ])
+    def test_a_password_below_the_policy_is_refused(
+        self, seeded_db, password, complaint
+    ):
+        with pytest.raises(ValueError, match=complaint):
+            User.create('someone', password)
+
+    def test_the_floor_is_six_characters_with_a_digit(self, seeded_db):
+        """The rejections above pass just as happily against a rule that refuses
+        everything. This is the one that pins where the line actually sits."""
+        User.create('someone', 'abcde1')
+        assert User.verify('someone', 'abcde1') is not None
+
+    def test_set_password_enforces_the_same_rule_as_create(self, staff_user):
+        """Both go through validate_password(). The rule was spelled out at three call
+        sites before, which is exactly how a reset path ends up accepting what the
+        create path rejects."""
+        with pytest.raises(ValueError, match='one number'):
+            User.set_password(TEST_USERNAME, 'abcdefgh')
+        with pytest.raises(ValueError, match='at least 6'):
+            User.set_password(TEST_USERNAME, 'a1b')
+
+        # And the original password still works -- a rejected reset changed nothing.
+        assert User.verify(TEST_USERNAME, TEST_PASSWORD) is not None
 
     def test_usernames_are_unique(self, staff_user, seeded_db):
         from pymongo.errors import DuplicateKeyError

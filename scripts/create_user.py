@@ -31,7 +31,7 @@ from pymongo.errors import DuplicateKeyError
 
 from database import db
 from models import LoginSession, User
-from models.user import MIN_PASSWORD_LENGTH
+from models.user import validate_password
 
 
 def read_password(from_stdin=False):
@@ -50,8 +50,11 @@ def read_password(from_stdin=False):
     else:
         password = getpass.getpass('Password: ')
 
-    if len(password) < MIN_PASSWORD_LENGTH:
-        sys.exit(f'[!!] Password must be at least {MIN_PASSWORD_LENGTH} characters.')
+    # The model's rule, not a copy of it -- a second spelling here would drift.
+    try:
+        validate_password(password)
+    except ValueError as e:
+        sys.exit(f'[!!] {str(e).capitalize()}.')
 
     if not from_stdin and password != getpass.getpass('Confirm password: '):
         sys.exit('[!!] Passwords did not match. Nothing was changed.')
@@ -75,7 +78,11 @@ def list_users():
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    # Raw, or argparse collapses the docstring's whitespace and renders the usage
+    # examples above as one unreadable paragraph.
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('username', nargs='?', help='account to create or modify')
     parser.add_argument('--name', help='display name, shown in the frontend user menu')
     parser.add_argument('--reset-password', action='store_true')
