@@ -1,14 +1,10 @@
 """
 Create and maintain the staff accounts that can log into the API.
 
-There is no signup route and there is not meant to be one -- the API serves student names
-and staff commentary about named children, so who can read it is an administrator's
-decision. This script is that decision, and it requires access to the server and to the
-cluster credentials in .env.
+There is no signup route by design; this script is the only way an account is made.
 
-The password is prompted for, never taken as an argument. An argument lands in shell
-history and in the process list, where anyone on the machine can read it while the
-command runs -- `--password-stdin` exists for automation because it has neither problem.
+The password is prompted for, never taken as an argument -- an argument lands in shell
+history and in the process list. `--password-stdin` covers automation.
 
     python scripts/create_user.py anthony                    # create, prompting twice
     python scripts/create_user.py anthony --name "Anthony N" # set the display name
@@ -35,15 +31,11 @@ from models.user import validate_password
 
 
 def read_password(from_stdin=False):
-    """The new password, either prompted for or piped in.
+    """The new password, prompted for or piped in.
 
-    Prompting asks twice and compares, because a typo here locks someone out of an
-    account with no self-service reset. --password-stdin cannot do that -- a pipe has one
-    value, not two -- which is the tradeoff for being usable unattended.
-
-    Note that getpass reads the console directly rather than stdin, so the prompt cannot
-    be driven by a pipe even accidentally. That is the reason --password-stdin has to
-    exist as its own flag rather than falling out of redirection.
+    Prompting asks twice, since a typo locks someone out of an account with no
+    self-service reset; --password-stdin has one value to read, so it cannot confirm.
+    getpass reads the console, not stdin, which is why the flag exists at all.
     """
     if from_stdin:
         password = sys.stdin.readline().rstrip('\n')

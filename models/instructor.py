@@ -5,21 +5,18 @@ from pymongo import ASCENDING
 from database import db
 
 
-# days_taught and students are the two arrays that grow with the dataset -- 272 dates and
-# a 304-student roster at the top end of the current data. Both are only read on the
-# detail view, so list results project them out and lean on the counts stored beside
-# them, total_days_taught and unique_students, which say the same thing in one number.
+# The two arrays that grow with the dataset (272 dates, a 304-student roster at the top
+# end). Only read on the detail view; total_days_taught and unique_students stand in.
 LIST_PROJECTION = {'days_taught': 0, 'students': 0}
 
-# One key is enough to page stably here, unlike students: instructor_name carries a unique
-# index, so no two documents can tie and the sort is already covered.
+# One key suffices here, unlike students: instructor_name is unique, so nothing can tie.
 LIST_SORT = [('instructor_name', ASCENDING)]
 
 
 class Instructor:
     """Aggregated per-instructor profiles -- see ingestion/build_instructors.py.
 
-    Keyed on instructor_name, because a name is all the source data carries. Two people
+    Keyed on instructor_name, because a name is all the source carries. Two people
     sharing a name merge into one document and nothing here can tell them apart.
     """
 
@@ -50,8 +47,7 @@ class Instructor:
 
     @staticmethod
     def search(query, limit, offset=0):
-        # re.escape for the same reason as Student.search: the query reaches $regex
-        # directly, so an unescaped input can be crafted into a pathological pattern.
+        # re.escape: the query reaches $regex directly -- see Student._name_criteria.
         criteria = {'instructor_name': {'$regex': re.escape(query), '$options': 'i'}}
         return Instructor._page(criteria, limit, offset)
 

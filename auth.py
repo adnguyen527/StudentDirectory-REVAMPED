@@ -1,24 +1,15 @@
-"""Request authentication.
+"""Request authentication. Every route is closed unless listed in PUBLIC_ENDPOINTS.
 
-The API serves student names and staff commentary about named children, so every route
-is closed by default and opened deliberately -- see PUBLIC_ENDPOINTS.
+Two credentials, tried in order:
 
-Two credentials, in this order:
+1. A session cookie, for the browser frontend -- issued by /api/auth/login, validated
+   against `login_sessions`.
+2. An X-API-Key header, for server-side callers. Never usable from a browser: a key in
+   the bundle is readable by anyone who opens DevTools.
 
-1. **A session cookie**, for the browser frontend. Issued by /api/auth/login against a
-   real staff account and validated by a lookup in `login_sessions`.
-2. **A shared key** in an X-API-Key header, for server-side callers and scripts. It is
-   deliberately NOT usable from a browser: a key shipped to the frontend is readable in
-   the bundle and in DevTools, so it is not a secret once it gets there.
-
-The guard walks AUTHENTICATORS and stops at the first identity, which is what made
-adding the cookie an append rather than a rewrite. Sessions come first so that a browser
-carrying both is identified as the person rather than as the anonymous shared key --
-the whole point of having accounts is that the logs can name someone.
-
-Unconfigured means closed: no credential is a 401, never a fallthrough. Note that cookie
-auth requires a real ALLOWED_ORIGINS list, because browsers refuse to send credentials
-to a wildcard origin -- app.py refuses to start on that combination.
+Sessions come first so a browser carrying both is identified as the person, not as the
+anonymous shared key. Cookie auth needs an explicit ALLOWED_ORIGINS -- browsers refuse
+credentials to a wildcard, and app.py refuses to start on that combination.
 """
 
 import hmac
@@ -29,11 +20,9 @@ from config import config
 from models import LoginSession, User
 
 
-# Endpoints, not paths: a renamed route keeps its exemption, and a typo here fails closed
-# instead of silently opening a path that no longer matches.
-#
-# Logout is NOT here. It needs the session it is destroying, and an unauthenticated
-# logout would be a way to delete other people's sessions by guessing.
+# Endpoint names, not paths, so a typo fails closed rather than opening a stale path.
+# Logout is deliberately absent: it needs the session it destroys, and an unauthenticated
+# one would let anyone delete sessions by guessing.
 PUBLIC_ENDPOINTS = {
     'metrics.health_check',
     'auth.login',
@@ -43,11 +32,8 @@ PUBLIC_ENDPOINTS = {
 def _session_identity():
     """The staff account behind the session cookie, or None.
 
-    The user is loaded on every request rather than copied into the session row at login.
-    That is a second indexed lookup on a collection of a handful of documents, and it
-    buys two things a denormalised copy would not: disabling an account takes effect on
-    the next request instead of at the end of their session, and a renamed display name
-    is not stale until they log out.
+    The user is re-read on every request rather than copied into the session row, so
+    disabling an account takes effect immediately instead of at expiry.
     """
     session = LoginSession.find(request.cookies.get(config.SESSION_COOKIE_NAME))
     if session is None:
@@ -61,8 +47,7 @@ def _session_identity():
         'kind': 'session',
         'user_id': user['_id'],
         'username': user['username'],
-        # Carried on the identity because the frontend's user menu wants it on every
-        # page, and this way it costs no extra request.
+        # Rides along so the frontend user menu costs no extra request.
         'display_name': user.get('display_name') or user['username'],
     }
 
@@ -109,17 +94,8 @@ def _guard():
 
     identity = authenticate()
     if identity is None:
-        # 401 for every failure, including an unset API_KEY. That used to be a 500 on the
-        # reasoning that a server nobody configured should cost availability rather than
-        # disclosure -- but a deployment serving only the browser frontend has no reason
-        # to set a shared key at all, so treating that as an error would report a correct
-        # configuration as broken. Both answers are closed; this one is also accurate.
-        # app.py warns at startup about the case that really is unreachable: no key AND
-        # no accounts.
-        #
-        # The challenge still names the key and not the cookie, because it is advice for
-        # whoever can act on it: a script author can add a header, while a browser client
-        # never reads this -- it sees the 401 and goes to the login page.
+        # The challenge names the key, not the cookie: a script author can act on it,
+        # while a browser client ignores it and goes to the login page.
         return jsonify({'error': 'Unauthorized'}), 401, {'WWW-Authenticate': 'X-API-Key'}
 
     g.identity = identity

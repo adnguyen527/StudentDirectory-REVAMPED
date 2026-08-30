@@ -8,12 +8,11 @@ from routes import auth_bp, students_bp, instructors_bp, metrics_bp
 
 
 def _check_origins():
-    """A wildcard origin and cookie auth cannot both be true.
+    """A wildcard origin and cookie auth cannot both hold.
 
-    Browsers refuse to send credentials to Access-Control-Allow-Origin: *, so this
-    combination does not degrade -- it produces a login that appears to succeed and an
-    app that is then anonymous on every subsequent request, with no error anywhere.
-    Refusing to start is the only version of this that is debuggable.
+    Browsers refuse credentials to `Access-Control-Allow-Origin: *`, so the combination
+    does not degrade -- login appears to succeed and every later request is anonymous,
+    with no error anywhere. Refusing to start is the debuggable version.
     """
     if config.ALLOWED_ORIGINS == '*':
         raise RuntimeError(
@@ -26,9 +25,8 @@ def _check_origins():
 def _warn_if_unreachable():
     """A server with no shared key and no accounts can be reached by nobody.
 
-    This is the case the request guard used to answer 500 for. It belongs at startup
-    instead: it is a deployment mistake, knowable once, and reporting it per request told
-    an unauthenticated caller about the server's configuration.
+    Reported here rather than per request, which would describe the configuration to an
+    unauthenticated caller.
     """
     if config.API_KEY:
         return
@@ -45,14 +43,10 @@ def create_app():
 
     _check_origins()
 
-    # X-API-Key is not a CORS-simple header, so a browser preflights every call. It has
-    # to be allowed by name or the preflight fails before the real request is ever sent.
-    #
-    # supports_credentials is what permits the session cookie to cross from the frontend
-    # origin to this one. Note that localhost:5173 -> localhost:5000 is cross-ORIGIN but
-    # same-SITE (a port is not part of a site), which is why a SameSite=Lax cookie works
-    # in development -- but only if both sides spell the host the same way. Mixing
-    # localhost and 127.0.0.1 makes them cross-site and the cookie is silently dropped.
+    # X-API-Key is not CORS-simple, so it must be allowed by name or every preflight
+    # fails before the real request is sent. supports_credentials lets the session cookie
+    # cross origins -- but only if both sides spell the host the same way: mixing
+    # localhost and 127.0.0.1 makes them cross-SITE and the cookie is silently dropped.
     CORS(
         app,
         resources={r"/api/*": {"origins": config.ALLOWED_ORIGINS}},
@@ -62,8 +56,8 @@ def create_app():
 
     try:
         db.connect()
-        # Neither collection has a builder to create these -- users and sessions are
-        # authored, not rebuilt from dwp_reports like every other collection here.
+        # No builder creates these: users and sessions are authored, not rebuilt from
+        # dwp_reports like every other collection here.
         User.ensure_indexes()
         LoginSession.ensure_indexes()
         _warn_if_unreachable()

@@ -140,10 +140,8 @@ class TestUnconfigured:
         """A missing API_KEY must cost availability, not disclosure. Answering 200 here
         would mean a deployment that forgot the variable serves student data openly.
 
-        401 rather than the 500 this used to give: now that sessions exist, a server
-        that serves only the browser frontend has no reason to set a shared key, so an
-        unset one is a valid configuration rather than a broken one. Still closed --
-        which is the part this test is actually about.
+        401 rather than an error: a server running only the browser frontend has no
+        reason to set a shared key, so an unset one is valid. Closed either way.
         """
         monkeypatch.setattr(auth.config, 'API_KEY', None)
 
@@ -582,9 +580,8 @@ class TestUserRecords:
         assert User.verify('someone', 'abcde1') is not None
 
     def test_set_password_enforces_the_same_rule_as_create(self, staff_user):
-        """Both go through validate_password(). The rule was spelled out at three call
-        sites before, which is exactly how a reset path ends up accepting what the
-        create path rejects."""
+        """Guards the drift a shared validator exists to prevent: a reset path that
+        accepts what the create path rejects."""
         with pytest.raises(ValueError, match='one number'):
             User.set_password(TEST_USERNAME, 'abcdefgh')
         with pytest.raises(ValueError, match='at least 6'):

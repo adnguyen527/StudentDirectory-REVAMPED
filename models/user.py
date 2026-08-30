@@ -1,17 +1,10 @@
 """Staff accounts -- the identity behind a browser session.
 
-There is no signup route and there should not be one. Every account in here is created
-deliberately by an administrator running scripts/create_user.py; the API serves student
-names and staff commentary about named children, so the set of people who can read it is
-a decision, not a form.
+No signup route by design: accounts are created by an administrator running
+scripts/create_user.py. Passwords are hashed with werkzeug's scrypt; the plaintext is
+never stored, logged, or returned.
 
-Passwords are hashed with werkzeug's default (scrypt), which ships with Flask -- nothing
-new to install and nothing hand-rolled. The plaintext is never stored, never logged, and
-never leaves this module.
-
-Deliberately absent: a role or permissions field. Nothing would read it until per-user
-permissions are built, and a field with no consumer is a promise the code does not keep.
-Adding one to a collection this small is a single migration when that day comes.
+Deliberately absent: a role or permissions field, until something reads it.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -23,26 +16,21 @@ from config import config
 from database import db
 from util import as_utc
 
-# The password policy, in one place. Every caller goes through validate_password() rather
-# than checking length itself -- the rule used to be spelled out at three call sites, and
-# the CLI's copy is exactly the sort of thing that drifts from the model's.
+# The password policy, in one place -- every caller goes through validate_password().
 #
-# Six characters and a digit is a deliberately low bar, chosen for a small internal tool
-# where the operator sets every password by hand. What it leans on: scrypt makes each
-# guess expensive, and the lockout in verify() caps online guessing at ten attempts per
-# fifteen minutes. What it does not cover is an OFFLINE attack -- if login_sessions and
-# users ever leak, a six-character password does not survive long against a GPU. Raise
-# MIN_PASSWORD_LENGTH here if that ever stops being an acceptable trade.
+# A low bar, for a small internal tool where an operator sets every password by hand. It
+# leans on scrypt's cost and the lockout in verify(); it does NOT cover an offline attack
+# if the collection leaks. Raise this if that stops being an acceptable trade.
 MIN_PASSWORD_LENGTH = 6
 
 _dummy_hash = None
 
 
 def validate_password(password):
-    """Raise ValueError unless the password meets the policy. Returns it unchanged.
+    """Raise ValueError unless the password meets the policy.
 
-    Raises rather than returning a boolean so a caller cannot accept a bad password by
-    forgetting to check the result.
+    Raises rather than returning a boolean, so a caller cannot accept a bad password by
+    forgetting to check.
     """
     password = password or ''
     if len(password) < MIN_PASSWORD_LENGTH:
@@ -55,15 +43,10 @@ def validate_password(password):
 
 
 def _dummy():
-    """A real hash that no password can match, for the unknown-username case.
+    """A real hash no password can match, so an unknown username costs the same time as
+    a wrong password rather than answering faster and revealing itself.
 
-    verify() runs check_password_hash against this when the account does not exist, so
-    an unknown username costs the same time as a wrong password. Without it the endpoint
-    answers noticeably faster for names that are not registered, which is a username
-    oracle -- the same reasoning as the constant-time key comparison in auth.py.
-
-    Built on first use rather than at import: scrypt takes ~100ms by design, and every
-    ingestion script imports this package.
+    Built on first use, not at import: scrypt takes ~100ms and every script imports this.
     """
     global _dummy_hash
     if _dummy_hash is None:
@@ -74,11 +57,8 @@ def _dummy():
 
 
 def normalize_username(username):
-    """Usernames are matched case-insensitively, so they are stored folded.
-
-    Doing it here rather than at each call site is what makes the unique index mean
-    what it looks like it means -- otherwise 'Anthony' and 'anthony' are two accounts.
-    """
+    """Fold to lowercase, so the unique index means what it looks like -- otherwise
+    'Anthony' and 'anthony' are two accounts."""
     return str(username or '').strip().lower()
 
 
@@ -106,11 +86,7 @@ class User:
 
     @staticmethod
     def create(username, password, display_name=None):
-        """A new account. Raises DuplicateKeyError if the username is taken.
-
-        display_name is what the frontend's user menu shows; it falls back to the
-        username so the column is never empty.
-        """
+        """A new account. Raises DuplicateKeyError if the username is taken."""
         username = normalize_username(username)
         if not username:
             raise ValueError('username is required')
@@ -133,8 +109,7 @@ class User:
 
     @staticmethod
     def set_password(username, password):
-        """Also clears the lockout: an administrator resetting a password is resolving
-        exactly the situation a lockout exists to create."""
+        """Also clears the lockout -- a reset resolves the situation it exists for."""
         validate_password(password)
         result = User._collection().update_one(
             {'username': normalize_username(username)},
@@ -160,14 +135,13 @@ class User:
     def verify(username, password):
         """The account behind these credentials, or None.
 
-        One return value for every kind of failure -- unknown, wrong, disabled, locked.
-        The caller cannot accidentally tell them apart in a response, which is what
-        keeps the login endpoint from enumerating which usernames exist.
+        One return value for every failure -- unknown, wrong, disabled, locked -- so a
+        caller cannot tell them apart and reveal which usernames exist.
         """
         user = User.find_by_username(username)
 
-        # Unconditional, and before any of the checks below can return: the work has to
-        # happen whether or not the account exists, or the timing answers the question.
+        # Runs before any check can return: the hashing has to cost the same whether or
+        # not the account exists, or the timing answers the question.
         matches = check_password_hash(
             user['password_hash'] if user else _dummy(), password or ''
         )
@@ -178,9 +152,8 @@ class User:
         now = datetime.now(timezone.utc)
         locked_until = as_utc(user.get('locked_until'))
         if locked_until and locked_until > now:
-            # Not counted as another failure: retrying during a lockout would otherwise
-            # extend it indefinitely, so a wrong guess could keep a real user out for
-            # as long as the guessing continued.
+            # Not counted as a further failure, or guessing would extend the lockout
+            # indefinitely and keep a real user out.
             return None
 
         if not matches:
@@ -200,8 +173,7 @@ class User:
     @staticmethod
     def _record_failure(user, now):
         """Count the failure, and lock the account once the ceiling is reached."""
-        # Counted from the stored value rather than $inc-ed blindly, so the lock decision
-        # and the write agree on the same number.
+        # Read-then-set rather than $inc, so the lock decision and the write agree.
         attempts = int(user.get('failed_attempts') or 0) + 1
         update = {'failed_attempts': attempts}
         if attempts >= config.LOGIN_MAX_ATTEMPTS:

@@ -11,8 +11,8 @@ instructors_bp = Blueprint('instructors', __name__, url_prefix='/api')
 def get_instructors():
     """A page of instructors, in the same envelope /api/students returns.
 
-    103 documents do not need paging today. They share the shape anyway so the frontend
-    learns one convention, and so the roster can grow without the route changing.
+    103 documents need no paging today; they share the shape so the frontend learns one
+    convention and the roster can grow without the route changing.
     """
     limit, offset, error = pagination.parse(request.args)
     if error:
@@ -50,9 +50,8 @@ def search_instructors():
 def get_instructor(instructor_name):
     """One instructor, roster and days included.
 
-    The name is the key -- it is all the source data carries -- so it travels in the
-    path URL-encoded. Wrapped in an object rather than returned bare, so the sessions
-    or stats a profile page may want later can be added without moving what is here.
+    The name is the key, so it travels URL-encoded in the path. Wrapped in an object so
+    a profile page's later additions do not move what is already here.
     """
     instructor = Instructor.find_by_name(instructor_name)
     if not instructor:
