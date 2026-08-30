@@ -12,7 +12,8 @@ dashboard.
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
 - **Tests**: `pytest` + `mongomock`
-- **Frontend**: React *(in progress)*
+- **Frontend**: React + TypeScript on Vite, Tailwind, React Router, TanStack Query —
+  **requires Node 20+** *(not built yet; see Frontend under TODO)*
 
 ---
 
@@ -547,6 +548,16 @@ Items are listed in priority order within each group.
       slice vs. hand-written fixtures.
 
 ### Frontend
+
+**Requires Node 20+** (`^20.19 || >=22.12`, Vite's floor). Installed: `node v22.23.2`,
+`npm 10.9.8`.
+
+| Tool | Version |
+|---|---|
+| Vite | 8.x |
+| Tailwind | 4.x |
+| React Router | 8.x |
+| TanStack Query | 5.x |
 
 **Layout reference.** The target shape is a conventional admin shell: a fixed left sidebar
 (logo, one primary action button, icon nav, settings at the bottom), a top bar carrying
