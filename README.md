@@ -12,7 +12,8 @@ dashboard.
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
 - **Tests**: `pytest` + `mongomock`
-- **Frontend**: React *(in progress)*
+- **Frontend**: React + TypeScript on Vite, Tailwind, React Router, TanStack Query —
+  **requires Node 20+** *(not built yet; see Frontend under TODO)*
 
 ---
 
@@ -27,13 +28,23 @@ pip install -r requirements.txt
 python app.py
 ```
 
-`API_KEY` is required. Generate one with
-`python -c "import secrets; print(secrets.token_urlsafe(32))"`. Without it the API
-answers `500` on every route except `/api/health` — an unconfigured server costs
-availability rather than serving student data openly.
+There are two ways in, and a server needs at least one of them:
+
+```bash
+python scripts/create_user.py <username>   # a person, for the browser frontend
+# or set API_KEY in .env                   # a shared key, for scripts and server-side callers
+```
+
+`create_user.py` prompts for the password twice and never takes it as an argument.
+Generate an `API_KEY` with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. With neither configured
+every protected route answers `401` and `app.py` says so on startup — an unconfigured
+server costs availability rather than serving student data openly.
 
 `ALLOWED_ORIGINS` is optional and defaults to the local dev servers. Set it when the
-frontend is served from anywhere else.
+frontend is served from anywhere else. It **cannot** be `*` — browsers refuse to send
+cookies to a wildcard origin, so the app refuses to start on that combination rather
+than serving one where login silently never works.
 
 Starts Flask on `http://127.0.0.1:5000` with the debugger **off**. `.env` is gitignored —
 never commit it.
@@ -148,7 +159,7 @@ Four things to know before reading it:
 progress, on 40,949 of the 50,900 topic entries.
 
 **Indexes**: `student_key` (unique), `account_id` (**not** unique — represents household),
-`student_name`.
+`(student_name, student_key)`
 
 Defined once in `util.py`:
 
@@ -202,6 +213,25 @@ One document per student per **day attended**, built from `dwp_reports` by
 **A day is not a session.** 70 student-days carry more than one DWP row (69 with two, one
 with three), so 29,382 sessions collapse to 29,311 days. Counting rows overstates
 attendance by exactly those 71 extra sessions.
+
+### `users` and `login_sessions` — staff accounts and their logins
+
+**The only two authored collections here.** Everything above is a pure function of
+`dwp_reports` and can be dropped and rebuilt at will; these two cannot. There is no
+builder, no migration path and no second copy — a `users` collection dropped by mistake
+is accounts gone. Treat them the way you would not treat the rest of this database.
+
+`users`: `username` (folded to lowercase, **unique**), `password_hash`, `display_name`,
+`disabled`, `created_at`, `last_login_at`, `failed_attempts`, `locked_until`. Created by
+`scripts/create_user.py`; there is no signup route.
+
+`login_sessions`: `_id` (the **SHA-256 of the session token**, never the token),
+`user_id`, `created_at`, `expires_at`. **Index**: `expires_at` with
+`expireAfterSeconds: 0`.
+
+Deliberately no `role` or permissions field. Nothing would read it until per-user
+permissions exist — see the `P2` TODO — and a field with no consumer is a promise the
+code does not keep.
 
 ---
 
@@ -258,8 +288,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 383 offline tests -- no network, no credentials (~2s)
-pytest --integration    # + 51 read-only checks against the real cluster
+pytest                  # 470 offline tests -- no network, no credentials (~3s)
+pytest --integration    # + 53 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -286,24 +316,81 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 | Method | Route | Notes |
 |---|---|---|
+| POST | `/api/auth/login` | `{username, password}` → sets the session cookie. The only public write |
+| POST | `/api/auth/logout` | revokes the session server-side and clears the cookie |
+| GET | `/api/auth/me` | the logged-in user, or `401` — how a browser client knows to show the login page |
 | GET | `/api/health` | liveness |
 | GET | `/api/metrics` | collection counts and averages |
-| GET | `/api/students` | all students; `?query=` to search, `?account_id=` for one household's siblings |
+| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
-| GET | `/api/instructors` | all instructors; `?query=` to search by name |
+| GET | `/api/instructors` | a page of instructors; `?query=` to search by name |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
 | GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
 
-List responses drop the arrays that grow with the dataset — `dwp_report_ids` and `topics`
-on a student, `days_taught` and the roster on an instructor — and keep the counts stored
-beside them. The detail routes serve them in full, and the gap is wide: one busy instructor
-is 48.9 KB against 38.8 KB for all 103 listed, and one student with 100 topics is 310.6 KB
-against 1.00 MB for all 893.
+### Session authentication
+
+Two credentials, tried in order: the session cookie, then `X-API-Key`. Sessions come
+first so a browser carrying both is identified as the person rather than as the anonymous
+shared key. Adding the cookie was an append to `AUTHENTICATORS` in `auth.py`, not a
+change to any route.
+
+**Sessions are server-side, and that is the point.** The cookie holds 32 random bytes;
+`login_sessions` holds only their SHA-256, so a database dump yields nothing presentable
+as a credential. Validation is a lookup, which means **logout actually revokes** — the
+row is deleted and the cookie stops working everywhere, not just in the browser that
+discarded it. The alternative, signing the user id into the cookie, needs no collection
+and no lookup, but a stolen cookie then stays valid until it expires and the only way to
+revoke anything is to rotate a secret and log everyone out.
+
+There is **no signing secret** anywhere in this design. A random token validated by
+lookup needs no key, so there is nothing to configure, leak or rotate.
+
+The cookie is `HttpOnly` (no script can read it, including one injected into our own
+page), `SameSite=Lax`, and `Secure` whenever `HOST` is not loopback. Sessions last 12
+hours, absolute rather than sliding — a sliding window would write to the database on
+every authenticated request.
+
+Expiry is enforced **in the query**, not by the TTL index. MongoDB's TTL monitor sweeps
+on roughly a one-minute cycle, so every session spends up to a minute expired and still
+stored; a lookup trusting the index would authenticate for that minute. The index is a
+janitor.
+
+Disabling an account takes effect on the **next request**, because the user is loaded on
+each one rather than copied into the session at login. `create_user.py --disable` also
+deletes the live sessions outright.
+
+Ten failed logins lock an account for fifteen minutes. The tradeoff is accepted rather
+than overlooked: with a handful of staff accounts, someone who knows a username can lock
+it for that window — cheaper than an unthrottled password endpoint. Guessing *during* a
+lockout does not extend it, or the lock would last as long as the guessing.
+
+Every login failure — wrong password, unknown username, disabled, locked — returns the
+same `401 {"error": "Invalid username or password"}`. Distinguishing them would make this
+a way to discover which usernames exist, and a username is half of a credential.
+
+⚠️ **Spell the host the same way on both sides.** `localhost:5173` → `localhost:5000` is
+cross-*origin* but same-*site* (a port is not part of a site), so a `SameSite=Lax` cookie
+is sent. `localhost:5173` → `127.0.0.1:5000` is cross-*site*, and the browser drops the
+cookie **with no error anywhere** — the login succeeds and every request after it is
+anonymous. This is the most likely hour to lose when the frontend arrives.
+
+CSRF has no target yet: every route but the three above is a read, and `SameSite=Lax`
+blocks the cross-site POST that CSRF needs. The write endpoints will need a token; see
+the TODO.
+
+### Pagination
+
+All four list routes take `?limit=` and `?offset=` and answer in one envelope:
+
+```json
+{ "students": [ ... ],
+  "page": { "limit": 50, "offset": 0, "total": 893, "returned": 50 } }
+```
 
 ---
 
@@ -332,12 +419,12 @@ pipeline = [
 
 - **A row edited at the source imports as a new document** rather than replacing the
   original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
-- **No pagination on `/api/students`.** The full list is 1.00 MB across 893 students, and
-  every call ships all of it. It crossed a megabyte when the two topic-state counts were
-  added — roughly 70 KB for two integers, because they are paid 893 times — even though
-  `topics[]` itself is projected out. The per-student summary fields are what grow this
-  now, and a search page hitting the route on every keystroke will feel it long before
-  MongoDB's document limit is anywhere in sight.
+- **A list row still costs more than it should.** Paging and the `instructors[]` projection
+  took `/api/students` from 1.08 MB to 31.0 KB a page, but what remains is mostly field
+  *names* paid once per row: the six topic counters are ~160 KB across 893 students, much
+  of it spelling `total_unique_topics_completed` out 893 times. Nothing to fix there short
+  of an explicit allowlist projection naming the handful of fields a results table draws,
+  which is worth doing once the frontend says which ones those are.
 - **Two topic counts that sound alike and answer different questions.**
   `total_unique_topics_finished` means a topic was **ever** completed or mastered;
   `state == 'finished'` means its **most recent** assignment ended that way. They disagree
@@ -346,9 +433,16 @@ pipeline = [
   but the names do not advertise the difference, so a reader reaching for "finished" can
   easily take the wrong one. A live check asserts the gap still exists; if it ever closed,
   one of the two would be redundant.
-- **No user accounts.** The shared `API_KEY` authenticates a *caller*, not a person, so
-  there is nothing to audit and nothing to revoke short of rotating the key for everyone.
-  A browser client will need session auth regardless — see the API section.
+- **Identity does not say what a user may read.** Accounts and revocable sessions exist
+  now, so there is someone to name and something to revoke — but every logged-in account
+  sees the whole directory. There are no roles, no per-center scoping and nothing
+  restricting `student_notes`, which means the only access decision available today is
+  whether someone has an account at all. Everything that scopes data waits on the `P2`
+  permissions item.
+- **The shared `API_KEY` is still anonymous.** It authenticates a *caller*, not a person,
+  and rotating it affects every script at once. That is acceptable for server-side use
+  and is why the browser path does not touch it, but a request authenticated by the key
+  cannot be attributed to anyone in a log.
 - **`app.run()` is a development server**, whatever `HOST` and `FLASK_DEBUG` are set to.
   Nothing enforces that `FLASK_DEBUG=1` and a non-loopback `HOST` are never combined —
   the defaults are safe and the danger is documented, but it is still two env vars away.
@@ -411,11 +505,23 @@ Items are listed in priority order within each group.
 
 - [x] `P1` **Expose the `instructors` collection** — `Instructor` model, list, detail by
       `instructor_name`, name search. Done; see the API table.
-- [ ] `P1` **Session authentication** for the React client — an authenticator in
-      `AUTHENTICATORS`, `supports_credentials` on CORS, a signing secret. The shared
-      `API_KEY` cannot go in a browser.
+- [x] `P1` **Paginate the list routes.** `?limit=`/`?offset=` in a shared envelope on all
+      four, sorted and index-backed so pages cannot repeat a row. A page of students is
+      31.0 KB against 1.08 MB for the old full list. Done; see the API section.
+- [x] `P1` **Session authentication** for the React client. Done: staff accounts in
+      `users`, server-side revocable sessions in `login_sessions`, three `/api/auth/*`
+      routes, and `scripts/create_user.py` to bootstrap. Appended to `AUTHENTICATORS`
+      without touching a route. No signing secret was needed after all — a random token
+      validated by lookup does not have one. See the API section.
 - [ ] `P2` **Per-user permissions** on top of it. Identity alone does not say what a user
-      may read; everything that scopes data depends on this.
+      may read; everything that scopes data depends on this. *Open:* roles (`admin`,
+      `manager`, `instructor`) or per-capability flags.
+- [ ] `P2` **Viewing permissions in the models.** The mechanism the item above needs: a
+      `role`/`permissions` field on `users` — deliberately left out until something read
+      it, and the admin-only user page below is now that consumer — plus a scoping layer
+      every model query goes through, so access is decided in one place rather than by
+      each route remembering. Candidate scopes: center, own students, `student_notes`.
+      The `P3` restricted-fields split and the prompt-driven agent both wait on this.
 - [ ] `P2` **Write endpoints for the report form** — create, update, finalize, plus the
       validation the importer never needed. Needs the natural-key switch above.
       *Open:* whether drafts live in `dwp_reports` as `finalized: false` or their own
@@ -450,6 +556,16 @@ Items are listed in priority order within each group.
 
 ### Frontend
 
+**Requires Node 20+** (`^20.19 || >=22.12`, Vite's floor). Installed: `node v22.23.2`,
+`npm 10.9.8`.
+
+| Tool | Version |
+|---|---|
+| Vite | 8.x |
+| Tailwind | 4.x |
+| React Router | 8.x |
+| TanStack Query | 5.x |
+
 **Layout reference.** The target shape is a conventional admin shell: a fixed left sidebar
 (logo, one primary action button, icon nav, settings at the bottom), a top bar carrying
 global search and the user menu, and a content area of cards — a top row of small tiles
@@ -460,7 +576,8 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
 
 - [ ] `P1` **Search for students and instructors.** The entry point everything else is
       reached from. Both searches now exist — `/api/students/search?q=` and
-      `/api/instructors/search?q=`, minimum 2 characters. *Open:* a page of its own, or
+      `/api/instructors/search?q=`, minimum 2 characters, and both page — a dropdown wants
+      the first `?limit=10` and the `total` to say how many more. *Open:* a page of its own, or
       the persistent top-bar search the layout reference uses — the reference implies
       results appear as a dropdown, with a full page only for "see all".
 - [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
@@ -473,13 +590,21 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
 - [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
       most-taught topics, `unfinalized_sessions` as a follow-up list.
       `/api/instructors/<name>` now serves everything except the topics.
+- [ ] `P2` **User management page, admin only** — create an account, set its display name
+      and permissions, disable one, reset a password. Does for staff accounts what
+      `scripts/create_user.py` does today, without server access. Needs write endpoints
+      under `/api/auth` and the permissions work above, since "admin only" is the first
+      thing that has to be enforceable. *Open:* whether a reset sets a password directly
+      or issues a one-time link — a link needs email, which this system does not have.
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
 - [ ] `P3` **Home dashboard the user assembles.** A pin button on any stat in the app puts
       that module in the top row of the home page — the row the reference layout fills with
       fixed KPI tiles. Every stat has to render standalone at tile size, and the layout is
-      per person — browser storage until session auth lands. Not every stat will be
-      pinnable; which ones qualify gets decided as the elements are built.
+      per person. Not every stat will be pinnable; which ones qualify gets decided as the
+      elements are built. *Open:* now that accounts exist, whether the layout is stored on
+      the `users` document — following the person across browsers — or left in browser
+      storage, which needs no endpoint and no schema.
 - [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
       The command-line import already works.

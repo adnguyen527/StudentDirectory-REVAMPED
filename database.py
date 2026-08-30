@@ -16,10 +16,9 @@ class Database:
                 # Verify connection
                 client.admin.command('ping')
             except Exception as e:
-                # Nothing is published to the class until the ping succeeds. A client
-                # cached here before it was verified would satisfy the guard above, so
-                # every later connect() would short-circuit and get_db() would hand
-                # back a None database for the rest of the process.
+                # Nothing is cached on the class until the ping succeeds: an unverified
+                # client would satisfy the guard above and make every later connect()
+                # short-circuit, handing back a None database for the rest of the process.
                 if client is not None:
                     client.close()
                 print(f"[!!] Failed to connect to MongoDB: {e}")

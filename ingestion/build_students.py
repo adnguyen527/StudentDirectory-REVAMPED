@@ -321,7 +321,13 @@ def build_students():
         # account_id is deliberately NOT unique -- siblings share one.
         students_collection.create_index([('student_key', ASCENDING)], unique=True)
         students_collection.create_index([('account_id', ASCENDING)])
-        students_collection.create_index([('student_name', ASCENDING)])
+        # Compound, and in this order, because it is the sort /api/students pages by --
+        # see models/student.py. student_name alone leaves the paged query a collection
+        # scan with a blocking sort, and cannot break the ties: 17 students share a name
+        # with someone, and an unstable tie can repeat or skip one across a page boundary.
+        students_collection.create_index(
+            [('student_name', ASCENDING), ('student_key', ASCENDING)]
+        )
         students_collection.insert_many(documents)
 
     print(f"Done. {len(documents)} students inserted into '{TARGET_COLLECTION}'.")

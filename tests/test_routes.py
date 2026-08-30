@@ -10,11 +10,11 @@ from tests.sample_data import ACCOUNT_NGUYEN, ACCOUNT_TAN, ANTHONY_KEY, CHLOE_KE
 
 
 def names(payload):
-    return sorted(s['student_name'] for s in payload)
+    return sorted(s['student_name'] for s in payload['students'])
 
 
 def instructor_names(payload):
-    return sorted(i['instructor_name'] for i in payload)
+    return sorted(i['instructor_name'] for i in payload['instructors'])
 
 
 class TestHealth:
@@ -53,16 +53,25 @@ class TestListStudents:
     def test_bson_is_serialised(self, client):
         """ObjectId and datetime must survive jsonify as $oid / $date wrappers."""
         student = next(
-            s for s in client.get('/api/students').get_json()
+            s for s in client.get('/api/students').get_json()['students']
             if s['student_key'] == ANTHONY_KEY
         )
         assert '$oid' in student['_id']
         assert '$date' in student['last_session_date']
 
+    def test_list_rows_omit_the_growing_arrays(self, client):
+        """A list row is a summary. topics and instructors live on the detail view."""
+        student = client.get('/api/students').get_json()['students'][0]
+        assert 'topics' not in student
+        assert 'instructors' not in student
+        assert 'dwp_report_ids' not in student
+
     def test_empty_result_is_an_empty_list(self, client):
         response = client.get('/api/students', query_string={'account_id': 'nope'})
         assert response.status_code == 200
-        assert response.get_json() == []
+        body = response.get_json()
+        assert body['students'] == []
+        assert body['page']['total'] == 0
 
 
 class TestSearchStudents:
@@ -81,7 +90,105 @@ class TestSearchStudents:
     def test_regex_metacharacters_do_not_error(self, client):
         response = client.get('/api/students/search', query_string={'q': '(('})
         assert response.status_code == 200
-        assert response.get_json() == []
+        assert response.get_json()['students'] == []
+
+    def test_search_pages_too(self, client):
+        """A search page hitting this on every keystroke is what pagination is for."""
+        body = client.get(
+            '/api/students/search', query_string={'q': 'Nguyen', 'limit': 1}
+        ).get_json()
+        assert len(body['students']) == 1
+        assert body['page']['total'] == 2
+
+    def test_a_bad_limit_is_rejected_before_the_query_runs(self, client):
+        response = client.get(
+            '/api/students/search', query_string={'q': 'Nguyen', 'limit': 'lots'}
+        )
+        assert response.status_code == 400
+
+
+class TestPagination:
+    """?limit= and ?offset= on the list routes -- see routes/pagination.py."""
+
+    def test_no_params_returns_the_default_page(self, client):
+        page = client.get('/api/students').get_json()['page']
+        assert page == {'limit': 50, 'offset': 0, 'total': 3, 'returned': 3}
+
+    def test_limit_takes_the_first_n(self, client):
+        body = client.get('/api/students', query_string={'limit': 2}).get_json()
+        assert names(body) == ['Anthony Nguyen', 'Ava Nguyen']
+        assert body['page'] == {'limit': 2, 'offset': 0, 'total': 3, 'returned': 2}
+
+    def test_offset_walks_past_them(self, client):
+        body = client.get(
+            '/api/students', query_string={'limit': 2, 'offset': 2}
+        ).get_json()
+        assert names(body) == ['Chloe Tan']
+        assert body['page']['returned'] == 1
+
+    def test_the_total_is_the_whole_match_not_the_page(self, client):
+        """What a pager needs on the first request, without walking to the end."""
+        body = client.get('/api/students', query_string={'limit': 1}).get_json()
+        assert body['page']['total'] == 3
+        assert body['page']['returned'] == 1
+
+    def test_the_total_follows_the_filter(self, client):
+        body = client.get(
+            '/api/students', query_string={'query': 'Nguyen', 'limit': 1}
+        ).get_json()
+        assert body['page']['total'] == 2
+
+    def test_offset_past_the_end_is_an_empty_page(self, client):
+        body = client.get('/api/students', query_string={'offset': 500}).get_json()
+        assert body['students'] == []
+        assert body['page']['total'] == 3
+
+    def test_an_oversized_limit_is_capped_not_refused(self, client):
+        """A caller asking for everything gets a page and a total telling it there is
+        more -- more useful than a 400 it has to learn about first."""
+        body = client.get('/api/students', query_string={'limit': 10_000}).get_json()
+        assert body['page']['limit'] == 200
+
+    def test_limit_zero_is_refused(self, client):
+        """pymongo reads .limit(0) as 'no limit', so accepting it would return all."""
+        response = client.get('/api/students', query_string={'limit': 0})
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    @pytest.mark.parametrize('params', [
+        {'limit': 'ten'}, {'limit': '-1'}, {'limit': '1.5'},
+        {'offset': 'later'}, {'offset': '-1'},
+    ])
+    def test_junk_paging_params_are_rejected(self, client, params):
+        response = client.get('/api/students', query_string=params)
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    @pytest.mark.parametrize('params', [{'limit': ''}, {'offset': ''}])
+    def test_blank_paging_params_fall_back_to_the_defaults(self, client, params):
+        """An empty input box on the frontend should not be a 400."""
+        response = client.get('/api/students', query_string=params)
+        assert response.status_code == 200
+        assert response.get_json()['page']['limit'] == 50
+
+    def test_walking_pages_visits_each_student_once(self, client):
+        """The point of sorting: skip/limit over an unsorted cursor can repeat a row."""
+        walked = []
+        offset = 0
+        while True:
+            body = client.get(
+                '/api/students', query_string={'limit': 1, 'offset': offset}
+            ).get_json()
+            if not body['students']:
+                break
+            walked.append(body['students'][0]['student_key'])
+            offset += 1
+        assert len(walked) == len(set(walked)) == 3
+
+    def test_instructors_page_in_the_same_envelope(self, client):
+        body = client.get('/api/instructors', query_string={'limit': 2}).get_json()
+        assert instructor_names(body) == ['Dana Reyes', 'Marcus Reyes']
+        assert body['page'] == {'limit': 2, 'offset': 0, 'total': 3, 'returned': 2}
 
 
 class TestGetStudent:
@@ -220,13 +327,13 @@ class TestListInstructors:
 
     def test_the_growing_arrays_are_not_shipped_in_a_list(self, client):
         """A roster per row is what makes a list response balloon."""
-        listed = client.get('/api/instructors').get_json()
+        listed = client.get('/api/instructors').get_json()['instructors']
         assert all('students' not in i and 'days_taught' not in i for i in listed)
         assert all(i['unique_students'] >= 1 for i in listed)
 
     def test_bson_is_serialised(self, client):
         dana = next(
-            i for i in client.get('/api/instructors').get_json()
+            i for i in client.get('/api/instructors').get_json()['instructors']
             if i['instructor_name'] == 'Dana Reyes'
         )
         assert '$oid' in dana['_id']
@@ -235,7 +342,9 @@ class TestListInstructors:
     def test_empty_result_is_an_empty_list(self, client):
         response = client.get('/api/instructors', query_string={'query': 'nobody'})
         assert response.status_code == 200
-        assert response.get_json() == []
+        body = response.get_json()
+        assert body['instructors'] == []
+        assert body['page']['total'] == 0
 
 
 class TestSearchInstructors:
@@ -254,7 +363,14 @@ class TestSearchInstructors:
     def test_regex_metacharacters_do_not_error(self, client):
         response = client.get('/api/instructors/search', query_string={'q': '(('})
         assert response.status_code == 200
-        assert response.get_json() == []
+        assert response.get_json()['instructors'] == []
+
+    def test_search_pages_too(self, client):
+        body = client.get(
+            '/api/instructors/search', query_string={'q': 'Reyes', 'limit': 1}
+        ).get_json()
+        assert len(body['instructors']) == 1
+        assert body['page']['total'] == 2
 
 
 class TestGetInstructor:
@@ -295,7 +411,9 @@ class TestGetInstructor:
         """/instructors/search would otherwise read as an instructor called 'search'."""
         response = client.get('/api/instructors/search', query_string={'q': 'Reyes'})
         assert response.status_code == 200
-        assert isinstance(response.get_json(), list)
+        # A search page, not the single-instructor envelope the name route returns.
+        assert 'instructors' in response.get_json()
+        assert 'instructor' not in response.get_json()
 
     def test_the_route_requires_a_credential(self, anonymous_client):
         assert anonymous_client.get('/api/instructors/Dana Reyes').status_code == 401

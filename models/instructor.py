@@ -1,19 +1,22 @@
 import re
 
+from pymongo import ASCENDING
+
 from database import db
 
 
-# days_taught and students are the two arrays that grow with the dataset -- 272 dates and
-# a 304-student roster at the top end of the current data. Both are only read on the
-# detail view, so list results project them out and lean on the counts stored beside
-# them, total_days_taught and unique_students, which say the same thing in one number.
+# The two arrays that grow with the dataset (272 dates, a 304-student roster at the top
+# end). Only read on the detail view; total_days_taught and unique_students stand in.
 LIST_PROJECTION = {'days_taught': 0, 'students': 0}
+
+# One key suffices here, unlike students: instructor_name is unique, so nothing can tie.
+LIST_SORT = [('instructor_name', ASCENDING)]
 
 
 class Instructor:
     """Aggregated per-instructor profiles -- see ingestion/build_instructors.py.
 
-    Keyed on instructor_name, because a name is all the source data carries. Two people
+    Keyed on instructor_name, because a name is all the source carries. Two people
     sharing a name merge into one document and nothing here can tell them apart.
     """
 
@@ -22,8 +25,20 @@ class Instructor:
         return db.get_db()['instructors']
 
     @staticmethod
-    def find_all():
-        return list(Instructor._collection().find({}, LIST_PROJECTION))
+    def _page(criteria, limit, offset):
+        """(documents for this page, total matching the criteria) -- as Student._page."""
+        collection = Instructor._collection()
+        documents = list(
+            collection.find(criteria, LIST_PROJECTION)
+            .sort(LIST_SORT)
+            .skip(offset)
+            .limit(limit)
+        )
+        return documents, collection.count_documents(criteria)
+
+    @staticmethod
+    def find_all(limit, offset=0):
+        return Instructor._page({}, limit, offset)
 
     @staticmethod
     def find_by_name(instructor_name):
@@ -31,13 +46,10 @@ class Instructor:
         return Instructor._collection().find_one({'instructor_name': instructor_name})
 
     @staticmethod
-    def search(query, limit=50):
-        # re.escape for the same reason as Student.search: the query reaches $regex
-        # directly, so an unescaped input can be crafted into a pathological pattern.
-        return list(Instructor._collection().find(
-            {'instructor_name': {'$regex': re.escape(query), '$options': 'i'}},
-            LIST_PROJECTION
-        ).limit(limit))
+    def search(query, limit, offset=0):
+        # re.escape: the query reaches $regex directly -- see Student._name_criteria.
+        criteria = {'instructor_name': {'$regex': re.escape(query), '$options': 'i'}}
+        return Instructor._page(criteria, limit, offset)
 
     @staticmethod
     def count_all():

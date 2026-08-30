@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from models import Attendance, Student, DigitalWorkoutPlan
+from routes import pagination
 from routes.serialization import serialize
 
 students_bp = Blueprint('students', __name__, url_prefix='/api')
@@ -13,9 +14,8 @@ DATE_FORMAT = '%Y-%m-%d'
 def _parse_period(args):
     """(start, end, error) from ?start=&end=, both YYYY-MM-DD and both required.
 
-    No default period. The obvious one -- "this month" -- silently returns nothing
-    whenever the imported data lags the calendar, which reads as a broken endpoint
-    rather than an empty month. The caller names the window it means.
+    No default period: "this month" returns nothing whenever the imported data lags the
+    calendar, which reads as a broken endpoint rather than an empty month.
     """
     raw_start, raw_end = args.get('start'), args.get('end')
     if not raw_start or not raw_end:
@@ -34,17 +34,27 @@ def _parse_period(args):
 
 @students_bp.route('/students', methods=['GET'])
 def get_students():
+    """A page of students; ?account_id= takes precedence over ?query=.
+
+    Paged by default, siblings included, so every caller reads one response shape.
+    """
+    limit, offset, error = pagination.parse(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
     account_id = request.args.get('account_id')
     query = request.args.get('query')
 
     if account_id:
-        students = Student.find_by_account(account_id)
+        students, total = Student.find_by_account(account_id, limit, offset)
     elif query:
-        students = Student.search(query)
+        students, total = Student.search(query, limit, offset)
     else:
-        students = Student.find_all()
+        students, total = Student.find_all(limit, offset)
 
-    return jsonify(serialize(students)), 200
+    return jsonify(
+        pagination.envelope('students', students, total, limit, offset)
+    ), 200
 
 
 @students_bp.route('/students/search', methods=['GET'])
@@ -53,7 +63,15 @@ def search_students():
     if not query or len(query) < 2:
         return jsonify({'error': 'Query must be at least 2 characters'}), 400
 
-    return jsonify(serialize(Student.search(query))), 200
+    limit, offset, error = pagination.parse(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
+    students, total = Student.search(query, limit, offset)
+
+    return jsonify(
+        pagination.envelope('students', students, total, limit, offset)
+    ), 200
 
 
 @students_bp.route('/students/<student_key>/attendance', methods=['GET'])
