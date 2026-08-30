@@ -107,6 +107,39 @@ def test_student_key_index_is_unique(live_db):
     assert any(spec.get('unique') for spec in key_indexes)
 
 
+def test_the_paging_sort_is_index_backed(live_db):
+    """/api/students pages on (student_name, student_key). Without the compound index
+    the sort cannot use student_name_1 alone, and every page becomes a collection scan
+    plus a blocking in-memory sort -- which also puts the query under a 32 MB ceiling."""
+    keys = [
+        [f for f, _ in spec['key']] for spec in
+        live_db['students'].index_information().values()
+    ]
+    assert ['student_name', 'student_key'] in keys, (
+        'no compound index for the paged sort -- see ingestion/build_students.py'
+    )
+
+
+def test_paging_by_name_never_repeats_or_skips_a_student(live_db):
+    """17 students share a name with someone, so the tiebreak is not hypothetical:
+    an unstable sort can hand the same student back on two pages and drop another."""
+    from models.student import LIST_SORT
+
+    seen, offset, limit = [], 0, 200
+    while True:
+        page = list(
+            live_db['students'].find({}, {'student_key': 1})
+            .sort(LIST_SORT).skip(offset).limit(limit)
+        )
+        if not page:
+            break
+        seen.extend(s['student_key'] for s in page)
+        offset += limit
+
+    assert len(seen) == len(set(seen)), 'a student appeared on two pages'
+    assert len(seen) == live_db['students'].count_documents({})
+
+
 def test_siblings_share_an_account_without_colliding(students):
     """Households with 2-5 students are the norm here, and the reason account_id alone
     is not identity. If none show up, the rollup collapsed them."""

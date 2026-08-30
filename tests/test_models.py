@@ -15,23 +15,41 @@ from tests.sample_data import (
 )
 
 
-def names(students):
-    return sorted(s['student_name'] for s in students)
+# Larger than the sample directory, so tests that are not about paging get everything.
+PAGE = 50
 
 
-def instructor_names(instructors):
-    return sorted(i['instructor_name'] for i in instructors)
+def rows(page):
+    """The documents out of a (documents, total) pair."""
+    documents, _total = page
+    return documents
+
+
+def names(page):
+    return sorted(s['student_name'] for s in rows(page))
+
+
+def instructor_names(page):
+    return sorted(i['instructor_name'] for i in rows(page))
 
 
 class TestStudent:
 
     def test_find_all_returns_every_student(self, seeded_db):
-        assert names(Student.find_all()) == ['Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan']
+        assert names(Student.find_all(PAGE)) == [
+            'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
 
-    def test_find_all_omits_the_report_id_plumbing(self, seeded_db):
-        assert all('dwp_report_ids' not in s for s in Student.find_all())
+    def test_find_all_omits_the_growing_arrays(self, seeded_db):
+        """dwp_report_ids, topics and instructors are detail-view data. instructors was
+        half the weight of the whole list response before it joined them."""
+        listed = rows(Student.find_all(PAGE))
+        assert all('dwp_report_ids' not in s for s in listed)
+        assert all('topics' not in s for s in listed)
+        assert all('instructors' not in s for s in listed)
         # The projection must not take anything else with it.
-        assert all('total_sessions' in s for s in Student.find_all())
+        assert all('total_sessions' in s for s in listed)
+        assert all('total_unique_topics_finished' in s for s in listed)
 
     def test_find_by_key_returns_one_sibling_not_the_household(self, seeded_db):
         student = Student.find_by_key(ANTHONY_KEY)
@@ -46,32 +64,72 @@ class TestStudent:
         assert Student.find_by_key('no-such-account_nobody') is None
 
     def test_find_by_account_returns_all_siblings(self, seeded_db):
-        siblings = Student.find_by_account(ACCOUNT_NGUYEN)
-        assert names(siblings) == ['Anthony Nguyen', 'Ava Nguyen']
+        assert names(Student.find_by_account(ACCOUNT_NGUYEN, PAGE)) == [
+            'Anthony Nguyen', 'Ava Nguyen'
+        ]
 
     def test_find_by_account_isolates_households(self, seeded_db):
-        assert names(Student.find_by_account(ACCOUNT_TAN)) == ['Chloe Tan']
+        assert names(Student.find_by_account(ACCOUNT_TAN, PAGE)) == ['Chloe Tan']
 
     def test_find_by_account_unknown_returns_empty(self, seeded_db):
-        assert Student.find_by_account('nope') == []
+        assert Student.find_by_account('nope', PAGE) == ([], 0)
 
     def test_search_matches_partial_names(self, seeded_db):
-        assert names(Student.search('Nguyen')) == ['Anthony Nguyen', 'Ava Nguyen']
+        assert names(Student.search('Nguyen', PAGE)) == ['Anthony Nguyen', 'Ava Nguyen']
 
     def test_search_is_case_insensitive(self, seeded_db):
-        assert names(Student.search('chloe')) == ['Chloe Tan']
+        assert names(Student.search('chloe', PAGE)) == ['Chloe Tan']
 
     @pytest.mark.parametrize('query', ['(', '[a-z', '*', '\\', '(?i)nguyen'])
     def test_search_treats_regex_metacharacters_as_literals(self, seeded_db, query):
         """The query reaches $regex directly, so it must be escaped: an unescaped
         pattern either errors or, as with '(?i)nguyen', matches nothing on purpose."""
-        assert Student.search(query) == []
+        assert Student.search(query, PAGE) == ([], 0)
 
     def test_search_respects_the_limit(self, seeded_db):
-        assert len(Student.search('n', limit=1)) == 1
+        assert len(rows(Student.search('n', 1))) == 1
 
-    def test_search_omits_the_report_id_plumbing(self, seeded_db):
-        assert all('dwp_report_ids' not in s for s in Student.search('Nguyen'))
+    def test_search_omits_the_growing_arrays(self, seeded_db):
+        assert all('dwp_report_ids' not in s for s in rows(Student.search('Nguyen', PAGE)))
+
+
+class TestStudentPaging:
+    """skip/limit is only correct under a deterministic sort -- see LIST_SORT."""
+
+    def test_a_page_is_the_slice_asked_for(self, seeded_db):
+        assert names(Student.find_all(2)) == ['Anthony Nguyen', 'Ava Nguyen']
+        assert names(Student.find_all(2, offset=2)) == ['Chloe Tan']
+
+    def test_the_total_counts_every_match_not_the_page(self, seeded_db):
+        _documents, total = Student.find_all(1)
+        assert total == 3
+
+    def test_the_total_is_scoped_to_the_filter(self, seeded_db):
+        _documents, total = Student.search('Nguyen', 1)
+        assert total == 2
+
+    def test_pages_are_sorted_by_name_and_do_not_overlap(self, seeded_db):
+        """Walking one document at a time must visit each student exactly once."""
+        walked = [rows(Student.find_all(1, offset=i))[0]['student_name'] for i in range(3)]
+        assert walked == ['Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan']
+
+    def test_a_tie_on_name_is_broken_by_key(self, seeded_db):
+        """17 students in the real directory share a name with someone. Without the
+        student_key tiebreak, paging across a tie can repeat or skip one of them."""
+        seeded_db['students'].insert_one({
+            'student_key': 'zzz-account_anthony-nguyen',
+            'account_id': 'zzz-account',
+            'student_name': 'Anthony Nguyen',
+            'total_sessions': 0,
+        })
+        keys = [rows(Student.find_all(1, offset=i))[0]['student_key'] for i in range(4)]
+        assert keys[:2] == sorted(keys[:2])
+        assert len(set(keys)) == 4
+
+    def test_offset_past_the_end_is_empty_not_an_error(self, seeded_db):
+        documents, total = Student.find_all(PAGE, offset=500)
+        assert documents == []
+        assert total == 3
 
     def test_count_all(self, seeded_db):
         assert Student.count_all() == 3
@@ -95,13 +153,13 @@ class TestStudent:
 class TestInstructor:
 
     def test_find_all_returns_every_instructor(self, seeded_db):
-        assert instructor_names(Instructor.find_all()) == [
+        assert instructor_names(Instructor.find_all(PAGE)) == [
             'Dana Reyes', 'Marcus Reyes', 'Sam Ortiz'
         ]
 
     def test_find_all_omits_the_growing_arrays(self, seeded_db):
         """days_taught and the roster are detail-view data; a list must not carry them."""
-        listed = Instructor.find_all()
+        listed = rows(Instructor.find_all(PAGE))
         assert all('days_taught' not in i for i in listed)
         assert all('students' not in i for i in listed)
         # The counts that stand in for them have to survive the projection.
@@ -124,20 +182,33 @@ class TestInstructor:
         assert Instructor.find_by_name('Nobody At All') is None
 
     def test_search_matches_partial_names(self, seeded_db):
-        assert instructor_names(Instructor.search('Reyes')) == ['Dana Reyes', 'Marcus Reyes']
+        assert instructor_names(Instructor.search('Reyes', PAGE)) == [
+            'Dana Reyes', 'Marcus Reyes'
+        ]
 
     def test_search_is_case_insensitive(self, seeded_db):
-        assert instructor_names(Instructor.search('ortiz')) == ['Sam Ortiz']
+        assert instructor_names(Instructor.search('ortiz', PAGE)) == ['Sam Ortiz']
 
     @pytest.mark.parametrize('query', ['(', '[a-z', '*', '\\', '(?i)reyes'])
     def test_search_treats_regex_metacharacters_as_literals(self, seeded_db, query):
-        assert Instructor.search(query) == []
+        assert Instructor.search(query, PAGE) == ([], 0)
 
     def test_search_respects_the_limit(self, seeded_db):
-        assert len(Instructor.search('Reyes', limit=1)) == 1
+        assert len(rows(Instructor.search('Reyes', 1))) == 1
 
     def test_search_omits_the_growing_arrays(self, seeded_db):
-        assert all('students' not in i for i in Instructor.search('Reyes'))
+        assert all('students' not in i for i in rows(Instructor.search('Reyes', PAGE)))
+
+    def test_pages_are_sorted_by_name_and_do_not_overlap(self, seeded_db):
+        """instructor_name is unique, so one key is a complete sort here."""
+        walked = [
+            rows(Instructor.find_all(1, offset=i))[0]['instructor_name'] for i in range(3)
+        ]
+        assert walked == ['Dana Reyes', 'Marcus Reyes', 'Sam Ortiz']
+
+    def test_the_total_counts_every_match_not_the_page(self, seeded_db):
+        _documents, total = Instructor.search('Reyes', 1)
+        assert total == 2
 
     def test_count_all(self, seeded_db):
         assert Instructor.count_all() == 3
@@ -157,8 +228,8 @@ class TestInstructor:
         """Anthony's 3/14 gives its 7 pages to both instructors, so instructor pages
         sum to more than the 23 actually recorded. Summing these for a center total is
         the mistake this documents."""
-        credited = sum(i['total_pages_completed'] for i in Instructor.find_all())
-        recorded = sum(s['total_pages_completed'] for s in Student.find_all())
+        credited = sum(i['total_pages_completed'] for i in rows(Instructor.find_all(PAGE)))
+        recorded = sum(s['total_pages_completed'] for s in rows(Student.find_all(PAGE)))
         assert credited == 30
         assert recorded == 23
 

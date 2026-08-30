@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from models import Attendance, Student, DigitalWorkoutPlan
+from routes import pagination
 from routes.serialization import serialize
 
 students_bp = Blueprint('students', __name__, url_prefix='/api')
@@ -34,17 +35,28 @@ def _parse_period(args):
 
 @students_bp.route('/students', methods=['GET'])
 def get_students():
+    """A page of students, newest filter wins: ?account_id= then ?query=.
+
+    Paged by default -- see routes/pagination.py. Even a household's siblings go through
+    it, so every caller reads one response shape rather than special-casing the small one.
+    """
+    limit, offset, error = pagination.parse(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
     account_id = request.args.get('account_id')
     query = request.args.get('query')
 
     if account_id:
-        students = Student.find_by_account(account_id)
+        students, total = Student.find_by_account(account_id, limit, offset)
     elif query:
-        students = Student.search(query)
+        students, total = Student.search(query, limit, offset)
     else:
-        students = Student.find_all()
+        students, total = Student.find_all(limit, offset)
 
-    return jsonify(serialize(students)), 200
+    return jsonify(
+        pagination.envelope('students', students, total, limit, offset)
+    ), 200
 
 
 @students_bp.route('/students/search', methods=['GET'])
@@ -53,7 +65,15 @@ def search_students():
     if not query or len(query) < 2:
         return jsonify({'error': 'Query must be at least 2 characters'}), 400
 
-    return jsonify(serialize(Student.search(query))), 200
+    limit, offset, error = pagination.parse(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
+    students, total = Student.search(query, limit, offset)
+
+    return jsonify(
+        pagination.envelope('students', students, total, limit, offset)
+    ), 200
 
 
 @students_bp.route('/students/<student_key>/attendance', methods=['GET'])

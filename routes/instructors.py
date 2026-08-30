@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from models import Instructor
+from routes import pagination
 from routes.serialization import serialize
 
 instructors_bp = Blueprint('instructors', __name__, url_prefix='/api')
@@ -8,10 +9,24 @@ instructors_bp = Blueprint('instructors', __name__, url_prefix='/api')
 
 @instructors_bp.route('/instructors', methods=['GET'])
 def get_instructors():
-    query = request.args.get('query')
-    instructors = Instructor.search(query) if query else Instructor.find_all()
+    """A page of instructors, in the same envelope /api/students returns.
 
-    return jsonify(serialize(instructors)), 200
+    103 documents do not need paging today. They share the shape anyway so the frontend
+    learns one convention, and so the roster can grow without the route changing.
+    """
+    limit, offset, error = pagination.parse(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
+    query = request.args.get('query')
+    if query:
+        instructors, total = Instructor.search(query, limit, offset)
+    else:
+        instructors, total = Instructor.find_all(limit, offset)
+
+    return jsonify(
+        pagination.envelope('instructors', instructors, total, limit, offset)
+    ), 200
 
 
 @instructors_bp.route('/instructors/search', methods=['GET'])
@@ -20,7 +35,15 @@ def search_instructors():
     if not query or len(query) < 2:
         return jsonify({'error': 'Query must be at least 2 characters'}), 400
 
-    return jsonify(serialize(Instructor.search(query))), 200
+    limit, offset, error = pagination.parse(request.args)
+    if error:
+        return jsonify({'error': error}), 400
+
+    instructors, total = Instructor.search(query, limit, offset)
+
+    return jsonify(
+        pagination.envelope('instructors', instructors, total, limit, offset)
+    ), 200
 
 
 @instructors_bp.route('/instructors/<instructor_name>', methods=['GET'])

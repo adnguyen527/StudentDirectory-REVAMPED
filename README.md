@@ -148,7 +148,7 @@ Four things to know before reading it:
 progress, on 40,949 of the 50,900 topic entries.
 
 **Indexes**: `student_key` (unique), `account_id` (**not** unique — represents household),
-`student_name`.
+`(student_name, student_key)`
 
 Defined once in `util.py`:
 
@@ -258,8 +258,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 383 offline tests -- no network, no credentials (~2s)
-pytest --integration    # + 51 read-only checks against the real cluster
+pytest                  # 412 offline tests -- no network, no credentials (~2s)
+pytest --integration    # + 53 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -288,22 +288,25 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 |---|---|---|
 | GET | `/api/health` | liveness |
 | GET | `/api/metrics` | collection counts and averages |
-| GET | `/api/students` | all students; `?query=` to search, `?account_id=` for one household's siblings |
+| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
-| GET | `/api/instructors` | all instructors; `?query=` to search by name |
+| GET | `/api/instructors` | a page of instructors; `?query=` to search by name |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
 | GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
 
-List responses drop the arrays that grow with the dataset — `dwp_report_ids` and `topics`
-on a student, `days_taught` and the roster on an instructor — and keep the counts stored
-beside them. The detail routes serve them in full, and the gap is wide: one busy instructor
-is 48.9 KB against 38.8 KB for all 103 listed, and one student with 100 topics is 310.6 KB
-against 1.00 MB for all 893.
+### Pagination
+
+All four list routes take `?limit=` and `?offset=` and answer in one envelope:
+
+```json
+{ "students": [ ... ],
+  "page": { "limit": 50, "offset": 0, "total": 893, "returned": 50 } }
+```
 
 ---
 
@@ -332,12 +335,12 @@ pipeline = [
 
 - **A row edited at the source imports as a new document** rather than replacing the
   original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
-- **No pagination on `/api/students`.** The full list is 1.00 MB across 893 students, and
-  every call ships all of it. It crossed a megabyte when the two topic-state counts were
-  added — roughly 70 KB for two integers, because they are paid 893 times — even though
-  `topics[]` itself is projected out. The per-student summary fields are what grow this
-  now, and a search page hitting the route on every keystroke will feel it long before
-  MongoDB's document limit is anywhere in sight.
+- **A list row still costs more than it should.** Paging and the `instructors[]` projection
+  took `/api/students` from 1.08 MB to 31.0 KB a page, but what remains is mostly field
+  *names* paid once per row: the six topic counters are ~160 KB across 893 students, much
+  of it spelling `total_unique_topics_completed` out 893 times. Nothing to fix there short
+  of an explicit allowlist projection naming the handful of fields a results table draws,
+  which is worth doing once the frontend says which ones those are.
 - **Two topic counts that sound alike and answer different questions.**
   `total_unique_topics_finished` means a topic was **ever** completed or mastered;
   `state == 'finished'` means its **most recent** assignment ended that way. They disagree
@@ -411,6 +414,9 @@ Items are listed in priority order within each group.
 
 - [x] `P1` **Expose the `instructors` collection** — `Instructor` model, list, detail by
       `instructor_name`, name search. Done; see the API table.
+- [x] `P1` **Paginate the list routes.** `?limit=`/`?offset=` in a shared envelope on all
+      four, sorted and index-backed so pages cannot repeat a row. A page of students is
+      31.0 KB against 1.08 MB for the old full list. Done; see the API section.
 - [ ] `P1` **Session authentication** for the React client — an authenticator in
       `AUTHENTICATORS`, `supports_credentials` on CORS, a signing secret. The shared
       `API_KEY` cannot go in a browser.
@@ -460,7 +466,8 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
 
 - [ ] `P1` **Search for students and instructors.** The entry point everything else is
       reached from. Both searches now exist — `/api/students/search?q=` and
-      `/api/instructors/search?q=`, minimum 2 characters. *Open:* a page of its own, or
+      `/api/instructors/search?q=`, minimum 2 characters, and both page — a dropdown wants
+      the first `?limit=10` and the `total` to say how many more. *Open:* a page of its own, or
       the persistent top-bar search the layout reference uses — the reference implies
       results appear as a dropdown, with a full page only for "see all".
 - [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
