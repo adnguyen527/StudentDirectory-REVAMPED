@@ -514,7 +514,14 @@ Items are listed in priority order within each group.
       without touching a route. No signing secret was needed after all — a random token
       validated by lookup does not have one. See the API section.
 - [ ] `P2` **Per-user permissions** on top of it. Identity alone does not say what a user
-      may read; everything that scopes data depends on this.
+      may read; everything that scopes data depends on this. *Open:* roles (`admin`,
+      `manager`, `instructor`) or per-capability flags.
+- [ ] `P2` **Viewing permissions in the models.** The mechanism the item above needs: a
+      `role`/`permissions` field on `users` — deliberately left out until something read
+      it, and the admin-only user page below is now that consumer — plus a scoping layer
+      every model query goes through, so access is decided in one place rather than by
+      each route remembering. Candidate scopes: center, own students, `student_notes`.
+      The `P3` restricted-fields split and the prompt-driven agent both wait on this.
 - [ ] `P2` **Write endpoints for the report form** — create, update, finalize, plus the
       validation the importer never needed. Needs the natural-key switch above.
       *Open:* whether drafts live in `dwp_reports` as `finalized: false` or their own
@@ -583,6 +590,12 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
 - [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
       most-taught topics, `unfinalized_sessions` as a follow-up list.
       `/api/instructors/<name>` now serves everything except the topics.
+- [ ] `P2` **User management page, admin only** — create an account, set its display name
+      and permissions, disable one, reset a password. Does for staff accounts what
+      `scripts/create_user.py` does today, without server access. Needs write endpoints
+      under `/api/auth` and the permissions work above, since "admin only" is the first
+      thing that has to be enforceable. *Open:* whether a reset sets a password directly
+      or issues a one-time link — a link needs email, which this system does not have.
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
