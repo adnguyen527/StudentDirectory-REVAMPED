@@ -12,7 +12,7 @@ dashboard.
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
 - **Tests**: `pytest` + `mongomock`
-- **Frontend**: React *(in progress)*
+- **Frontend**: React + TypeScript + Vite — **SigmaHub**, in `frontend/` *(in progress)*
 
 ---
 
@@ -56,6 +56,27 @@ own documentation says so.
 `app.run()` is Werkzeug's development server either way — no request timeouts, no
 slow-client protection, and it says as much on startup. A deployment needs a real WSGI
 server in front of `create_app()`.
+
+### Running the frontend
+
+**SigmaHub** lives in `frontend/` — React + TypeScript on Vite. With Flask already
+running:
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:5173
+```
+
+**The frontend has no API key of its own.** The browser calls same-origin `/api/*`, and
+the Vite dev server attaches `X-API-Key` on the way through to Flask, reading `API_KEY`,
+`HOST` and `PORT` straight out of the **root** `.env` — the same file `app.py` reads. So
+the key never enters the bundle, and CORS is never exercised in development.
+
+This is a development-only bridge. A browser cannot hold the shared key (`auth.py` says
+why: anything in the bundle is readable in DevTools), so a deployed frontend is blocked on
+the session authenticator under **TODO → API**. `npm run build` produces a `dist/` that is
+not yet servable for that reason.
 
 ---
 
@@ -464,12 +485,17 @@ tiles, **this app puts the user's pinned stats** — the top row is assembled by
 hard-coded. Each card owns its header controls: a period dropdown where the data is
 time-scoped, and an overflow menu in the corner, which is where the pin button lives.
 
-- [ ] `P1` **Search for students and instructors.** The entry point everything else is
-      reached from. Both searches now exist — `/api/students/search?q=` and
-      `/api/instructors/search?q=`, minimum 2 characters, and both page — a dropdown wants
-      the first `?limit=10` and the `total` to say how many more. *Open:* a page of its own, or
-      the persistent top-bar search the layout reference uses — the reference implies
-      results appear as a dropdown, with a full page only for "see all".
+- [x] `P1` **App shell and the data path.** `frontend/` — Vite + React + TypeScript, the
+      sidebar/top-bar/card layout above, CSS custom-property tokens in
+      `src/styles/tokens.css`, and a typed client in `src/api/` that unwraps the Extended
+      JSON `json_util` emits (`{"$date"}`, `{"$oid"}`) and tells 400/401/500 apart. Auth in
+      dev is a Vite proxy injecting `X-API-Key`; see **Running the frontend**.
+- [x] `P1` **Student search.** Answered as the persistent top-bar dropdown the layout
+      reference implies, not a page of its own: debounced, `?limit=10`, `page.total` for the
+      "N more" line, and Enter takes the whole term to the list as "see all". Both open
+      questions in the old note are settled that way. Instructor search is still unwired.
+- [x] `P1` **Student list**, paged off the shared envelope with `query` and `offset` in the
+      URL so a result is linkable and Back steps through pages.
 - [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
       completed, session history. `/api/students/<key>` already returns all of it, so this
       is frontend-only.
@@ -477,9 +503,10 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       selectable period, with the dates, so a manager can tell a parent what their prepaid
       package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which
       already exists.
-- [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
-      most-taught topics, `unfinalized_sessions` as a follow-up list.
-      `/api/instructors/<name>` now serves everything except the topics.
+- [ ] `P2` **Instructor list and profile page** — sessions taught, unique students, roster,
+      centers, most-taught topics, `unfinalized_sessions` as a follow-up list.
+      `/api/instructors/<name>` now serves everything except the topics. The nav item and
+      the typed client exist; the route renders a placeholder.
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
