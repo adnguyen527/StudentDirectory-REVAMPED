@@ -1,8 +1,7 @@
 """Shared `?limit=&offset=` handling for the list endpoints.
 
-Every list route pages by default rather than on request. The alternative -- unlimited
-unless the caller asks otherwise -- leaves the full-collection response one URL away,
-which is the problem this exists to close.
+Paging is the default, not opt-in: unlimited-unless-asked leaves the full-collection
+response one URL away, which is what this exists to close.
 """
 
 from routes.serialization import serialize
@@ -27,10 +26,9 @@ def _int_arg(args, name, default, minimum):
 def parse(args):
     """(limit, offset, error) from the query string. Both arguments are optional.
 
-    limit is capped at MAX_LIMIT rather than refused: a caller asking for everything
-    gets a full page and a total telling it more exists, which beats a 400 it has to
-    learn about first. A limit of 0 is refused outright -- pymongo reads .limit(0) as
-    "no limit", so accepting it would hand back the whole collection.
+    An oversized limit is capped rather than refused -- the caller gets a page plus a
+    total saying more exists. A limit of 0 IS refused: pymongo reads .limit(0) as "no
+    limit", so accepting it would return the whole collection.
     """
     limit, error = _int_arg(args, 'limit', DEFAULT_LIMIT, minimum=1)
     if error:
@@ -44,10 +42,9 @@ def parse(args):
 
 
 def envelope(key, documents, total, limit, offset):
-    """The list response shape: the rows under `key`, plus where they sit in the whole.
+    """The list response shape: rows under `key`, plus where they sit in the whole.
 
-    `total` counts every match, not just this page, so a caller can size a pager
-    without walking to the end.
+    `total` counts every match, not just this page.
     """
     return {
         key: serialize(documents),

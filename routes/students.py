@@ -14,9 +14,8 @@ DATE_FORMAT = '%Y-%m-%d'
 def _parse_period(args):
     """(start, end, error) from ?start=&end=, both YYYY-MM-DD and both required.
 
-    No default period. The obvious one -- "this month" -- silently returns nothing
-    whenever the imported data lags the calendar, which reads as a broken endpoint
-    rather than an empty month. The caller names the window it means.
+    No default period: "this month" returns nothing whenever the imported data lags the
+    calendar, which reads as a broken endpoint rather than an empty month.
     """
     raw_start, raw_end = args.get('start'), args.get('end')
     if not raw_start or not raw_end:
@@ -35,10 +34,9 @@ def _parse_period(args):
 
 @students_bp.route('/students', methods=['GET'])
 def get_students():
-    """A page of students, newest filter wins: ?account_id= then ?query=.
+    """A page of students; ?account_id= takes precedence over ?query=.
 
-    Paged by default -- see routes/pagination.py. Even a household's siblings go through
-    it, so every caller reads one response shape rather than special-casing the small one.
+    Paged by default, siblings included, so every caller reads one response shape.
     """
     limit, offset, error = pagination.parse(request.args)
     if error:
