@@ -637,7 +637,7 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       instructors did, `/students?query=` otherwise. Four rows per group, not five: at five
       the students filled the dropdown and the Instructors heading fell below the fold,
       hiding the thing the grouping exists to show.
-- [ ] `P2` **Months attended, on the student's *Sessions in a period* card.** The card
+- [x] `P2` **Months attended, on the student's *Sessions in a period* card.** The card
       reports sessions and days attended, then a per-month table underneath — so "how many
       months did they actually turn up in" can only be answered by counting rows by eye.
       **Frontend-only:** `by_month` is already in the `/api/students/<key>/attendance`
@@ -662,6 +662,20 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       when reading the table by eye stops being practical. And it extends the distinction
       the card already trades on — sessions, days and months are three granularities of the
       same attendance, coarsest last, so a month with twelve sessions counts once here.
+
+      Done, and it lands in **two places, scoped differently** — deliberately, so the same
+      words showing different numbers is not a bug:
+
+      - **The Sessions tile**, all-time: `149 Sessions · 12 months · last Jul 30, 2025`.
+        Counted from distinct months across `dwp_reports`, not from `by_month`, because the
+        tile row is all-time while `by_month` only covers the panel's range. The
+        last-session date stays on the line — it appears nowhere else on the page.
+      - **The attendance card**, period-scoped, beside sessions and days.
+
+      Verified against real data: for one student the tile reads 12 months while the panel,
+      on its default Apr–Jul range, reads 3. Widened to Sep 2024 – Sep 2025 the panel reads
+      **136 sessions, 136 days, 11 months** over a range covering **13** — August and
+      September 2025 are absent from `by_month`, so they do not count.
 - [ ] `P2` **Pages per session on the instructor roster.** The roster shows sessions and
       pages completed as raw totals, which makes its rows incomparable: a student seen 24
       times will out-total one seen twice no matter how either session went. The rate is

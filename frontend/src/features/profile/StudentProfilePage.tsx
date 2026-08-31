@@ -1,6 +1,7 @@
+import { useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { formatDate, formatNumber } from '../../api/bson'
+import { formatDate, formatNumber, toDate } from '../../api/bson'
 import { getStudent } from '../../api/endpoints'
 import type { StudentDetailResponse } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
@@ -26,6 +27,21 @@ export function StudentProfilePage() {
     (signal) => getStudent(studentKey, signal),
     [studentKey],
   )
+
+  /**
+   * Distinct months the student has a session in, all-time.
+   *
+   * UTC, like every date here: these are naive wall clocks, and a local read would push a
+   * 1st-of-the-month session into the month before.
+   */
+  const monthsAttended = useMemo(() => {
+    const months = new Set<string>()
+    for (const report of data?.dwp_reports ?? []) {
+      const date = toDate(report.date)
+      if (date) months.add(date.toISOString().slice(0, 7))
+    }
+    return months.size
+  }, [data])
 
   // A mistyped or stale key is an ordinary thing to do, not an error to shout about.
   if (error?.status === 404) {
@@ -87,10 +103,16 @@ export function StudentProfilePage() {
       </div>
 
       <div className="tile-row">
+        {/* The months read against the count above them: 149 sessions across 12 months.
+            The last-session date stays because this is the only place it appears. */}
         <StatTile
           label="Sessions"
           value={formatNumber(student.total_sessions)}
-          sub={`last on ${formatDate(student.last_session_date)}`}
+          sub={
+            monthsAttended > 0
+              ? `${formatNumber(monthsAttended)} month${monthsAttended === 1 ? '' : 's'} · last ${formatDate(student.last_session_date)}`
+              : `last on ${formatDate(student.last_session_date)}`
+          }
           icon={<StudentsIcon size={22} />}
           wash={1}
         />

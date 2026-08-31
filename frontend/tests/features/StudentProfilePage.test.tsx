@@ -3,7 +3,13 @@ import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { currentLocation, renderApp } from '../support/renderApp'
-import { ANTHONY_DETAIL, ANTHONY_KEY, ANTHONY_REPORTS, day } from '../support/sampleData'
+import {
+  ANTHONY_ATTENDANCE,
+  ANTHONY_DETAIL,
+  ANTHONY_KEY,
+  ANTHONY_REPORTS,
+  day,
+} from '../support/sampleData'
 import { server } from '../support/server'
 
 const PROFILE = `/students/${encodeURIComponent(ANTHONY_KEY)}`
@@ -21,6 +27,25 @@ async function card(title: RegExp | string): Promise<HTMLElement> {
 }
 
 /**
+ * The stat tile with this label.
+ *
+ * Matched on `.stat-label` because the words also appear as column headers -- "Sessions"
+ * heads a column in both the topics and the instructors tables.
+ */
+async function tile(label: string): Promise<HTMLElement> {
+  const el = await screen.findByText(label, { selector: '.stat-label' })
+  return el.closest('.stat-tile') as HTMLElement
+}
+
+/** The attendance card's headline figures as [label, value], in the order shown. */
+function headlineFigures(panel: HTMLElement): [string, string][] {
+  return [...panel.querySelectorAll('.attendance-totals > div')].map((cell) => [
+    cell.querySelector('.muted')?.textContent ?? '',
+    cell.querySelector('.attendance-figure')?.textContent ?? '',
+  ])
+}
+
+/**
  * The profile carries the app's subtlest decisions, so these pin the reasoning rather
  * than the pixels: which topic counter is shown, what "on plan" means, and where the
  * attendance period starts.
@@ -31,11 +56,64 @@ describe('student profile', () => {
     // written Completed. Reading ..._completed here understates the work about twentyfold.
     renderApp(PROFILE)
 
-    const tile = (await screen.findByText('Topics finished')).closest(
-      '.stat-tile',
-    ) as HTMLElement
-    expect(within(tile).getByText('1')).toBeInTheDocument()
+    const finished = await tile('Topics finished')
+    expect(within(finished).getByText('1')).toBeInTheDocument()
     expect(screen.queryByText('Topics completed')).not.toBeInTheDocument()
+  })
+
+  it('counts all-time months on the sessions tile, beside the last session', async () => {
+    // Both fixture reports fall in March 2026, so this also pins the singular.
+    renderApp(PROFILE)
+
+    const sessions = await tile('Sessions')
+    expect(within(sessions).getByText('2')).toBeInTheDocument()
+    expect(within(sessions).getByText('1 month · last Mar 14, 2026')).toBeInTheDocument()
+  })
+
+  it('counts months on the tile from every session, not the panel period', async () => {
+    // The tile is all-time; the panel is scoped to its date range. They are allowed to
+    // disagree, so the tile must not be reading by_month.
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: ANTHONY_DETAIL,
+          stats: { total_dwp_reports: 4 },
+          dwp_reports: [
+            { ...ANTHONY_REPORTS[0], _id: { $oid: 'a'.repeat(24) }, date: day('2025-11-04') },
+            { ...ANTHONY_REPORTS[0], _id: { $oid: 'b'.repeat(24) }, date: day('2025-11-19') },
+            { ...ANTHONY_REPORTS[0], _id: { $oid: 'c'.repeat(24) }, date: day('2026-01-08') },
+            { ...ANTHONY_REPORTS[0], _id: { $oid: 'd'.repeat(24) }, date: day('2026-03-02') },
+          ],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const sessions = await tile('Sessions')
+    // Four sessions over three distinct months -- the two November ones count once.
+    expect(within(sessions).getByText(/^3 months ·/)).toBeInTheDocument()
+
+    // Meanwhile the panel still reports its own period, from the attendance response.
+    const panel = await card(/Sessions in a period/)
+    await within(panel).findByText('months attended')
+    expect(headlineFigures(panel)).toContainEqual(['months attended', '2'])
+  })
+
+  it('counts a session on the 1st in its own month, not the one before', async () => {
+    // Midnight UTC on 1 March reads as 28 February in any zone west of UTC.
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: ANTHONY_DETAIL,
+          stats: { total_dwp_reports: 1 },
+          dwp_reports: [{ ...ANTHONY_REPORTS[0], date: day('2026-03-01') }],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const sessions = await tile('Sessions')
+    expect(within(sessions).getByText(/^1 month ·/)).toBeInTheDocument()
   })
 
   it('opens the topics card on what the student is working on now', async () => {
@@ -74,20 +152,53 @@ describe('student profile', () => {
     expect(screen.getByLabelText('Period end')).toHaveValue('2026-03-14')
   })
 
-  it('reports sessions and days as separate figures', async () => {
-    // A day with two sessions draws down two. Showing one number invites the reader to
-    // assume it is the other.
+  it('reports sessions, days and months as three separate figures', async () => {
+    // Three granularities of the same attendance, coarsest last. A day with two sessions
+    // draws down two; a month with twelve sessions counts once. Showing fewer of these
+    // invites the reader to take one for another.
     renderApp(PROFILE)
 
     const panel = await card(/Sessions in a period/)
     await within(panel).findByText('days attended')
 
-    // Read the two headline figures directly: the month breakdown below repeats these
-    // numbers, so matching on text alone would not prove which is which.
-    const figures = [...panel.querySelectorAll('.attendance-figure')].map((n) => n.textContent)
-    expect(figures).toEqual(['3', '2'])
-    expect(within(panel).getByText('sessions')).toBeInTheDocument()
-    expect(within(panel).getByText('days attended')).toBeInTheDocument()
+    // Read each figure with its own label: the month breakdown below repeats these
+    // numbers, and two of the three can legitimately be equal, so position or text alone
+    // would not prove which is which.
+    expect(headlineFigures(panel)).toEqual([
+      ['sessions', '3'],
+      ['days attended', '2'],
+      ['months attended', '2'],
+    ])
+  })
+
+  it('counts only the months attended, not the months the range covers', async () => {
+    // The rule: a month counts if they turned up in it. by_month is built from visits, so
+    // a missed month is absent rather than present as a zero -- here the range spans six
+    // months and they attended in two.
+    server.use(
+      http.get('/api/students/:key/attendance', () =>
+        HttpResponse.json({
+          ...ANTHONY_ATTENDANCE,
+          period: { start: '2025-10-01', end: '2026-03-31' },
+          totals: { sessions: 9, days: 5 },
+          by_month: [
+            { month: '2025-11', sessions: 4, days: 2 },
+            { month: '2026-03', sessions: 5, days: 3 },
+          ],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const panel = await card(/Sessions in a period/)
+    await within(panel).findByText('months attended')
+
+    expect(headlineFigures(panel)).toEqual([
+      ['sessions', '9'],
+      ['days attended', '5'],
+      // Two, not six: December, January and February were skipped and do not count.
+      ['months attended', '2'],
+    ])
   })
 
   it('blocks an impossible period instead of collecting the API 400', async () => {

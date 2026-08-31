@@ -97,6 +97,14 @@ export function AttendancePanel({ studentKey, lastSessionDate }: AttendancePanel
               <div className="attendance-figure">{formatNumber(data?.totals.days)}</div>
               <div className="muted">days attended</div>
             </div>
+            {/* A month counts only if they attended it. by_month is built from visits, so
+                a month they missed is absent from the array rather than present as a zero
+                -- its length is the figure, with nothing to filter and no denominator.
+                Coarsest of the three: a month with twelve sessions counts once. */}
+            <div>
+              <div className="attendance-figure">{formatNumber(data?.by_month.length)}</div>
+              <div className="muted">months attended</div>
+            </div>
           </div>
 
           <table className="table attendance-months">
