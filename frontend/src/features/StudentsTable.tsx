@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { formatDate, formatNumber } from '../api/bson'
 import type { StudentListItem } from '../api/types'
 
@@ -33,7 +35,11 @@ export function StudentsTable({ students }: StudentsTableProps) {
         <tbody>
           {students.map((student) => (
             <tr key={student.student_key}>
-              <td className="primary-name">{student.student_name}</td>
+              <td className="primary-name">
+                <Link className="row-link" to={`/students/${encodeURIComponent(student.student_key)}`}>
+                  {student.student_name}
+                </Link>
+              </td>
               {/* A household, not a person -- siblings share it, so it is what tells two
                   students with the same name apart. Truncated because it is an identifier
                   to compare, not to read; the full value is on hover and in the title. */}

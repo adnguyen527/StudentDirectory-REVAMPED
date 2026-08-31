@@ -48,6 +48,20 @@ export function toDate(value: unknown): Date | null {
   return null
 }
 
+/**
+ * Everything here renders in UTC, deliberately.
+ *
+ * The stored datetimes are naive: ingestion/import_reports.py builds them with
+ * strptime('%m/%d/%Y') and datetime.combine(), and pymongo persists a naive datetime as
+ * UTC. So the instant tagged 2025-07-30T17:53Z is not really 17:53 UTC -- it is the wall
+ * clock the center wrote down, 5:53 PM, with a UTC label stuck on it.
+ *
+ * Rendering that in the viewer's zone re-interprets it: in US Central it slides to
+ * 12:53 PM, and a date at midnight UTC lands on the day before. Formatting in UTC hands
+ * back exactly the value the source recorded, from any machine.
+ */
+const UTC = 'UTC'
+
 /** "30 Jun 2025", or a dash when there is no date -- never an empty cell. */
 export function formatDate(value: unknown): string {
   const date = toDate(value)
@@ -56,6 +70,18 @@ export function formatDate(value: unknown): string {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: UTC,
+  })
+}
+
+/** "5:53 PM", or a dash. Same UTC reasoning as formatDate. */
+export function formatTime(value: unknown): string {
+  const date = toDate(value)
+  if (!date) return '—'
+  return date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: UTC,
   })
 }
 

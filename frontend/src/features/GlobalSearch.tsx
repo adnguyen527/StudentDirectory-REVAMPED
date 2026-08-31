@@ -15,10 +15,9 @@ const DROPDOWN_LIMIT = 10
  * The persistent top-bar search, answering the README's open question the way the layout
  * reference implies: results in a dropdown, no page of its own.
  *
- * Picking a result goes to the students list filtered by that name. Once the student
- * profile page exists this should navigate to /students/<student_key> instead -- the
- * account_id shown on each row is what disambiguates the 17 students who share a name
- * with someone.
+ * Picking a result opens that student's profile. It navigates by student_key rather than
+ * name because 17 students share a name with someone -- the key carries the account, so
+ * it lands on the right one. Enter takes the whole term to the filtered list instead.
  */
 export function GlobalSearch() {
   const [input, setInput] = useState('')
@@ -59,10 +58,18 @@ export function GlobalSearch() {
     }
   }, [open])
 
-  function choose(name: string) {
+  /** A picked result goes to that student. */
+  function openStudent(studentKey: string) {
     setOpen(false)
     setInput('')
-    navigate(`/students?query=${encodeURIComponent(name)}`)
+    navigate(`/students/${encodeURIComponent(studentKey)}`)
+  }
+
+  /** Enter is the "see all" path: the whole term, taken to the filtered list. */
+  function seeAll(term: string) {
+    setOpen(false)
+    setInput('')
+    navigate(`/students?query=${encodeURIComponent(term)}`)
   }
 
   const results = data?.students ?? []
@@ -87,7 +94,7 @@ export function GlobalSearch() {
           // Enter takes the whole term to the list rather than picking a row -- that is
           // the "see all" path, and it works before the debounced results have landed.
           if (event.key === 'Enter' && input.trim().length >= MIN_SEARCH_LENGTH) {
-            choose(input.trim())
+            seeAll(input.trim())
           }
         }}
       />
@@ -108,7 +115,7 @@ export function GlobalSearch() {
               key={student.student_key}
               type="button"
               className="search-result"
-              onClick={() => choose(student.student_name)}
+              onClick={() => openStudent(student.student_key)}
             >
               <span className="search-result-name">{student.student_name}</span>
               <span className="search-result-meta">

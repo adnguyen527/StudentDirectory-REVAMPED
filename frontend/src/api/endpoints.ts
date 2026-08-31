@@ -1,7 +1,13 @@
 /** Named calls for the routes this app uses. Query-string spelling lives here only. */
 
 import { request } from './client'
-import type { InstructorsResponse, Metrics, StudentsResponse } from './types'
+import type {
+  AttendanceResponse,
+  InstructorsResponse,
+  Metrics,
+  StudentDetailResponse,
+  StudentsResponse,
+} from './types'
 
 /** routes/pagination.py: DEFAULT_LIMIT. Matched so the pager's arithmetic is the API's. */
 export const PAGE_SIZE = 50
@@ -26,6 +32,40 @@ export function listStudents(params: ListParams = {}, signal?: AbortSignal) {
 
 export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
   return request<InstructorsResponse>('/instructors', { ...params }, signal)
+}
+
+/**
+ * One student, with every session.
+ *
+ * Deliberately not paged by the API, which is what lets the profile page be frontend-
+ * only. The heaviest student in the current data is 149 sessions / ~229 KB.
+ */
+export function getStudent(studentKey: string, signal?: AbortSignal) {
+  return request<StudentDetailResponse>(
+    `/students/${encodeURIComponent(studentKey)}`,
+    undefined,
+    signal,
+  )
+}
+
+/**
+ * Sessions attended in a period. Both bounds are required and inclusive, 'YYYY-MM-DD'.
+ *
+ * The route refuses to default the window on purpose -- "this month" would silently
+ * return nothing whenever the imported data lags the calendar, which reads as a broken
+ * endpoint rather than an empty month. The caller names the period it means.
+ */
+export function getStudentAttendance(
+  studentKey: string,
+  start: string,
+  end: string,
+  signal?: AbortSignal,
+) {
+  return request<AttendanceResponse>(
+    `/students/${encodeURIComponent(studentKey)}/attendance`,
+    { start, end },
+    signal,
+  )
 }
 
 /**

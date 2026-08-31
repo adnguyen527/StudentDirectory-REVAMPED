@@ -91,6 +91,13 @@ button:disabled {
   font-weight: 600;
 }
 
+/* Underlined only on hover: 50 underlined names at once is noise, but a name that leads
+   somewhere has to say so when reached. */
+.row-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .muted {
   color: var(--text-muted);
 }

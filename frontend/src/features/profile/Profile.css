@@ -1,0 +1,209 @@
+/* --- Header ------------------------------------------------------------- */
+
+.profile-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.profile-back:hover {
+  color: var(--accent);
+}
+
+.profile-back-icon {
+  transform: rotate(180deg);
+}
+
+.profile-back-block {
+  margin-top: var(--space-4);
+}
+
+.page-header .account-id {
+  margin-right: var(--space-2);
+}
+
+.profile-center {
+  margin-right: var(--space-2);
+}
+
+/* --- Filter chips ------------------------------------------------------- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip-active,
+.chip-active:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--wash-1-ink);
+  font-weight: 600;
+}
+
+.chip-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* --- Topics ------------------------------------------------------------- */
+
+.topic-id {
+  display: block;
+  color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+/*
+ * Status is a ladder, not three unrelated labels: Mastered implies Completed implies
+ * Worked On. The colours climb with it rather than being three arbitrary hues.
+ */
+.status {
+  font-size: var(--font-size-sm);
+}
+
+.status-worked-on {
+  color: var(--text-muted);
+}
+
+.status-completed {
+  color: var(--wash-2-ink);
+}
+
+.status-mastered {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.tag-warn {
+  margin-left: var(--space-2);
+  background: var(--wash-3);
+  color: var(--wash-3-ink);
+}
+
+/* --- Session history ---------------------------------------------------- */
+
+.row-expandable {
+  cursor: pointer;
+}
+
+.row-detail td {
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-sunken);
+}
+
+.note + .note {
+  margin-top: var(--space-3);
+}
+
+.note-label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Staff-to-staff commentary about a named child -- marked so it is never mistaken for
+   something a parent is meant to read. */
+.note-label-internal::after {
+  content: ' · internal';
+  color: var(--wash-3-ink);
+}
+
+.note-body {
+  white-space: pre-wrap;
+}
+
+.topic-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.table-footnote {
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+/* --- Attendance panel --------------------------------------------------- */
+
+.period {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.period-input {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.period-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.attendance-totals {
+  display: flex;
+  gap: var(--space-6);
+}
+
+.attendance-figure {
+  font-size: var(--font-size-stat);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.attendance-note {
+  margin-top: var(--space-3);
+  font-size: var(--font-size-sm);
+  max-width: 60ch;
+}
+
+.attendance-months {
+  margin-top: var(--space-4);
+}
+
+.attendance-months th:first-child,
+.attendance-months td:first-child {
+  padding-left: 0;
+}
+
+@media (max-width: 720px) {
+  .period {
+    flex-wrap: wrap;
+  }
+}

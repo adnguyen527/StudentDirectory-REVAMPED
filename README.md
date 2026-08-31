@@ -395,6 +395,18 @@ pipeline = [
   100, `days_taught` to 272 per instructor, and instructor rosters to 304. All grow with
   the dataset, and all are far from MongoDB's 16 MB document limit — accepted, not a
   pending fix.
+- **Session times are local wall clock at the point of entry, with no zone attached.**
+  The source records "3:58 PM" as whoever filled in the report saw it, and `date`,
+  `session_start`, `session_end` are stored naive — which Mongo keeps as UTC, so they read
+  as `15:58Z` while meaning 3:58 PM local. **Assumed for now: one timezone throughout.**
+  It breaks the moment two locations in different zones are compared: a 4 PM session at each is the same
+  stored number but not the same moment, so "who taught latest" and any cross-center
+  duration or overlap would be quietly wrong. `@Home` sessions are the likelier first
+  crack, since the student need not be near the center at all. Fixing it means a zone per
+  center, the DST boundaries across 2024–2025, and a backfill of all 29,382 rows — not
+  worth it until a second zone actually exists. Until then, read and render these in UTC;
+  converting to a local zone corrupts them. Documented at the two ends in
+  `combine_session_time` (`ingestion/import_reports.py`) and `frontend/src/api/bson.ts`.
 
 ---
 
@@ -452,6 +464,18 @@ Items are listed in priority order within each group.
       directly: instructor totals double-count co-taught pages, so they cannot be summed
       into a center figure. *Open:* a built `centers` collection like the other aggregates,
       or computed per request, which is what would make a date range possible.
+- [ ] `P2` **Per-topic stats endpoint**, backing the Topics tab under **Frontend** — the
+      one thing that page is blocked on. Rolls up `students.topics[]` rather than
+      `dwp_reports.topics[]`: the per-topic history is already computed there, so this is
+      a rollup of 13,598 existing entries into 771 topics, not a re-derivation. Per topic:
+      students who worked it, finished, on plan, removed; median sessions to finish;
+      reassignments. *Open:* a built `topics` collection like the other aggregates, or
+      computed per request — the same question the center metrics above carry, and the same
+      trade, since computed is what would allow a date range.
+      *Also open:* the canonical name. `PK-3121-00` appears as both "Reducing Fractions
+      using GCF" and "Simplifying Fractions using GCF" — one topic renamed at the source,
+      the same shape of problem as the centers rename map below, and it has to resolve to
+      one name before topics can be listed.
 - [ ] `P2` **Decide who sees `student_notes`** (3,594 rows). Fine for instructors,
       questionable parent-facing. Needed before anything reaches a parent.
 - [ ] `P3` **Prompt-driven agent for niche stats.** Hard requirement: it reads only what the
@@ -496,17 +520,50 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       questions in the old note are settled that way. Instructor search is still unwired.
 - [x] `P1` **Student list**, paged off the shared envelope with `query` and `offset` in the
       URL so a result is linkable and Back steps through pages.
-- [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
-      completed, session history. `/api/students/<key>` already returns all of it, so this
-      is frontend-only.
-- [ ] `P1` **Session count panel on the student record** — sessions attended over a
-      selectable period, with the dates, so a manager can tell a parent what their prepaid
-      package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which
-      already exists.
+- [x] `P1` **Student profile page** — header stats, centers, instructors, topics and full
+      session history, reached from a search result or a name in the list. Frontend-only as
+      predicted: `/api/students/<key>` serves it in one response. The topics card filters on
+      `state` and opens on **On plan**, since `total_unique_*` means *ever*; the session
+      history pages 25 at a time **in the browser** over the array already in memory, and
+      rows expand to the notes and that session's topics.
+- [x] `P1` **Session count panel on the student record.** Date range in the card's header
+      controls, showing sessions against days and a per-month breakdown. Defaults to the
+      three months ending at that student's **last session, not today** — the route refuses
+      to guess a period for the same reason, and anchoring on today would open the panel
+      empty on every student while the data ends 2025-09-17.
+- [ ] `P3` **Page the detail route's `dwp_reports`.** The profile pulls every session in one
+      response — 229 KB for the heaviest student (149 sessions). Fine at this size and the
+      reason the page needed no API work; revisit if a student ever gets big enough to feel
+      it.
 - [ ] `P2` **Instructor list and profile page** — sessions taught, unique students, roster,
       centers, most-taught topics, `unfinalized_sessions` as a follow-up list.
       `/api/instructors/<name>` now serves everything except the topics. The nav item and
       the typed client exist; the route renders a placeholder.
+- [ ] `P2` **Instructors in the global search.** The top-bar dropdown searches students
+      only. `/api/instructors/search?q=` already answers in the same paged envelope and
+      already returns everything a row needs — name, sessions taught, unique students,
+      centers — so the client side is a `searchInstructors` call beside the existing
+      `listInstructors` in `src/api/endpoints.ts` and a second section in the dropdown.
+      Group the results under Students and Instructors headings with a count each, since a
+      name can match both. Sits behind the item above: an instructor hit has nowhere useful
+      to land while the profile is a placeholder. *Open:* whether Enter still means
+      `/students?query=`, which stops being a sensible "see all" once results span both.
+- [ ] `P2` **Topics tab in the sidebar** — per-topic stats across the whole program, which
+      is the one question shape the app cannot answer today. 771 distinct topics over
+      13,598 (student, topic) pairs: for each, how many students worked it, how many
+      finished, how many are on plan or removed, median sessions to finish, and how often
+      it was reassigned. Sortable, so "most reassigned" and "lowest finish rate" are
+      reachable. *Half of Odd Numbers* is the shape — 176 students, 117 finished, 40 on
+      plan, 23 removed, median 4 sessions, 18 reassignments. **Not frontend-only**, unlike
+      the student profile: blocked on the topics endpoint under **API**. The per-student
+      view of the same data is the profile's topics card.
+
+      ⚠️ **Group or filter by topic type, or the finish-rate column lies.** The id prefix
+      predicts it almost entirely: `PK` — the curriculum, 663 topics and 13,268 pairs —
+      finishes 68.7%, while `GF` is 28.3%, `WCH` 13.0%, `FO` 11.4% and the single `WOB`
+      topic 0.0% across 20 students. Those are a different kind of item and do not carry a
+      completion status the same way, so a flat ranking by finish rate fills the bottom
+      with them and reads as "hardest topics".
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
