@@ -20,8 +20,8 @@ export default defineConfig(({ mode }) => {
     // Without this the first symptom is a 500 carrying "Server is not configured for
     // authentication" -- true, but it points at the API rather than at this file.
     console.warn(
-      `\n[sigmahub] API_KEY is empty in ${path.join(repoRoot, '.env')}.` +
-        '\n[sigmahub] Every /api request will come back 401/500 until it is set.\n',
+      `\n[sigma] API_KEY is empty in ${path.join(repoRoot, '.env')}.` +
+        '\n[sigma] Every /api request will come back 401/500 until it is set.\n',
     )
   }
 

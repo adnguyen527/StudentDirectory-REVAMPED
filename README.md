@@ -12,7 +12,7 @@ dashboard.
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
 - **Tests**: `pytest` + `mongomock`
-- **Frontend**: React + TypeScript + Vite — **SigmaHub**, in `frontend/` *(in progress)*
+- **Frontend**: React + TypeScript + Vite — **Sigma**, in `frontend/` *(in progress)*
 
 ---
 
@@ -59,7 +59,7 @@ server in front of `create_app()`.
 
 ### Running the frontend
 
-**SigmaHub** lives in `frontend/` — React + TypeScript on Vite. With Flask already
+**Sigma** lives in `frontend/` — React + TypeScript on Vite. With Flask already
 running:
 
 ```bash

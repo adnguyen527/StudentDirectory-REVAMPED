@@ -24,7 +24,7 @@ export function Sidebar() {
           Σ
         </span>
         <span className="brand-text">
-          <span className="brand-name">SigmaHub</span>
+          <span className="brand-name">Sigma</span>
           <span className="brand-tagline">All our Mathlete metrics. One hub.</span>
         </span>
       </div>
