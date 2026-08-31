@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
-import { DashboardPage } from './features/DashboardPage'
+import { HomePage } from './features/HomePage'
 import { InstructorsPage } from './features/InstructorsPage'
 import { StudentsPage } from './features/StudentsPage'
 import { InstructorProfilePage } from './features/profile/InstructorProfilePage'
@@ -13,7 +13,7 @@ export default function App() {
       {/* Every page renders inside the shell, so the sidebar and the search bar are
           mounted once and survive navigation. */}
       <Route element={<AppShell />}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<HomePage />} />
         <Route path="students" element={<StudentsPage />} />
         {/* The key is account_id + slugified name, so it carries characters that must
             survive a URL -- it is encoded on the way out in endpoints.ts. */}

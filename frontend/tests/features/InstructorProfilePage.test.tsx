@@ -76,13 +76,6 @@ describe('instructor profile', () => {
     expect(months.queryByRole('row', { name: /2026-02/ })).not.toBeInTheDocument()
   })
 
-  it('says days are not sessions, because the tile above counts differently', async () => {
-    renderApp(PROFILE)
-    expect(
-      await screen.findByText(/Distinct days on site, not sessions/),
-    ).toBeInTheDocument()
-  })
-
   it('links a roster row straight to that student, with no lookup', async () => {
     const { user } = renderApp(PROFILE)
 

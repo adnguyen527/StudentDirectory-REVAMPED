@@ -143,7 +143,16 @@ export function StudentProfilePage() {
             <tbody>
               {student.instructors.map((instructor) => (
                 <tr key={instructor.name}>
-                  <td className="primary-name">{instructor.name}</td>
+                  <td className="primary-name">
+                    {/* The reverse of the instructor profile's roster, which links back
+                        here. The name is the key, so no lookup is needed. */}
+                    <Link
+                      className="row-link"
+                      to={`/instructors/${encodeURIComponent(instructor.name)}`}
+                    >
+                      {instructor.name}
+                    </Link>
+                  </td>
                   <td className="numeric">{formatNumber(instructor.sessions)}</td>
                   <td className="numeric">{formatNumber(instructor.pages_completed)}</td>
                 </tr>
@@ -154,7 +163,7 @@ export function StudentProfilePage() {
         {/* Pages are attributed per instructor per session, so a co-taught session counts
             for each of them. The column does not add up to the tile above, by design. */}
         <p className="muted table-footnote">
-          Co-taught sessions count for each instructor, so these pages sum to more than the
+          * Co-taught sessions count for each instructor, so these pages sum to more than the
           student's own total.
         </p>
       </Card>

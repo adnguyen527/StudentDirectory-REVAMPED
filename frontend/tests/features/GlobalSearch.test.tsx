@@ -63,7 +63,7 @@ describe('global search', () => {
     const { user } = renderApp()
     await user.type(searchBox(), 'an')
 
-    // Each group is a labelled region, so this cannot accidentally match the dashboard's
+    // Each group is a labelled region, so this cannot accidentally match the home page's
     // "Students" card heading behind the dropdown.
     const students = await screen.findByRole('region', { name: 'Students' })
     expect(within(students).getByRole('button', { name: /Anthony Nguyen/ })).toBeInTheDocument()

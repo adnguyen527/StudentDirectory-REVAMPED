@@ -10,7 +10,7 @@ import {
 import './Sidebar.css'
 
 const NAV = [
-  { to: '/', label: 'Dashboard', icon: DashboardIcon, end: true },
+  { to: '/', label: 'Home', icon: DashboardIcon, end: true },
   { to: '/students', label: 'Students', icon: StudentsIcon, end: false },
   { to: '/instructors', label: 'Instructors', icon: InstructorsIcon, end: false },
 ]

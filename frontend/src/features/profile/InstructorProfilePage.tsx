@@ -178,11 +178,6 @@ export function InstructorProfilePage() {
             </table>
           </div>
         </AsyncBoundary>
-        {/* days_taught is distinct days, not sessions -- an instructor running six
-            sessions in a day counts once here and six in the tile above. */}
-        <p className="muted table-footnote">
-          Distinct days on site, not sessions — a day with several sessions counts once.
-        </p>
       </Card>
 
       <Card title={`Roster · ${formatNumber(instructor.unique_students)} students`} flush>

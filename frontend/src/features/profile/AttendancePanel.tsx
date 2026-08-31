@@ -99,13 +99,6 @@ export function AttendancePanel({ studentKey, lastSessionDate }: AttendancePanel
             </div>
           </div>
 
-          {/* These are different numbers and a reader will want to know which they are
-              looking at: a day with two sessions draws down two. */}
-          <p className="muted attendance-note">
-            A day is not a session — 70 student-days in the data carry more than one.
-            Unfinalized sessions count: the student attended either way.
-          </p>
-
           <table className="table attendance-months">
             <thead>
               <tr>

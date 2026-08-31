@@ -19,8 +19,8 @@
 
   /* Text */
   --text: #1e1f2b;
-  --text-muted: #82859a;
-  --text-faint: #a9acbd;
+  --text-muted: #5d5f73;
+  --text-faint: #696e88;
   --text-on-accent: #ffffff;
 
   /* Accent */
@@ -30,7 +30,7 @@
   --accent-ring: rgba(109, 40, 217, 0.16);
 
   /* Status */
-  --danger: #d92d20;
+  --danger: #ce2b1e;
   --danger-soft: #fdecea;
   --success: #067647;
 
@@ -40,8 +40,8 @@
   --wash-3: #fef0e3;
   --wash-4: #fde7ef;
   --wash-1-ink: #6d28d9;
-  --wash-2-ink: #1570ef;
-  --wash-3-ink: #c4650a;
+  --wash-2-ink: #0f65de;
+  --wash-3-ink: #aa5709;
   --wash-4-ink: #c11574;
 
   /* Spacing */

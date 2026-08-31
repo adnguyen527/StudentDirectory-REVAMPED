@@ -10,7 +10,7 @@ interface StudentsTableProps {
 /**
  * The student list's columns, in one place.
  *
- * The dashboard card and the full list page both render this, so the two cannot end up
+ * The home page's card and the full list page both render this, so the two cannot end up
  * showing different columns for the same rows.
  *
  * Every figure here is all-time -- the aggregates are batch-built by

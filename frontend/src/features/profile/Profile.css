@@ -186,12 +186,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.attendance-note {
-  margin-top: var(--space-3);
-  font-size: var(--font-size-sm);
-  max-width: 60ch;
-}
-
 .attendance-months {
   margin-top: var(--space-4);
 }

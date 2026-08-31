@@ -17,7 +17,17 @@ async function tile(label: string): Promise<HTMLElement> {
   return within(row).getByText(label).closest('.stat-tile') as HTMLElement
 }
 
-describe('dashboard', () => {
+describe('home page', () => {
+  it('is titled Home, in the heading and the nav', async () => {
+    renderApp('/')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Home' })).toBeInTheDocument()
+    // The nav item is the landing route, and it is the current one here.
+    const nav = screen.getByRole('link', { name: 'Home' })
+    expect(nav).toHaveAttribute('href', '/')
+    expect(nav).toHaveClass('nav-item-active')
+  })
+
   it('shows the all-time counts with their averages', async () => {
     renderApp('/')
 

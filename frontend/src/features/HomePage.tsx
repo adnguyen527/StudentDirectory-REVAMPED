@@ -17,7 +17,7 @@ const PREVIEW_ROWS = 8
  * rather than fixed, so these four are a placeholder for that mechanism -- StatTile and
  * Card's controls slot are the parts that will survive it.
  */
-export function DashboardPage() {
+export function HomePage() {
   const metrics = useApi<Metrics>((signal) => getMetrics(signal), [])
   const students = useApi<StudentsResponse>(
     (signal) => listStudents({ limit: PREVIEW_ROWS }, signal),
@@ -29,7 +29,7 @@ export function DashboardPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Dashboard</h1>
+        <h1>Home</h1>
         <p>All-time totals across the imported reports.</p>
       </div>
 

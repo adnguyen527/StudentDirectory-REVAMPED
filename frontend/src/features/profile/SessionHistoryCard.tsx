@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { formatDate, formatNumber, formatTime } from '../../api/bson'
 import { decodeEntities } from '../../api/text'
@@ -90,7 +91,27 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                       >
                         <td className="primary-name">{formatDate(report.date)}</td>
                         <td className="muted">{timeRange(report)}</td>
-                        <td>{report.instructors?.join(', ') || <span className="muted">—</span>}</td>
+                        <td>
+                          {report.instructors?.length ? (
+                            report.instructors.map((name, index) => (
+                              <Fragment key={name}>
+                                {index > 0 && ', '}
+                                {/* stopPropagation because the row itself toggles the
+                                    expander: without it, following the link would also
+                                    open a panel on the page being navigated away from. */}
+                                <Link
+                                  className="row-link"
+                                  to={`/instructors/${encodeURIComponent(name)}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  {name}
+                                </Link>
+                              </Fragment>
+                            ))
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
                         <td>
                           {report.centers?.[0] ? (
                             <span className="tag">{report.centers[0]}</span>

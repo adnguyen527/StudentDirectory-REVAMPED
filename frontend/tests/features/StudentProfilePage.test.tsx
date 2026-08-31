@@ -138,6 +138,39 @@ describe('student profile', () => {
     expect(within(row).getByText('Unfinalized')).toBeInTheDocument()
   })
 
+  it('opens an instructor from the instructors card', async () => {
+    // The reverse of the instructor profile's roster, which already links back here.
+    const { user } = renderApp(PROFILE)
+
+    const instructors = within(await card(/^Instructors$/))
+    await user.click(instructors.getByRole('link', { name: 'Dana Reyes' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors/Dana%20Reyes'))
+  })
+
+  it('opens an instructor from a session row without expanding it', async () => {
+    // The row toggles the notes expander, so the link has to stop the click from also
+    // opening a panel on the page being navigated away from.
+    const { user } = renderApp(PROFILE)
+
+    const history = within(await card(/Session history/))
+    const row = await history.findByRole('row', { name: /Mar 14, 2026/ })
+    await user.click(within(row).getByRole('link', { name: 'Marcus Webb' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors/Marcus%20Webb'))
+    expect(screen.queryByText(/Great progress/)).not.toBeInTheDocument()
+  })
+
+  it('links each instructor of a co-taught session separately', async () => {
+    renderApp(PROFILE)
+
+    const history = within(await card(/Session history/))
+    const row = await history.findByRole('row', { name: /Mar 14, 2026/ })
+    // Two names, two links -- not one link over "Dana Reyes, Marcus Webb".
+    expect(within(row).getByRole('link', { name: 'Dana Reyes' })).toBeInTheDocument()
+    expect(within(row).getByRole('link', { name: 'Marcus Webb' })).toBeInTheDocument()
+  })
+
   it('offers a way back rather than an error box for an unknown student', async () => {
     const { user } = renderApp('/students/does-not-exist')
 
