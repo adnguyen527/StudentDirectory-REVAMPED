@@ -1,19 +1,15 @@
-"""Request authentication.
+"""Request authentication. Every route is closed unless listed in PUBLIC_ENDPOINTS.
 
-The API serves student names and staff commentary about named children, so every route
-is closed by default and opened deliberately -- see PUBLIC_ENDPOINTS.
+Two credentials, tried in order:
 
-Today the only credential is a shared key in an X-API-Key header, which is enough for a
-server-side caller. It is deliberately NOT enough for the planned React frontend: a key
-shipped to a browser is readable in the bundle and in DevTools, so it is not a secret.
-When that frontend arrives, add a session-cookie authenticator to AUTHENTICATORS rather
-than reworking the routes -- the guard already walks a list and stops at the first
-identity, so a second mechanism is an append, not a rewrite. Note that cookie auth also
-requires a real ALLOWED_ORIGINS list, because browsers refuse to send credentials to a
-wildcard origin.
+1. A session cookie, for the browser frontend -- issued by /api/auth/login, validated
+   against `login_sessions`.
+2. An X-API-Key header, for server-side callers. Never usable from a browser: a key in
+   the bundle is readable by anyone who opens DevTools.
 
-Unconfigured means closed. If API_KEY is unset, protected routes answer 401 rather than
-running open -- a misconfiguration should cost availability, not disclosure.
+Sessions come first so a browser carrying both is identified as the person, not as the
+anonymous shared key. Cookie auth needs an explicit ALLOWED_ORIGINS -- browsers refuse
+credentials to a wildcard, and app.py refuses to start on that combination.
 """
 
 import hmac
@@ -21,13 +17,39 @@ import hmac
 from flask import g, jsonify, request
 
 from config import config
+from models import LoginSession, User
 
 
-# Endpoints, not paths: a renamed route keeps its exemption, and a typo here fails closed
-# instead of silently opening a path that no longer matches.
+# Endpoint names, not paths, so a typo fails closed rather than opening a stale path.
+# Logout is deliberately absent: it needs the session it destroys, and an unauthenticated
+# one would let anyone delete sessions by guessing.
 PUBLIC_ENDPOINTS = {
     'metrics.health_check',
+    'auth.login',
 }
+
+
+def _session_identity():
+    """The staff account behind the session cookie, or None.
+
+    The user is re-read on every request rather than copied into the session row, so
+    disabling an account takes effect immediately instead of at expiry.
+    """
+    session = LoginSession.find(request.cookies.get(config.SESSION_COOKIE_NAME))
+    if session is None:
+        return None
+
+    user = User.find_by_id(session['user_id'])
+    if user is None or user.get('disabled'):
+        return None
+
+    return {
+        'kind': 'session',
+        'user_id': user['_id'],
+        'username': user['username'],
+        # Rides along so the frontend user menu costs no extra request.
+        'display_name': user.get('display_name') or user['username'],
+    }
 
 
 def _api_key_identity():
@@ -45,9 +67,8 @@ def _api_key_identity():
     return None
 
 
-# Ordered: the first authenticator to recognise the request wins. A session-cookie
-# reader belongs here, after the key.
-AUTHENTICATORS = [_api_key_identity]
+# Ordered: the first authenticator to recognise the request wins.
+AUTHENTICATORS = [_session_identity, _api_key_identity]
 
 
 def authenticate():
@@ -73,11 +94,8 @@ def _guard():
 
     identity = authenticate()
     if identity is None:
-        if not config.API_KEY:
-            return jsonify({
-                'error': 'Server is not configured for authentication',
-                'detail': 'Set API_KEY in .env -- see .env.example',
-            }), 500
+        # The challenge names the key, not the cookie: a script author can act on it,
+        # while a browser client ignores it and goes to the login page.
         return jsonify({'error': 'Unauthorized'}), 401, {'WWW-Authenticate': 'X-API-Key'}
 
     g.identity = identity
