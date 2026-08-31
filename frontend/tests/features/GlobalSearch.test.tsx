@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { currentLocation, renderApp } from '../support/renderApp'
-import { ANTHONY_KEY } from '../support/sampleData'
+import { ANTHONY, ANTHONY_KEY } from '../support/sampleData'
 import { server } from '../support/server'
 
 /**
@@ -121,6 +121,30 @@ describe('global search', () => {
 
     // One match, one row shown: a "see all 1" link would be a link to the same thing.
     expect(screen.queryByRole('button', { name: /see all/i })).not.toBeInTheDocument()
+  })
+
+  it('offers "see all" when a group has more than it showed, and it goes to that list', async () => {
+    // Four rows per group; the count is the whole match, so anything above four needs a
+    // way through to the full list.
+    server.use(
+      http.get('/api/students/search', () =>
+        HttpResponse.json({
+          students: Array.from({ length: 4 }, (_, i) => ({
+            ...ANTHONY,
+            student_key: `key-${i}`,
+            student_name: `Match ${i}`,
+          })),
+          page: { limit: 4, offset: 0, total: 12, returned: 4 },
+        }),
+      ),
+    )
+    const { user } = renderApp()
+    await user.type(searchBox(), 'match')
+
+    const seeAll = await screen.findByRole('button', { name: /see all 12 students/i })
+    await user.click(seeAll)
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?query=match'))
   })
 
   it('says nothing matched once, not once per group', async () => {

@@ -305,7 +305,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 61 tests, Vitest + Testing Library (~11s)
+npm test                # 114 tests, Vitest + Testing Library (~13s)
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -620,11 +620,9 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       pinnable; which ones qualify gets decided as the elements are built.
 - [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
       The command-line import already works.
-- [ ] `P2` **Finish the frontend test coverage.** The harness and the high-value paths are
-      done — 61 tests in `frontend/tests/`, 92% of statements and 82% of branches. What is
-      thin: the instructors
-      list page (54%, no test of its own), the instructor profile's roster paging and
-      days-by-month grouping, `AsyncBoundary`'s loading state, and `useApi`'s
-      abort-on-unmount, which nothing currently exercises. Adding them is mechanical now
-      that `tests/support/` exists — the fixtures and handlers already cover both
-      instructor routes.
+- [x] `P2` **Frontend test coverage.** 114 tests in `frontend/tests/` — 97.8% of
+      statements, 92.6% of branches, 98.9% of lines. Every page, both list/profile pairs,
+      `useApi`'s abort-on-unmount and `AsyncBoundary`'s state precedence are covered.
+      What is left uncovered is defensive: `?? 'No center'`-style fallbacks and a handful
+      of guards for shapes the API does not currently produce. Chasing the last few percent
+      would mean asserting on branches that cannot be reached, so it stops here.

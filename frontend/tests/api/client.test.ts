@@ -29,6 +29,39 @@ describe('request', () => {
     expect(seen).toBe('?limit=10')
   })
 
+  it('sends no query string when there are no params', async () => {
+    let seen = 'unset'
+    server.use(
+      http.get('/api/metrics', ({ request: req }) => {
+        seen = new URL(req.url).search
+        return HttpResponse.json({ total_students: 0 })
+      }),
+    )
+    await request('/metrics')
+    expect(seen).toBe('')
+  })
+
+  it('lets an abort propagate rather than reporting it as a failure', async () => {
+    // An aborted request is a component unmounting, not something to show the user.
+    const controller = new AbortController()
+    const pending = request('/metrics', undefined, controller.signal).catch((e: unknown) => e)
+    controller.abort()
+
+    // Asserted on the name, not the class: DOMException is realm-bound, which is exactly
+    // the trap the client had to stop falling into.
+    const error = await pending
+    expect((error as Error).name).toBe('AbortError')
+    expect(error).not.toBeInstanceOf(ApiError)
+  })
+
+  it('falls back to a status message when the body names no error', async () => {
+    server.use(http.get('/api/metrics', () => HttpResponse.json({}, { status: 418 })))
+    const error = (await request('/metrics').catch((e: unknown) => e)) as ApiError
+    expect(error.message).toBe('Request failed (418)')
+    // No detail, so displayMessage is just the message.
+    expect(error.displayMessage).toBe('Request failed (418)')
+  })
+
   it('carries the error text from a 400', async () => {
     const error = await request('/students/search', { q: 'a' }).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ApiError)

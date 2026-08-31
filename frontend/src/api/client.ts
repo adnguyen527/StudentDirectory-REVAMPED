@@ -35,6 +35,10 @@ export class ApiError extends Error {
   }
 }
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError'
+}
+
 function buildQuery(params?: Record<string, QueryValue>): string {
   if (!params) return ''
   const search = new URLSearchParams()
@@ -60,8 +64,14 @@ export async function request<T>(
       signal,
     })
   } catch (error) {
-    // An aborted request is a component unmounting, not a failure -- let useApi ignore it.
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    // An aborted request is a component unmounting, not a failure -- let it through so
+    // useApi can ignore it rather than reporting the API as unreachable.
+    //
+    // Matched on `name`, not `instanceof DOMException`: the class is realm-bound, and an
+    // abort raised inside another realm (jsdom under test, a worker, an embedded frame)
+    // is a DOMException that fails the instanceof against this one. The name is the same
+    // everywhere the spec applies.
+    if (isAbortError(error)) throw error
     throw new ApiError(0, 'Could not reach the API. Is the Flask server running?')
   }
 

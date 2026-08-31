@@ -36,6 +36,19 @@ describe('toDate', () => {
     )
   })
 
+  it('passes a Date and a raw epoch through', () => {
+    // Not every caller hands over an envelope: a value already unwrapped upstream, or a
+    // plain millisecond number, must not come back null.
+    const date = new Date('2025-07-30T17:53:00Z')
+    expect(toDate(date)).toBe(date)
+    expect(toDate(Date.UTC(2025, 6, 30))?.toISOString()).toBe('2025-07-30T00:00:00.000Z')
+  })
+
+  it('rejects an invalid Date rather than passing it along', () => {
+    expect(toDate(new Date('nonsense'))).toBeNull()
+    expect(toDate(Number.NaN)).toBeNull()
+  })
+
   it('returns null for null, undefined and unparseable values', () => {
     expect(toDate(null)).toBeNull()
     expect(toDate(undefined)).toBeNull()

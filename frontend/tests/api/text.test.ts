@@ -38,6 +38,13 @@ describe('decodeEntities', () => {
     )
   })
 
+  it('leaves a lone surrogate alone instead of throwing', () => {
+    // fromCodePoint throws on D800-DFFF; a malformed reference must not take the page
+    // down with it.
+    expect(decodeEntities('&#55296;')).toBe('&#55296;')
+    expect(decodeEntities('&#xD800;')).toBe('&#xD800;')
+  })
+
   it('resolves references to text, never to markup', () => {
     // The decoder must not become an HTML parser: this returns the literal characters,
     // and React still escapes them on render. No row in the data contains a tag.

@@ -43,7 +43,7 @@ export function DashboardPage() {
           {metrics.error.displayMessage}
         </div>
       ) : (
-        <div className="tile-row">
+        <div className="tile-row" data-testid="tile-row">
           <StatTile
             label="Students"
             value={formatNumber(m?.total_students)}

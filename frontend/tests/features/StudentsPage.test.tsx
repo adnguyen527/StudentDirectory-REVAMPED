@@ -86,6 +86,29 @@ describe('students page', () => {
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled()
   })
 
+  it('drops the offset from the URL when paging back to the first page', async () => {
+    // ?offset=0 is noise: page one is the bare path, so a shared link is the clean one.
+    server.use(
+      http.get('/api/students', ({ request }) => {
+        const url = new URL(request.url)
+        const limit = Number(url.searchParams.get('limit') ?? 50)
+        const offset = Number(url.searchParams.get('offset') ?? 0)
+        const all = manyStudents(60)
+        const rows = all.slice(offset, offset + limit)
+        return HttpResponse.json({
+          students: rows,
+          page: { limit, offset, total: all.length, returned: rows.length },
+        })
+      }),
+    )
+    const { user } = renderApp('/students?offset=50')
+
+    expect(await screen.findByText('51–60 of 60')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /previous/i }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students'))
+  })
+
   it('says no match, which must not look like a failure', async () => {
     renderApp('/students?query=nobody')
 
