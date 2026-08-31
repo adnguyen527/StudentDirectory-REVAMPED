@@ -1,0 +1,65 @@
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.card-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.card-overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.card-overflow:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+.card-body {
+  padding: var(--space-5);
+}
+
+/* Tables and lists run to the card's edges; the header keeps the inset. */
+.card-body-flush {
+  padding: var(--space-4) 0 0;
+}
+
+.card-body-flush .table th:first-child,
+.card-body-flush .table td:first-child {
+  padding-left: var(--space-5);
+}
+
+.card-body-flush .table th:last-child,
+.card-body-flush .table td:last-child {
+  padding-right: var(--space-5);
+}

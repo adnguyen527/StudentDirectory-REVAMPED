@@ -1,0 +1,173 @@
+@import './styles/tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Shared primitives -------------------------------------------------- */
+
+/* One table style for every list, so students and instructors cannot drift apart. */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+}
+
+.table th {
+  padding: 0 var(--space-4) var(--space-3);
+  text-align: left;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover td {
+  background: var(--surface-sunken);
+}
+
+.table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wide tables scroll inside the card rather than pushing the page sideways. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.primary-name {
+  font-weight: 600;
+}
+
+/* Underlined only on hover: 50 underlined names at once is noise, but a name that leads
+   somewhere has to say so when reached. */
+.row-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.tag {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--wash-1-ink);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+/* The same pill in the "needs attention" wash: an unfinalized report, a reassigned
+   topic. Not an error -- something outstanding. */
+.tag-warn {
+  background: var(--wash-3);
+  color: var(--wash-3-ink);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-size-base);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.button:disabled {
+  color: var(--text-faint);
+  background: var(--surface-sunken);
+}
+
+/*
+ * Loading, empty and error each look different on purpose: an empty result and a failed
+ * request must never render as the same blank card.
+ */
+.state {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.state-error {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: var(--radius-md);
+  margin: var(--space-4);
+  padding: var(--space-4);
+  text-align: left;
+}
+
+.state-error strong {
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+/* Identifiers are compared, not read: monospace so a mismatch is visible at a glance. */
+.account-id {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+}

@@ -1,0 +1,118 @@
+/*
+ * Design tokens for Sigma.
+ *
+ * Every colour, space and radius in the app resolves to one of these, so the shell can be
+ * restyled from this file alone. Values follow dashboard-design-example-hcare.png: a
+ * light shell, a violet accent, soft-shadowed white cards on a grey page.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg: #f4f5f9;
+  --surface: #ffffff;
+  --surface-sunken: #fafbfd;
+  --surface-hover: #f6f4fe;
+  --border: #ecedf3;
+  --border-strong: #dfe1ea;
+
+  /* Text */
+  --text: #1e1f2b;
+  --text-muted: #5d5f73;
+  --text-faint: #696e88;
+  --text-on-accent: #ffffff;
+
+  /* Accent */
+  --accent: #6d28d9;
+  --accent-hover: #5b21b6;
+  --accent-soft: #ede7fb;
+  --accent-ring: rgba(109, 40, 217, 0.16);
+
+  /* Status */
+  --danger: #ce2b1e;
+  --danger-soft: #fdecea;
+  --success: #067647;
+
+  /* Tile icon washes, cycled by index -- see StatTile */
+  --wash-1: #ede7fb;
+  --wash-2: #e4f0fe;
+  --wash-3: #fef0e3;
+  --wash-4: #fde7ef;
+  --wash-1-ink: #6d28d9;
+  --wash-2-ink: #0f65de;
+  --wash-3-ink: #aa5709;
+  --wash-4-ink: #c11574;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radii */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-card: 14px;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.05);
+  --shadow-pop: 0 8px 28px rgba(16, 24, 40, 0.14);
+
+  /* Layout */
+  --sidebar-width: 244px;
+  --topbar-height: 68px;
+
+  /* Type */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-stat: 26px;
+}
+
+/*
+ * Only the tokens are redefined -- no component rule appears twice. The shell reads the
+ * same variable names in either scheme.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --bg: #14151c;
+    --surface: #1c1e27;
+    --surface-sunken: #191b23;
+    --surface-hover: #262437;
+    --border: #2a2c38;
+    --border-strong: #363845;
+
+    --text: #eceef5;
+    --text-muted: #9498ac;
+    --text-faint: #6f7386;
+
+    --accent: #9b7cf0;
+    --accent-hover: #b09aff;
+    --accent-soft: #2c2542;
+    --accent-ring: rgba(155, 124, 240, 0.24);
+
+    --danger: #f97066;
+    --danger-soft: #3a1f1d;
+    --success: #47cd89;
+
+    --wash-1: #2c2542;
+    --wash-2: #1c2f45;
+    --wash-3: #3a2c1a;
+    --wash-4: #3a1f2e;
+    --wash-1-ink: #b9a3f7;
+    --wash-2-ink: #7cc0ff;
+    --wash-3-ink: #f5b167;
+    --wash-4-ink: #f38bbd;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.24);
+    --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+}

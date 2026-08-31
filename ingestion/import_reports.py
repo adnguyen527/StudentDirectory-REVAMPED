@@ -61,6 +61,11 @@ def _to_snake(s):
     return re.sub(r'[^a-z0-9]+', '_', str(s).lower()).strip('_')
 
 def _parse_date(value):
+    """'07/30/2025' -> a naive datetime at midnight.
+
+    Naive on purpose, and stored that way -- see combine_session_time below for what that
+    means downstream.
+    """
     if not value:
         return None
     try:
@@ -89,6 +94,22 @@ def combine_session_time(session_date, value):
     which day it belongs to, so the two halves are joined once here rather than rejoined
     by every consumer. Returns None if either half is missing: a time on no date is not
     a moment.
+
+    THE RESULT IS NAIVE, AND MONGO STORES NAIVE AS UTC. The source gives a wall clock and
+    no zone -- "3:58 PM" at the center -- and datetime.combine keeps it that way, so what
+    lands in the database reads as 15:58 UTC while meaning 3:58 PM local. Every session in
+    the collection carries that same offset-free wall clock, so they sort, range and
+    subtract against each other correctly, which is all this system does with them.
+
+    What it means is that these are NOT instants, and converting one to a local zone
+    corrupts it: in US Central a 5:53 PM session re-reads as 12:53 PM, and a `date` at
+    midnight lands on the day before. Read and render them in UTC to get the value the
+    center actually wrote down. The frontend formats every date and time with
+    timeZone: 'UTC' for this reason -- see frontend/src/api/bson.ts.
+
+    Attaching a real zone would mean knowing each center's, handling the DST boundaries
+    across the 2024-2025 range, and backfilling 29,382 rows -- worth doing only if this
+    ever has to line up against something outside the dataset.
     """
     if isinstance(value, datetime):
         return value

@@ -1,0 +1,55 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: 0 var(--space-6);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.user-name {
+  font-size: var(--font-size-base);
+}
+
+.user-chevron {
+  transform: rotate(90deg);
+  color: var(--text-faint);
+}
+
+/* The user menu is the first thing to go when the bar gets tight. */
+@media (max-width: 720px) {
+  .topbar {
+    padding: 0 var(--space-4);
+  }
+
+  .user-name,
+  .user-chevron {
+    display: none;
+  }
+}

@@ -11,9 +11,8 @@ dashboard.
 - **Database**: MongoDB Atlas (`StudentDirectory` database)
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
-- **Tests**: `pytest` + `mongomock`
-- **Frontend**: React + TypeScript on Vite, Tailwind, React Router, TanStack Query —
-  **requires Node 20+** *(not built yet; see Frontend under TODO)*
+- **Tests**: `pytest` + `mongomock` (backend), Vitest + Testing Library + MSW (frontend)
+- **Frontend**: React + TypeScript + Vite — **Sigma**, in `frontend/` *(in progress)*
 
 ---
 
@@ -67,6 +66,27 @@ own documentation says so.
 `app.run()` is Werkzeug's development server either way — no request timeouts, no
 slow-client protection, and it says as much on startup. A deployment needs a real WSGI
 server in front of `create_app()`.
+
+### Running the frontend
+
+**Sigma** lives in `frontend/` — React + TypeScript on Vite. With Flask already
+running:
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:5173
+```
+
+**The frontend has no API key of its own.** The browser calls same-origin `/api/*`, and
+the Vite dev server attaches `X-API-Key` on the way through to Flask, reading `API_KEY`,
+`HOST` and `PORT` straight out of the **root** `.env` — the same file `app.py` reads. So
+the key never enters the bundle, and CORS is never exercised in development.
+
+This is a development-only bridge. A browser cannot hold the shared key (`auth.py` says
+why: anything in the bundle is readable in DevTools), so a deployed frontend is blocked on
+the session authenticator under **TODO → API**. `npm run build` produces a `dist/` that is
+not yet servable for that reason.
 
 ---
 
@@ -310,6 +330,41 @@ ingestion run before the API serves it:
 These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
 
+### Frontend tests
+
+```bash
+cd frontend
+npm test                # 115 tests, Vitest + Testing Library (~13s)
+npm run test:watch      # re-runs on change
+npm run test:coverage
+```
+
+**The same instinct as `mongomock`: fake the boundary, not our own seams.** MSW
+(`tests/support/server.ts`) intercepts `fetch`, so a test drives the real UI through the
+real client — `client.ts`'s error mapping, `bson.ts`'s `$date` unwrapping, `useApi`, the
+components and the router all actually execute. Nothing under `src/api` is stubbed, which
+is the point: both bugs that reached the browser (dates a day early, emoji as `&#128218;`)
+lived in exactly the seams a module-level mock would have skipped over.
+
+`tests/support/handlers.ts` reimplements the routes' real rules — the paging envelope, the
+two-character search floor that answers `400`, `404` on an unknown key — rather than
+always returning `200`. A handler that cannot fail leaves the UI's error and empty paths
+untested, and those are the ones worth having. `onUnhandledRequest: 'error'` makes an
+uncovered call a loud failure, the same way `conftest.py` points `MONGODB_URI` at an
+unroutable host.
+
+`tests/support/sampleData.ts` is deliberately the same cast as `tests/sample_data.py` —
+the Nguyen siblings, Chloe Tan, Dana Reyes — carrying the same two traps: a household
+holding two students, and a co-taught session whose pages are credited to each instructor
+in full. The difference is dialect: these are the JSON shapes the API returns, so dates are
+`{"$date": ...}`.
+
+⚠️ **`vitest.config.ts` pins `TZ` to `America/Chicago`.** The date helpers format in UTC
+because the stored datetimes are naive wall clock. On a UTC machine — most CI — a local
+reading and a UTC reading agree, so those regression tests would pass with the fix removed.
+The suite also asserts the offset is non-zero, so it fails loudly rather than silently
+proving nothing.
+
 ---
 
 ## API
@@ -465,6 +520,18 @@ pipeline = [
   100, `days_taught` to 272 per instructor, and instructor rosters to 304. All grow with
   the dataset, and all are far from MongoDB's 16 MB document limit — accepted, not a
   pending fix.
+- **Session times are local wall clock at the point of entry, with no zone attached.**
+  The source records "3:58 PM" as whoever filled in the report saw it, and `date`,
+  `session_start`, `session_end` are stored naive — which Mongo keeps as UTC, so they read
+  as `15:58Z` while meaning 3:58 PM local. **Assumed for now: one timezone throughout.**
+  It breaks the moment two locations in different zones are compared: a 4 PM session at each is the same
+  stored number but not the same moment, so "who taught latest" and any cross-center
+  duration or overlap would be quietly wrong. `@Home` sessions are the likelier first
+  crack, since the student need not be near the center at all. Fixing it means a zone per
+  center, the DST boundaries across 2024–2025, and a backfill of all 29,382 rows — not
+  worth it until a second zone actually exists. Until then, read and render these in UTC;
+  converting to a local zone corrupts them. Documented at the two ends in
+  `combine_session_time` (`ingestion/import_reports.py`) and `frontend/src/api/bson.ts`.
 
 ---
 
@@ -531,6 +598,59 @@ Items are listed in priority order within each group.
       directly: instructor totals double-count co-taught pages, so they cannot be summed
       into a center figure. *Open:* a built `centers` collection like the other aggregates,
       or computed per request, which is what would make a date range possible.
+- [ ] `P2` **Per-topic stats endpoint**, backing the Topics tab under **Frontend** — the
+      one thing that page is blocked on. Rolls up `students.topics[]` rather than
+      `dwp_reports.topics[]`: the per-topic history is already computed there, so this is
+      a rollup of 13,598 existing entries into 771 topics, not a re-derivation. Per topic:
+      students who worked it, finished, on plan, removed; median sessions to finish;
+      reassignments. *Open:* a built `topics` collection like the other aggregates, or
+      computed per request — the same question the center metrics above carry, and the same
+      trade, since computed is what would allow a date range.
+      *Also open:* the canonical name. `PK-3121-00` appears as both "Reducing Fractions
+      using GCF" and "Simplifying Fractions using GCF" — one topic renamed at the source,
+      the same shape of problem as the centers rename map below, and it has to resolve to
+      one name before topics can be listed.
+- [ ] `P2` **Filter and sort parameters on the two list routes**, backing the column
+      controls under **Frontend**. `/api/students` and `/api/instructors` accept only
+      `query` (plus `account_id` on students). They need one filter per column — `center`,
+      numeric ranges, a last-session date range — plus `sort` and `direction`, each optional
+      and combinable with the existing paging. `sort` is validated against an allowlist of
+      sortable fields and an unrecognised value is a `400`, not a silent fallback to name
+      order, in the same spirit as `pagination.parse` refusing a bad `limit`.
+
+      ⚠️ **Every sort must append the collection's unique key, or paging breaks.** This is
+      correctness, not tuning. `total_topics_on_plan` has **8 distinct values across 893
+      students, 280 of them sharing one**; `last_session_date` ties 155 rows and
+      `total_unique_topics_finished` 141. A page boundary landing inside a tie makes
+      `skip`/`limit` repeat and drop rows — the exact bug **Pagination** already claims is
+      fixed, so reintroducing it would make the docs wrong as well as the pages. `LIST_SORT`
+      in `models/student.py` and `models/instructor.py` already does this for names
+      (`student_name` then `student_key`); it becomes a function of the requested column
+      rather than a constant.
+
+      Indexes are the separate, smaller problem: one compound `(sort_field, unique_key)` per
+      sortable column, and `(centers.name, …)` for the center filter — neither collection
+      indexes `centers.name` today. Indexing every *filter × sort* combination is neither
+      practical nor needed at 893 and 103 documents, where an unindexed sort is merely
+      slower. An untied one is wrong.
+- [ ] `P2` **A list route for `dwp_reports`**, backing the report browser under
+      **Frontend**. The collection has no route of its own — it is reachable only through
+      `/api/students/<key>`, one student at a time. `/api/reports` in the shared paged
+      envelope, filtered by date range, center, instructor, student and `finalized`.
+      `models/dwp_report.py`'s `PRIVATE_FIELDS` already withholds the set that never leaves
+      the server, so the projection is in place.
+
+      ⚠️ **Date alone is not a stable sort here**, and newest-first is the obvious default.
+      The 29,382 reports fall on 309 days — a **median of 85 a day and 192 on the busiest**
+      — so nearly every page boundary lands inside a single day's tie, and `skip`/`limit`
+      over it repeats and drops rows. Sort `(date, _id)`; `_id` is the only field on this
+      collection guaranteed unique. Same requirement as the list-route sorting above, just
+      unavoidable rather than opt-in.
+
+      Indexes: `date` and `finalized` already exist, `account_id` covers the student filter.
+      A compound `(date, _id)` matches the default order, and an `instructors` index is
+      what the instructor filter would want — without it that filter scans all 29,382,
+      which is survivable but is the one filter that does not ride an existing index.
 - [ ] `P2` **Decide who sees `student_notes`** (3,594 rows). Fine for instructors,
       questionable parent-facing. Needed before anything reaches a parent.
 - [ ] `P3` **Prompt-driven agent for niche stats.** Hard requirement: it reads only what the
@@ -574,32 +694,222 @@ tiles, **this app puts the user's pinned stats** — the top row is assembled by
 hard-coded. Each card owns its header controls: a period dropdown where the data is
 time-scoped, and an overflow menu in the corner, which is where the pin button lives.
 
-- [ ] `P1` **Search for students and instructors.** The entry point everything else is
-      reached from. Both searches now exist — `/api/students/search?q=` and
-      `/api/instructors/search?q=`, minimum 2 characters, and both page — a dropdown wants
-      the first `?limit=10` and the `total` to say how many more. *Open:* a page of its own, or
-      the persistent top-bar search the layout reference uses — the reference implies
-      results appear as a dropdown, with a full page only for "see all".
-- [ ] `P1` **Student profile page** — profile, centers, instructors, topics mastered and
-      completed, session history. `/api/students/<key>` already returns all of it, so this
-      is frontend-only.
-- [ ] `P1` **Session count panel on the student record** — sessions attended over a
-      selectable period, with the dates, so a manager can tell a parent what their prepaid
-      package has used. Backed by `GET /api/students/<key>/attendance?start=&end=`, which
-      already exists.
-- [ ] `P2` **Instructor profile page** — sessions taught, unique students, roster, centers,
-      most-taught topics, `unfinalized_sessions` as a follow-up list.
-      `/api/instructors/<name>` now serves everything except the topics.
-- [ ] `P2` **User management page, admin only** — create an account, set its display name
-      and permissions, disable one, reset a password. Does for staff accounts what
-      `scripts/create_user.py` does today, without server access. Needs write endpoints
-      under `/api/auth` and the permissions work above, since "admin only" is the first
-      thing that has to be enforceable. *Open:* whether a reset sets a password directly
-      or issues a one-time link — a link needs email, which this system does not have.
+- [x] `P1` **App shell and the data path.** `frontend/` — Vite + React + TypeScript, the
+      sidebar/top-bar/card layout above, CSS custom-property tokens in
+      `src/styles/tokens.css`, and a typed client in `src/api/` that unwraps the Extended
+      JSON `json_util` emits (`{"$date"}`, `{"$oid"}`) and tells 400/401/500 apart. Auth in
+      dev is a Vite proxy injecting `X-API-Key`; see **Running the frontend**.
+- [x] `P1` **Student search.** Answered as the persistent top-bar dropdown the layout
+      reference implies, not a page of its own: debounced, `?limit=10`, `page.total` for the
+      "N more" line, and Enter takes the whole term to the list as "see all". Both open
+      questions in the old note are settled that way. Instructor search is still unwired.
+- [x] `P1` **Student list**, paged off the shared envelope with `query` and `offset` in the
+      URL so a result is linkable and Back steps through pages.
+- [x] `P1` **Student profile page** — header stats, centers, instructors, topics and full
+      session history, reached from a search result or a name in the list. Frontend-only as
+      predicted: `/api/students/<key>` serves it in one response. The topics card filters on
+      `state` and opens on **On plan**, since `total_unique_*` means *ever*; the session
+      history pages 25 at a time **in the browser** over the array already in memory, and
+      rows expand to the notes and that session's topics.
+- [x] `P1` **Session count panel on the student record.** Date range in the card's header
+      controls, showing sessions against days and a per-month breakdown. Defaults to the
+      three months ending at that student's **last session, not today** — the route refuses
+      to guess a period for the same reason, and anchoring on today would open the panel
+      empty on every student while the data ends 2025-09-17.
+- [ ] `P3` **Page the detail route's `dwp_reports`.** The profile pulls every session in one
+      response — 229 KB for the heaviest student (149 sessions). Fine at this size and the
+      reason the page needed no API work; revisit if a student ever gets big enough to feel
+      it.
+- [x] `P2` **Instructor list and profile page** — the list pages off the shared envelope
+      like the students one; the profile shows sessions taught (and how many co-taught),
+      unique students, days taught with sessions-per-day, centers, days-taught-by-month,
+      and the roster. Roster rows carry `student_key`, so they link straight through to
+      the student profile with no lookup. Frontend-only: `/api/instructors/<name>` serves
+      it in ~10 KB, and the largest roster (304) pages in the browser. Navigation runs both
+      ways: a roster row opens that student, and an instructor name on a student's profile —
+      in the Instructors card and in each session row — opens that instructor.
+      **Two gaps left, both needing backend work:** most-taught topics renders an explicit
+      "not available" card — the collection carries no topic data, see the `P2` data
+      integrity item. And `unfinalized_sessions` is a **count, not the follow-up list** the
+      original note asked for: it is surfaced as a figure with its share of the
+      instructor's sessions (Samuel Smith is 135 of 478, 28%), but listing *which* sessions
+      needs a route that serves `dwp_reports` filtered by instructor and `finalized:
+      false`, which does not exist.
+- [x] `P2` **Instructors in the global search.** Both kinds in one dropdown, under Students
+      and Instructors headings with a total beside each — grouped rather than merged
+      because a name can match both (*smith* is 15 students and 4 instructors) and a flat
+      list would not say which kind a row is or where clicking it goes. Two requests, each
+      rendering as it lands rather than waiting for the other; the dropdown only reports
+      failure if **both** fail.
+      **The Enter question is settled by group:** each group carries its own "see all N",
+      and Enter goes to whichever group actually matched — `/instructors?query=` when only
+      instructors did, `/students?query=` otherwise. Four rows per group, not five: at five
+      the students filled the dropdown and the Instructors heading fell below the fold,
+      hiding the thing the grouping exists to show.
+- [ ] `P2` **Months attended, on the student's *Sessions in a period* card.** The card
+      reports sessions and days attended, then a per-month table underneath — so "how many
+      months did they actually turn up in" can only be answered by counting rows by eye.
+      **Frontend-only:** `by_month` is already in the `/api/students/<key>/attendance`
+      response and already drives that table, so the figure is a third total beside the
+      existing two.
+
+      **A month counts only if they attended it.** No denominator, no "X of Y" — a month
+      with no attendance simply does not count, and `by_month` is built from visits so it
+      already omits those. The array's length *is* the figure; nothing needs deriving from
+      `period.start` and `period.end`.
+
+      That gap is the reason it is worth showing: **216 of 893 students, 24%, skipped at
+      least one month inside their own span**, one of them missing 10 months between first
+      session and last. For those students the count sits below the months the range covers,
+      which is the point of counting attendance rather than calendar. Across the whole
+      dataset the median student attended 5 months, against a 14-month span (Aug 2024 –
+      Sep 2025) — 109 attended in only one month, 17 in twelve.
+
+      It earns its place on a **wide** range rather than the default one: the card opens on
+      three months ending at the student's last session, where the count can only read 1–3.
+      It becomes useful once someone widens the range to a term or a year, which is also
+      when reading the table by eye stops being practical. And it extends the distinction
+      the card already trades on — sessions, days and months are three granularities of the
+      same attendance, coarsest last, so a month with twelve sessions counts once here.
+- [ ] `P2` **Pages per session on the instructor roster.** The roster shows sessions and
+      pages completed as raw totals, which makes its rows incomparable: a student seen 24
+      times will out-total one seen twice no matter how either session went. The rate is
+      what says how a session with that student actually goes, and both halves are already
+      on the roster entry — `sessions` and `pages_completed` — so this is **frontend-only**,
+      the cheapest item in this section.
+
+      It discriminates: across 8,475 roster entries the median is **4.6 pages a session**,
+      the tenth percentile 1.0 and the ninetieth 10.0, with a maximum of 34. And it matters
+      most where the totals mislead most — **40% of roster entries are a single session**,
+      where "pages completed" *is* the per-session figure but reads as a total next to a
+      24-session row.
+
+      Two things to get right: **580 entries genuinely sit at 0.0** and must render as zero,
+      not as a dash for missing; and while no roster entry currently has `sessions: 0`,
+      guard the division anyway, the way the profile's sessions-per-day tile already does.
+      The same column belongs on the student profile's Instructors card, which carries the
+      identical two totals and the identical problem.
+- [ ] `P2` **Average days worked per week, on the instructor profile.** A card beside
+      *Days taught by month*, answering how often someone actually works rather than how
+      much they have worked in total. **Frontend-only** — `days_taught[]` is already on the
+      detail response, and the whole thing is a grouping of that array.
+
+      **The denominator is the whole point.** Count the weeks from their first day taught
+      to their last, then **drop any run of three or more consecutive weeks with nothing
+      taught**. A one- or two-week gap still counts against the average — a week off is part
+      of how someone works — but a longer absence is a term break, a closure or leave, and
+      charging it to them measures the calendar rather than the person. **31 of the 103
+      instructors have a gap of four weeks or more**, so this is not a rare correction.
+
+      It lands where it should, between the two readings that get this wrong:
+
+      | denominator | median days/week | worst case |
+      |---|---|---|
+      | every week in the span | 1.55 | 0.18 — punished for a long absence |
+      | **gaps ≤ 2 weeks counted** | **1.76** | **0.62** |
+      | only weeks actually worked | 1.98 | 1.00 by construction — flatters everyone |
+
+      That rule drops **384 of 2,620 span weeks, 15%**, as long absences. A run after the
+      final day taught never counts either, since the span ends there.
+
+      Two edges: **4 instructors span less than two weeks**, where any weekly rate is noise
+      — show the raw days instead. And group by **ISO week in UTC**, for the same reason the
+      months grouping does: these are naive wall-clock dates, so a local read can push a
+      Sunday or Monday across a week boundary.
+- [ ] `P2` **Topics tab in the sidebar** — per-topic stats across the whole program, which
+      is the one question shape the app cannot answer today. 771 distinct topics over
+      13,598 (student, topic) pairs: for each, how many students worked it, how many
+      finished, how many are on plan or removed, median sessions to finish, and how often
+      it was reassigned. Sortable, so "most reassigned" and "lowest finish rate" are
+      reachable. *Half of Odd Numbers* is the shape — 176 students, 117 finished, 40 on
+      plan, 23 removed, median 4 sessions, 18 reassignments. **Not frontend-only**, unlike
+      the student profile: blocked on the topics endpoint under **API**. The per-student
+      view of the same data is the profile's topics card.
+
+      ⚠️ **Group or filter by topic type, or the finish-rate column lies.** The id prefix
+      predicts it almost entirely: `PK` — the curriculum, 663 topics and 13,268 pairs —
+      finishes 68.7%, while `GF` is 28.3%, `WCH` 13.0%, `FO` 11.4% and the single `WOB`
+      topic 0.0% across 20 students. Those are a different kind of item and do not carry a
+      completion status the same way, so a flat ranking by finish rate fills the bottom
+      with them and reads as "hardest topics".
+- [ ] `P2` **Filter and sort each list by its own columns.** Both lists take only a name
+      substring today and are stuck in name order, so a column can be read but not asked
+      about — there is no way to say "Southlake only", "fewer than 5 sessions", "nothing
+      since June", or "most sessions first". Every column gets a filter, and its **type
+      follows the column**, so the whole thing is one pattern applied seven times rather
+      than seven separate features:
+
+      | column | students | instructors | filter |
+      |---|---|---|---|
+      | name | ✓ | ✓ | text — **exists** as `?query=` |
+      | account | ✓ | — | exact — **exists** as `?account_id=` |
+      | center | ✓ | ✓ | select |
+      | sessions | ✓ | ✓ | numeric range |
+      | topics finished / students taught | ✓ | ✓ | numeric range |
+      | on plan / days taught | ✓ | ✓ | numeric range |
+      | unfinalized | — | ✓ | numeric range |
+      | last session | ✓ | ✓ | date range |
+
+      **The numeric and date columns also sort**, from the same header: clicking one
+      toggles **descending → ascending → descending**. Descending first because that is the
+      end anyone asks for — most sessions, most unfinalized, most recent. One sort at a
+      time; clicking another column starts that column at its own default, and the name
+      column keeps today's ascending-by-name as the list's resting order.
+
+      The controls belong in each `Card`'s header slot, hung off the column headers so the
+      filter sits where the value it filters is read, and `sort` and `direction` join
+      `query`, `offset` and the filters in the URL, so a filtered *and* sorted view is
+      linkable and Back steps through it. Changing the sort has to reset the offset, and so
+      does clearing a filter — page 3 of one ordering is not page 3 of another, which the
+      existing "clear filter" button already handles for `query`.
+      Blocked on the query parameters under **API**.
+
+      Four things the data says before any of it is built:
+
+      - **An instructor center filter means anywhere they have taught**, not their primary
+        center — so one instructor can appear under two centers, deliberately. 395 North
+        Dallas / 234 Southlake / 134 Forney / 130 Tyler. It needs saying because the two
+        readings disagree for a tenth of the roster: **11 of 103 instructors teach at
+        several**, while **no student attends more than one** (0 of 893), which makes the
+        same filter unambiguous on the other list.
+      - ⚠️ **Anchor the last-session range on the latest session in the data, not today.**
+        Same trap as the attendance panel: the data ends 2025-09-17, so a "last 30 days"
+        filter run now matches nobody. For scale, 313 students had no session in the data's
+        final month, 226 in three months, 87 in six.
+      - **A range beats a checkbox on the count columns.** "Has unfinalized reports" would
+        match 70 of 103 instructors and "has topics on plan" 822 of 893 students — neither
+        narrows anything. A minimum is what separates a straggler from a problem.
+      - **Delivery method is not a column and cannot become one yet.** `@Home` / `In-Center`
+        lives on `dwp_reports` and no aggregate carries it, so it needs `build_students.py`
+        to roll it up before it could be shown, let alone filtered.
+- [ ] `P2` **Report browser** — a page for reading `dwp_reports` across students. Today a
+      report is reachable only one student at a time, through the session history on their
+      profile, so questions that span students cannot be asked at all: what came in
+      yesterday, everything Dana Reyes taught last week, every report still unfinalized.
+      29,382 reports over 309 days. Blocked on the list route under **API**.
+
+      Two views, and they earn their place differently:
+
+      - **The list**, filtered on the same column pattern as the other two lists: date
+        range, center, instructor, student, and finalized. `finalized: false` is the one
+        that pays for the page on its own — **1,068 unfinalized reports**, and it is the
+        *follow-up list* the instructor profile still cannot give, since
+        `/api/instructors/<name>` serves only a count. Filtering that list by instructor is
+        the same question answered properly.
+      - **A single report**, showing the **whole** record. The profile's session history
+        deliberately drops `card_level`, `stars_*`, `student_goal*` and `schoolwork_*`
+        because they are populated on under a fifth of rows and would be dead columns on
+        almost every student — but on the one report that has them they are the point.
+        Render what is present, omit what is not, as the notes expander already does.
+
+      ⚠️ **Settle `student_notes` before this ships**, not after. 3,594 reports carry them,
+      and the existing `P2` question about who may read them is sharper here than on a
+      profile: this page makes staff commentary about named children browsable in bulk,
+      filtered by center and instructor, by anyone who can reach the API.
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
-- [ ] `P3` **Home dashboard the user assembles.** A pin button on any stat in the app puts
+- [ ] `P3` **Pinned stats on the Home page.** A pin button on any stat in the app puts
       that module in the top row of the home page — the row the reference layout fills with
       fixed KPI tiles. Every stat has to render standalone at tile size, and the layout is
       per person. Not every stat will be pinnable; which ones qualify gets decided as the
@@ -608,3 +918,9 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       storage, which needs no endpoint and no schema.
 - [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
       The command-line import already works.
+- [x] `P2` **Frontend test coverage.** 115 tests in `frontend/tests/` — 97.8% of
+      statements, 92.6% of branches, 98.9% of lines. Every page, both list/profile pairs,
+      `useApi`'s abort-on-unmount and `AsyncBoundary`'s state precedence are covered.
+      What is left uncovered is defensive: `?? 'No center'`-style fallbacks and a handful
+      of guards for shapes the API does not currently produce. Chasing the last few percent
+      would mean asserting on branches that cannot be reached, so it stops here.
