@@ -1,0 +1,68 @@
+.stat-tile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-md);
+}
+
+.stat-icon-1 { background: var(--wash-1); color: var(--wash-1-ink); }
+.stat-icon-2 { background: var(--wash-2); color: var(--wash-2-ink); }
+.stat-icon-3 { background: var(--wash-3); color: var(--wash-3-ink); }
+.stat-icon-4 { background: var(--wash-4); color: var(--wash-4-ink); }
+
+.stat-text {
+  min-width: 0;
+}
+
+.stat-value {
+  font-size: var(--font-size-stat);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-base);
+}
+
+.stat-sub {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--font-size-sm);
+}
+
+/* A bar the width of a plausible number, so the row does not resize when data lands. */
+.stat-skeleton {
+  display: inline-block;
+  width: 72px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--border) 25%, var(--surface-sunken) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: stat-shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes stat-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-skeleton { animation: none; }
+}

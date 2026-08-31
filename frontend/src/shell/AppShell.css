@@ -1,0 +1,72 @@
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+  grid-template-areas:
+    'sidebar topbar'
+    'sidebar content';
+  height: 100%;
+}
+
+.sidebar {
+  grid-area: sidebar;
+}
+
+.topbar {
+  grid-area: topbar;
+}
+
+.app-content {
+  grid-area: content;
+  /* Only this scrolls; minmax(0, 1fr) above is what lets it, rather than the grid growing
+     to fit its content and pushing the whole page. */
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+/* The page's own stack: a tile row above a grid of cards. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 1440px;
+}
+
+.page-header h1 {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.page-header p {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+/*
+ * The pinned-stats row. auto-fit rather than a fixed count: the layout reference has four
+ * tiles, but this row is meant to be assembled by pinning, so its length is not fixed.
+ */
+.tile-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'topbar'
+      'content';
+  }
+
+  /* Below this the rail costs more than it gives; nav returns as a drawer later. */
+  .sidebar {
+    display: none;
+  }
+
+  .app-content {
+    padding: var(--space-4);
+  }
+}
