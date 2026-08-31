@@ -1,31 +1,80 @@
+import { useSearchParams } from 'react-router-dom'
+
+import { formatNumber } from '../api/bson'
+import { PAGE_SIZE, listInstructors } from '../api/endpoints'
+import type { InstructorsResponse } from '../api/types'
+import { useApi } from '../hooks/useApi'
+import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
+import { Pager } from '../shell/Pager'
+import { InstructorsTable } from './InstructorsTable'
 
 /**
- * Placeholder, so the nav item does not dead-end.
+ * The full instructor list.
  *
- * The plumbing is already here -- `listInstructors` and `InstructorListItem` are written
- * and the API returns the same envelope the students list uses -- so this becomes a real
- * table by reusing StudentsTable's shape. It is left out of this pass deliberately.
+ * 103 documents fit in three pages and would not need paging at all, but it shares the
+ * students list's shape so both read the same way and the roster can grow without this
+ * changing. Filter and page live in the URL for the same reason as there.
  */
 export function InstructorsPage() {
+  const [params, setParams] = useSearchParams()
+  const query = params.get('query') ?? ''
+  const offset = Math.max(0, Number(params.get('offset') ?? 0) || 0)
+
+  const { data, loading, error } = useApi<InstructorsResponse>(
+    (signal) => listInstructors({ limit: PAGE_SIZE, offset, query }, signal),
+    [query, offset],
+  )
+
+  function goToOffset(next: number) {
+    const updated = new URLSearchParams(params)
+    if (next > 0) updated.set('offset', String(next))
+    else updated.delete('offset')
+    setParams(updated)
+  }
+
+  const page = data?.page
+
   return (
     <div className="page">
       <div className="page-header">
         <h1>Instructors</h1>
-        <p>Not built yet.</p>
+        <p>
+          {page
+            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, sorted by name.`
+            : 'Sorted by name.'}
+        </p>
       </div>
 
-      <Card title="Next up" showOverflow={false}>
-        <p className="muted">
-          <code>/api/instructors</code> already serves sessions taught, unique students,
-          centers and unfinalized sessions in the same paged envelope the students list
-          uses, and the typed client for it is in place.
-        </p>
-        <p className="muted" style={{ marginTop: 'var(--space-3)' }}>
-          What it is waiting on is the most-taught topics field — the collection carries no
-          topic data today, so an instructor profile would be missing the part a manager
-          would actually come here for.
-        </p>
+      <Card
+        title={query ? `Instructors matching “${query}”` : 'Instructors'}
+        flush
+        controls={
+          query ? (
+            <button
+              type="button"
+              className="button"
+              // The offset goes with the filter -- page 2 of the filtered list is not
+              // page 2 of the whole.
+              onClick={() => setParams(new URLSearchParams())}
+            >
+              Clear filter
+            </button>
+          ) : undefined
+        }
+      >
+        <AsyncBoundary
+          loading={loading}
+          error={error}
+          empty={data?.instructors.length === 0}
+          emptyMessage={
+            query ? `No instructors match “${query}”.` : 'No instructors in the database yet.'
+          }
+        >
+          <InstructorsTable instructors={data?.instructors ?? []} />
+        </AsyncBoundary>
+
+        {page && !error && <Pager page={page} onChange={goToOffset} />}
       </Card>
     </div>
   )

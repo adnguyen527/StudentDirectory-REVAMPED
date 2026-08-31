@@ -154,24 +154,63 @@ export interface StudentDetailResponse {
 }
 
 /**
- * An instructor as the list routes return them.
+ * The instructor fields both routes return.
  *
- * models/instructor.py projects out days_taught and students; total_days_taught and
- * unique_students say the same thing in one number each.
+ * models/instructor.py's LIST_PROJECTION drops days_taught and students -- the two arrays
+ * that grow with the dataset. total_days_taught and unique_students say the same thing in
+ * one number each, which is why the list can do without them.
+ *
+ * Keyed on instructor_name, because a name is all the source data carries. Two people
+ * sharing a name merge into one document and nothing here can tell them apart.
  */
-export interface InstructorListItem {
+export interface InstructorBase {
   _id: ExtOid
   instructor_name: string
   total_sessions_taught: number
+  /** Sessions shared with another instructor. A subset of total_sessions_taught. */
   co_taught_sessions: number
-  /** Sessions taught whose report was never completed -- a follow-up list. */
+  /** Sessions taught whose report was never completed. */
   unfinalized_sessions: number
+  /**
+   * Attributed per instructor per session, so a co-taught session's pages count for each
+   * of them. Summing this across instructors exceeds the true total -- do not.
+   */
   total_pages_completed: number
   total_days_taught: number
   last_session_date: ExtDate | null
   unique_students: number
   centers: CenterCount[]
   last_modified: ExtDate
+}
+
+/** An instructor as the list routes return them -- the projected arrays are absent. */
+export type InstructorListItem = InstructorBase
+
+/**
+ * One student on an instructor's roster.
+ *
+ * Carries student_key, so a roster row links straight to that student's profile without
+ * a lookup.
+ */
+export interface InstructorRosterEntry {
+  student_key: string
+  student_name: string
+  account_id: string
+  sessions: number
+  pages_completed: number
+}
+
+/** The detail document: the base plus the two arrays the list projection drops. */
+export interface InstructorDetail extends InstructorBase {
+  /** Every distinct day taught, oldest first. Up to 209 in the current data. */
+  days_taught: ExtDate[]
+  /** Sorted by sessions, so [0] is who they taught most. Up to 304 entries. */
+  students: InstructorRosterEntry[]
+}
+
+/** Wrapped in an object rather than returned bare, so stats can be added beside it. */
+export interface InstructorDetailResponse {
+  instructor: InstructorDetail
 }
 
 /** routes/metrics.py -- all-time counts across the collections. */

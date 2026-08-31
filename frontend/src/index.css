@@ -112,6 +112,13 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* The same pill in the "needs attention" wash: an unfinalized report, a reassigned
+   topic. Not an error -- something outstanding. */
+.tag-warn {
+  background: var(--wash-3);
+  color: var(--wash-3-ink);
+}
+
 .button {
   display: inline-flex;
   align-items: center;

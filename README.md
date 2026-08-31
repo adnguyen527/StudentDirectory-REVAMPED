@@ -11,7 +11,7 @@ dashboard.
 - **Database**: MongoDB Atlas (`StudentDirectory` database)
 - **Backend**: Python / Flask
 - **Data ingestion**: Python (`openpyxl`)
-- **Tests**: `pytest` + `mongomock`
+- **Tests**: `pytest` + `mongomock` (backend), Vitest + Testing Library + MSW (frontend)
 - **Frontend**: React + TypeScript + Vite — **Sigma**, in `frontend/` *(in progress)*
 
 ---
@@ -301,6 +301,41 @@ ingestion run before the API serves it:
 These skip with a clear message when `MONGODB_URI` is unset or still holds the
 `.env.example` placeholders, so they are safe to leave in a CI run that has no credentials.
 
+### Frontend tests
+
+```bash
+cd frontend
+npm test                # 61 tests, Vitest + Testing Library (~11s)
+npm run test:watch      # re-runs on change
+npm run test:coverage
+```
+
+**The same instinct as `mongomock`: fake the boundary, not our own seams.** MSW
+(`tests/support/server.ts`) intercepts `fetch`, so a test drives the real UI through the
+real client — `client.ts`'s error mapping, `bson.ts`'s `$date` unwrapping, `useApi`, the
+components and the router all actually execute. Nothing under `src/api` is stubbed, which
+is the point: both bugs that reached the browser (dates a day early, emoji as `&#128218;`)
+lived in exactly the seams a module-level mock would have skipped over.
+
+`tests/support/handlers.ts` reimplements the routes' real rules — the paging envelope, the
+two-character search floor that answers `400`, `404` on an unknown key — rather than
+always returning `200`. A handler that cannot fail leaves the UI's error and empty paths
+untested, and those are the ones worth having. `onUnhandledRequest: 'error'` makes an
+uncovered call a loud failure, the same way `conftest.py` points `MONGODB_URI` at an
+unroutable host.
+
+`tests/support/sampleData.ts` is deliberately the same cast as `tests/sample_data.py` —
+the Nguyen siblings, Chloe Tan, Dana Reyes — carrying the same two traps: a household
+holding two students, and a co-taught session whose pages are credited to each instructor
+in full. The difference is dialect: these are the JSON shapes the API returns, so dates are
+`{"$date": ...}`.
+
+⚠️ **`vitest.config.ts` pins `TZ` to `America/Chicago`.** The date helpers format in UTC
+because the stored datetimes are naive wall clock. On a UTC machine — most CI — a local
+reading and a UTC reading agree, so those regression tests would pass with the fix removed.
+The suite also asserts the offset is non-zero, so it fails loudly rather than silently
+proving nothing.
+
 ---
 
 ## API
@@ -535,19 +570,30 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       response — 229 KB for the heaviest student (149 sessions). Fine at this size and the
       reason the page needed no API work; revisit if a student ever gets big enough to feel
       it.
-- [ ] `P2` **Instructor list and profile page** — sessions taught, unique students, roster,
-      centers, most-taught topics, `unfinalized_sessions` as a follow-up list.
-      `/api/instructors/<name>` now serves everything except the topics. The nav item and
-      the typed client exist; the route renders a placeholder.
-- [ ] `P2` **Instructors in the global search.** The top-bar dropdown searches students
-      only. `/api/instructors/search?q=` already answers in the same paged envelope and
-      already returns everything a row needs — name, sessions taught, unique students,
-      centers — so the client side is a `searchInstructors` call beside the existing
-      `listInstructors` in `src/api/endpoints.ts` and a second section in the dropdown.
-      Group the results under Students and Instructors headings with a count each, since a
-      name can match both. Sits behind the item above: an instructor hit has nowhere useful
-      to land while the profile is a placeholder. *Open:* whether Enter still means
-      `/students?query=`, which stops being a sensible "see all" once results span both.
+- [x] `P2` **Instructor list and profile page** — the list pages off the shared envelope
+      like the students one; the profile shows sessions taught (and how many co-taught),
+      unique students, days taught with sessions-per-day, centers, days-taught-by-month,
+      and the roster. Roster rows carry `student_key`, so they link straight through to
+      the student profile with no lookup. Frontend-only: `/api/instructors/<name>` serves
+      it in ~10 KB, and the largest roster (304) pages in the browser.
+      **Two gaps left, both needing backend work:** most-taught topics renders an explicit
+      "not available" card — the collection carries no topic data, see the `P2` data
+      integrity item. And `unfinalized_sessions` is a **count, not the follow-up list** the
+      original note asked for: it is surfaced as a figure with its share of the
+      instructor's sessions (Samuel Smith is 135 of 478, 28%), but listing *which* sessions
+      needs a route that serves `dwp_reports` filtered by instructor and `finalized:
+      false`, which does not exist.
+- [x] `P2` **Instructors in the global search.** Both kinds in one dropdown, under Students
+      and Instructors headings with a total beside each — grouped rather than merged
+      because a name can match both (*smith* is 15 students and 4 instructors) and a flat
+      list would not say which kind a row is or where clicking it goes. Two requests, each
+      rendering as it lands rather than waiting for the other; the dropdown only reports
+      failure if **both** fail.
+      **The Enter question is settled by group:** each group carries its own "see all N",
+      and Enter goes to whichever group actually matched — `/instructors?query=` when only
+      instructors did, `/students?query=` otherwise. Four rows per group, not five: at five
+      the students filled the dropdown and the Instructors heading fell below the fold,
+      hiding the thing the grouping exists to show.
 - [ ] `P2` **Topics tab in the sidebar** — per-topic stats across the whole program, which
       is the one question shape the app cannot answer today. 771 distinct topics over
       13,598 (student, topic) pairs: for each, how many students worked it, how many
@@ -574,3 +620,11 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       pinnable; which ones qualify gets decided as the elements are built.
 - [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
       The command-line import already works.
+- [ ] `P2` **Finish the frontend test coverage.** The harness and the high-value paths are
+      done — 61 tests in `frontend/tests/`, 92% of statements and 82% of branches. What is
+      thin: the instructors
+      list page (54%, no test of its own), the instructor profile's roster paging and
+      days-by-month grouping, `AsyncBoundary`'s loading state, and `useApi`'s
+      abort-on-unmount, which nothing currently exercises. Adding them is mechanical now
+      that `tests/support/` exists — the fixtures and handlers already cover both
+      instructor routes.

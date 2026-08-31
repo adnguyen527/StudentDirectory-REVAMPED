@@ -3,6 +3,7 @@
 import { request } from './client'
 import type {
   AttendanceResponse,
+  InstructorDetailResponse,
   InstructorsResponse,
   Metrics,
   StudentDetailResponse,
@@ -32,6 +33,21 @@ export function listStudents(params: ListParams = {}, signal?: AbortSignal) {
 
 export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
   return request<InstructorsResponse>('/instructors', { ...params }, signal)
+}
+
+/**
+ * One instructor, with their roster and every day taught.
+ *
+ * The name is the key -- it is all the source data carries -- so it travels in the path.
+ * Small next to the student detail: ~10 KB typical, and the largest roster in the data is
+ * 304 students.
+ */
+export function getInstructor(instructorName: string, signal?: AbortSignal) {
+  return request<InstructorDetailResponse>(
+    `/instructors/${encodeURIComponent(instructorName)}`,
+    undefined,
+    signal,
+  )
 }
 
 /**
@@ -76,4 +92,9 @@ export function getStudentAttendance(
  */
 export function searchStudents(q: string, limit = 10, signal?: AbortSignal) {
   return request<StudentsResponse>('/students/search', { q, limit }, signal)
+}
+
+/** The same, over instructors. Same `q` spelling, same envelope, same 2-character floor. */
+export function searchInstructors(q: string, limit = 10, signal?: AbortSignal) {
+  return request<InstructorsResponse>('/instructors/search', { q, limit }, signal)
 }
