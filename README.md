@@ -206,11 +206,24 @@ Aggregated instructor profiles built from `dwp_reports`. Rebuilt by
 
 `instructor_name`, `total_sessions_taught`, `co_taught_sessions`, `unfinalized_sessions`,
 `total_pages_completed`, `total_days_taught`, `days_taught[]`, `last_session_date`,
-`unique_students`, `students[]` (roster keyed by `student_key`), `centers[]`,
-`last_modified`.
+`unique_students`, `students[]` (roster keyed by `student_key`), `unique_topics_taught`,
+`topics[]`, `centers[]`, `last_modified`.
 
 **Index**: `instructor_name` (**unique** - Instructors are identified by name alone, because that is all the source data carries.
 Two distinct people sharing a name would merge into one document.).
+
+**`topics[]` ranks what each instructor taught most** — `{topic_id, name, sessions}`, most
+taught first then alphabetical, for the instructor profile page. It holds the same 16,932
+(instructor, topic) pairs as `topics.instructors[]`, read from the other side — exactly the
+way `students[]` here mirrors `students.instructors[]`. Both sides give each instructor on
+a co-taught session full credit, so they agree pair for pair, and
+`test_instructor_topics_and_topic_instructors_are_the_same_pairs` holds them to it. A
+median instructor has 126 distinct topics; the widest, 504.
+
+The display name comes from `build_topics.canonical_name`, so a topic the source spells two
+ways reads the same here as on the topics page. That couples the builds: rebuild `topics`
+after a source rename without rebuilding `instructors` and the old name lingers here until
+this one runs too.
 
 **Co-taught sessions credit each instructor the full page count** — pages are copied, not
 split. 2,563 of 29,382 sessions have more than one instructor, so summing
@@ -233,6 +246,61 @@ One document per student per **day attended**, built from `dwp_reports` by
 **A day is not a session.** 70 student-days carry more than one DWP row (69 with two, one
 with three), so 29,382 sessions collapse to 29,311 days. Counting rows overstates
 attendance by exactly those 71 extra sessions.
+
+### `topics` — 771 documents
+
+One document per topic across the whole program, built from `dwp_reports` by
+`ingestion/build_topics.py`. Backs the Topics tab.
+
+`topic_id`, `name`, `also_known_as[]`, `sessions`, `times_worked_on`, `times_completed`,
+`times_mastered`, `unique_students`, `students_finished`, `students_on_plan`,
+`students_removed`, `students_ever_finished`, `total_reassignments`,
+`median_sessions_to_finish`, `unique_instructors`, `instructors[]`, `first_taught`,
+`last_taught`, `last_modified`.
+
+**Indexes**: `topic_id` (**unique**), `sessions`, `name`.
+
+**It reuses the student builder's history.** `build_topics.py` reads `dwp_reports` and
+calls `build_students.build_topic_history()` per student, then rolls the results up by
+id — so what counts as an *assignment*, and therefore `total_reassignments` and the three
+state counts, has one definition shared with `students.topics[]`. Change
+`DISPLACED_TOPICS_THRESHOLD` and both aggregates move together. The two reconcile exactly:
+50,900 topic entries, 13,598 (student, topic) pairs, 1,235 reassignments.
+
+**Counts are per (student, topic) pair, not per session.** `students_finished` is how many
+students finished the topic; someone who worked it across nine sessions counts once.
+`state` reads a student's last assignment only, so the three state counts partition
+`unique_students` exactly. `students_ever_finished` asks the other question — ever
+completed or mastered, even if the topic was later handed back — so it can exceed
+`students_finished`. `median_sessions_to_finish` is `null` for a topic nobody has
+finished, which is an answer rather than a missing field.
+
+**`instructors[]` ranks who taught the topic most** — `{name, sessions}`, most sessions
+first, then alphabetical so the order is stable between builds. This is what the topic
+page's "taught most by" list reads. It is a detail-view array: 16,932 roster entries
+across 771 topics, a median of 17 per topic and 82 at the widest, so when `models/topic.py`
+lands it should sit in a `LIST_PROJECTION` exclusion the way `topics[]` and `instructors[]`
+already do on students (`models/student.py:11`). `unique_instructors` is kept alongside it
+so a list view has the count without pulling the array.
+
+**Co-taught sessions credit each instructor in full here too.** 5,216 of 50,900 topic
+entries have more than one instructor, so the credits summed across a topic exceed that
+topic's own sessions — 56,728 against 50,900 program-wide. Intended, and the same rule the
+`instructors` collection applies to pages: these are per-instructor figures, not a
+breakdown of the topic's sessions. **There is deliberately no page count on these entries**
+— pages are recorded once per session and a session covers several topics, so charging a
+session's pages to each of its topics would multiply the real number. `build_instructors`
+can credit pages in full because its unit *is* the session; here it is not.
+
+**Three ids carry two names, and only one is a rename.** `PK-3121-00` is the real one:
+"Reducing Fractions using GCF" stops on 2024-10-01 and "Simplifying Fractions using GCF"
+runs from 2024-10-05 to 2025-09-17. The other two are not renames at all — on `PK-3099-00`
+and `PK-3081-00` both names start the same day and run side by side for the topic's whole
+life, splitting near 50/50. A rename map would not fix those, so the name is settled by a
+rule: **most recently used, then most sessions, then alphabetical**, with the names not
+chosen kept in `also_known_as` so a search for the old name still finds the topic.
+Last-used is chosen because it stays correct the next time the source renames something;
+on all three collisions today it happens to agree with most-sessions.
 
 ### `users` and `login_sessions` — staff accounts and their logins
 
@@ -257,16 +325,24 @@ code does not keep.
 
 ## Rebuilding the aggregates
 
-All three builders are pure functions of `dwp_reports` — nothing in `students`,
-`instructors` or `attendance_reports` is authored, so they can be rebuilt from scratch at
-any time.
+All four builders are pure functions of `dwp_reports` — nothing in `students`,
+`instructors`, `attendance_reports` or `topics` is authored, so they can be rebuilt from
+scratch at any time.
 
 ```bash
 python ingestion/import_reports.py      # Excel -> dwp_reports
 python ingestion/build_students.py      # dwp_reports -> students
 python ingestion/build_instructors.py   # dwp_reports -> instructors
 python ingestion/build_attendance.py    # dwp_reports -> attendance_reports
+python ingestion/build_topics.py        # dwp_reports -> topics
 ```
+
+The builders share code but not data. `build_topics.py` imports `build_topic_history` from
+`build_students.py` so the two agree on what an assignment is, and `build_instructors.py`
+imports `canonical_name` from `build_topics.py` so the two agree on what a topic is called.
+None of them reads another aggregate's collection, so **the order of the four builds does
+not matter** — but a source rename does mean rebuilding `topics` *and* `instructors`, since
+both embed the topic name.
 
 Each builder `drop()`s and recreates its target collection, and creates indexes **before**
 inserting so a bad build fails ahead of the write.
@@ -308,8 +384,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 470 offline tests -- no network, no credentials (~3s)
-pytest --integration    # + 53 read-only checks against the real cluster
+pytest                  # 506 offline tests -- no network, no credentials (~3s)
+pytest --integration    # + 89 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -519,7 +595,10 @@ pipeline = [
 - **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student and `topics` to
   100, `days_taught` to 272 per instructor, and instructor rosters to 304. All grow with
   the dataset, and all are far from MongoDB's 16 MB document limit — accepted, not a
-  pending fix.
+  pending fix. The two sides of the instructor/topic relationship behave differently here:
+  `topics.instructors[]` tops out at 82 and is bounded by staff headcount (103 people), so
+  it cannot grow the way the others do, while `instructors.topics[]` runs to 504 and is
+  bounded by the curriculum (771 topics) instead.
 - **Session times are local wall clock at the point of entry, with no zone attached.**
   The source records "3:58 PM" as whoever filled in the report saw it, and `date`,
   `session_start`, `session_end` are stored naive — which Mongo keeps as UTC, so they read
@@ -546,9 +625,25 @@ Items are listed in priority order within each group.
 - [x] `P2` **Add completed topics to `students`.** Done, as part of `topics[]` — one entry
       per topic with per-status counts, reassignments and current standing. Rebuilt:
       13,598 topic entries, 187 students with a reassigned topic.
-- [ ] `P2` **Add most-taught topics to `instructors`.** Ranked topic counts across the
-      sessions each instructor ran; the collection carries no topic data today. For the
-      instructor profile page.
+- [x] `P2` **Add most-taught topics to `instructors`.** Done, as `topics[]` — ranked
+      `{topic_id, name, sessions}` per instructor, plus `unique_topics_taught`. The mirror
+      of `topics.instructors[]`: the same 16,932 pairs from the other side, same co-taught
+      full-credit rule, named by the same `canonical_name`, and reconciled pair for pair in
+      the integration tests. 103 instructors, a median of 126 distinct topics each.
+- [ ] `P2` **Three fields the topic detail page needs**, none of which are in `topics`
+      today. Two are cheap: `mean_sessions_to_finish` and `median_days_to_finish` — the
+      `roll_up()` loop in `ingestion/build_topics.py` already holds each student's
+      `sessions`, `first_seen`, `last_seen` and `last_assignment_started`, so both fall out
+      of what it is already iterating.
+
+      The third is the page figure, and it is the one that adds real work: it needs a
+      second pass over `dwp_reports` to build each student's baseline pages-per-session
+      before any topic can be compared against it. **It reads the session's total
+      `pages_completed`, compared to the student's own baseline — not the topic's share of
+      the pages.** Nobody should later "simplify" it into an attribution; a session carries
+      2.17 topics on average, so a per-topic share does not exist to be computed. See the
+      detail-page item under **Frontend** for the ~1.12 neutral point and the co-occurrence
+      caveat.
 - [ ] `P2` **Switch `_upsert()` to the natural key**, so an edited row updates its document
       instead of landing beside it. Hash demoted to change detection. The write endpoints
       need this.
@@ -599,17 +694,24 @@ Items are listed in priority order within each group.
       into a center figure. *Open:* a built `centers` collection like the other aggregates,
       or computed per request, which is what would make a date range possible.
 - [ ] `P2` **Per-topic stats endpoint**, backing the Topics tab under **Frontend** — the
-      one thing that page is blocked on. Rolls up `students.topics[]` rather than
-      `dwp_reports.topics[]`: the per-topic history is already computed there, so this is
-      a rollup of 13,598 existing entries into 771 topics, not a re-derivation. Per topic:
-      students who worked it, finished, on plan, removed; median sessions to finish;
-      reassignments. *Open:* a built `topics` collection like the other aggregates, or
-      computed per request — the same question the center metrics above carry, and the same
-      trade, since computed is what would allow a date range.
-      *Also open:* the canonical name. `PK-3121-00` appears as both "Reducing Fractions
-      using GCF" and "Simplifying Fractions using GCF" — one topic renamed at the source,
-      the same shape of problem as the centers rename map below, and it has to resolve to
-      one name before topics can be listed.
+      one thing that page is blocked on. The data half is done: `topics` is a built
+      collection, 771 documents with students who worked each topic, finished, on plan,
+      removed, median sessions to finish, reassignments, and a ranked `instructors[]` for
+      the "taught most by" list on the detail view. What is left is the model and
+      the routes — `models/topic.py` and `routes/topics.py`: the paged list, plus
+      `/api/topics/search?q=` mirroring `/api/students/search?q=` (two-character floor,
+      `400` below it) for the list's own search bar, and `/api/topics/<topic_id>` for the
+      detail page. Search has to cover `also_known_as` as well as `name`; `name` is
+      indexed already, `also_known_as` is not. Exclude `instructors[]` from the list
+      projection the way `models/student.py` excludes its heavy arrays — 16,932 roster
+      entries would otherwise ride along on every page of the list.
+      Both open questions are settled. **Built, not computed per request**, matching the
+      other aggregates; the date range that computing would have allowed is deferred until
+      something asks for it. **The canonical name is a rule, not a map** — most recently
+      used, then most sessions, then alphabetical, alternates kept in `also_known_as`.
+      Worth correcting the old note here: only `PK-3121-00` is a rename. `PK-3099-00` and
+      `PK-3081-00` run both names concurrently for the topic's whole life, so the centers
+      rename map would not have fixed them. See the `topics` section above.
 - [ ] `P2` **Filter and sort parameters on the two list routes**, backing the column
       controls under **Frontend**. `/api/students` and `/api/instructors` accept only
       `query` (plus `account_id` on students). They need one filter per column — `center`,
@@ -840,12 +942,50 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       the student profile: blocked on the topics endpoint under **API**. The per-student
       view of the same data is the profile's topics card.
 
+      **The list carries its own search bar, topics only** — not the global dropdown, which
+      answers students and instructors and would bury 771 topics in it. It has to match
+      `also_known_as` as well as `name`: keeping the names not chosen is only worth doing
+      if searching a renamed topic's old name still finds it.
+
       ⚠️ **Group or filter by topic type, or the finish-rate column lies.** The id prefix
       predicts it almost entirely: `PK` — the curriculum, 663 topics and 13,268 pairs —
       finishes 68.7%, while `GF` is 28.3%, `WCH` 13.0%, `FO` 11.4% and the single `WOB`
       topic 0.0% across 20 students. Those are a different kind of item and do not carry a
       completion status the same way, so a flat ranking by finish rate fills the bottom
       with them and reads as "hardest topics".
+- [ ] `P2` **Topic detail page**, reached by clicking a row in the list above — how hard
+      one topic is and who teaches it. Three things beyond what the list row already shows:
+
+      **How long it takes.** Sessions to finish (the median is already stored; the mean is
+      worth showing beside it) and elapsed days to finish, which is not the same question —
+      a topic can take four sessions spread over two months. Computable now: 9,189 finished
+      (student, topic) pairs, every one with usable dates. Median 13 days from first sight,
+      9 from the finishing assignment's start. **Lead with the median on both** — the mean
+      is 26.7 days against a median of 13, with a 393-day tail and 7.7% finishing the same
+      day, so a mean on its own describes almost nobody.
+
+      **What it does to a session's page count.** Not the topic's share of the pages — the
+      *whole session's* `pages_completed`, and whether having this topic on the plan moves
+      that total. So it is a comparison against the student's own baseline, never an
+      attribution; page pace varies far more between students than between topics, which is
+      why the student is their own control. Real signal, and face-valid: across 283 topics
+      with 50+ finalized sessions it runs 0.69× to 2.11×, the drag end being long division
+      (*Division – 5-digit by 2-digit* 0.69×) and the fast end shape recognition
+      (*Transversals* 2.11×).
+
+      ⚠️ **Its neutral point is ~1.12, not 1.0.** Sessions carry 2.17 topics on average and
+      only 29.6% carry one, and a session's pages count once for every topic on it — which
+      biases every ratio upward. Centred on 1.0 the page claims almost every topic speeds
+      students up. Read it against the program median, label it "sessions including this
+      topic", and do not imply the topic caused it: a topic usually worked alongside fast
+      ones inherits their pace. Separating co-occurring topics needs a marginal effect
+      rather than a mean — a later refinement, not a blocker.
+
+      **Who teaches it most.** Already built — `topics.instructors[]` is ranked and holds
+      the same pairs as `instructors.topics[]`.
+
+      The `PK` / `GF` / `WCH` / `FO` / `WOB` warning on the list item applies here too:
+      every rate on this page means something different for a non-`PK` item.
 - [ ] `P2` **Filter and sort each list by its own columns.** Both lists take only a name
       substring today and are stuck in name order, so a column can be read but not asked
       about — there is no way to say "Southlake only", "fewer than 5 sessions", "nothing

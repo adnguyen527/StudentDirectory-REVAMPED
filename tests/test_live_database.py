@@ -578,6 +578,63 @@ def test_instructor_roster_size_matches_its_count(instructors):
     assert not drifted, f'{len(drifted)} roster count(s) out of sync, e.g. {drifted[:5]}'
 
 
+def test_instructor_topic_counts_match_their_list(instructors):
+    drifted = [
+        i['instructor_name'] for i in instructors
+        if i.get('unique_topics_taught') != len(i.get('topics', []))
+    ]
+    assert not drifted, f'{len(drifted)} instructor(s), e.g. {drifted[:5]}'
+
+
+def test_instructor_topics_are_ranked_by_sessions(instructors):
+    """The profile page reads 'most taught' top down."""
+    unsorted_instructors = [
+        i['instructor_name'] for i in instructors
+        if [(-t['sessions'], t['name']) for t in i.get('topics', [])]
+        != sorted((-t['sessions'], t['name']) for t in i.get('topics', []))
+    ]
+    assert not unsorted_instructors, f'e.g. {unsorted_instructors[:5]}'
+
+
+def test_instructor_topics_and_topic_instructors_are_the_same_pairs(instructors, topics):
+    """The two aggregates hold one relationship from opposite sides, the way students[]
+    here mirrors students.instructors[]. Both credit each instructor on a co-taught
+    session in full, so they must agree pair for pair -- if they do not, one of the two
+    was built from a different dwp_reports than the other."""
+    from_instructors = {
+        (i['instructor_name'], t['topic_id']): t['sessions']
+        for i in instructors for t in i.get('topics', [])
+    }
+    from_topics = {
+        (i['name'], t['topic_id']): i['sessions']
+        for t in topics for i in t.get('instructors', [])
+    }
+    assert from_instructors == from_topics, (
+        f'{len(set(from_instructors) - set(from_topics))} pair(s) only on the instructor '
+        f'side, {len(set(from_topics) - set(from_instructors))} only on the topic side'
+    )
+
+
+def test_instructor_topics_name_them_the_way_the_topics_page_does(instructors, topics_by_id):
+    """Both sides run build_topics.canonical_name, so a topic the source spells two ways
+    cannot read one way on the topic page and another on the instructor page."""
+    drifted = [
+        (i['instructor_name'], t['topic_id'], t['name'], topics_by_id[t['topic_id']]['name'])
+        for i in instructors for t in i.get('topics', [])
+        if t['topic_id'] in topics_by_id
+        and t['name'] != topics_by_id[t['topic_id']]['name']
+    ]
+    assert not drifted, f'{len(drifted)} topic(s) named differently, e.g. {drifted[:3]}'
+
+
+def test_instructor_topics_point_at_real_topics(instructors, topics_by_id):
+    unknown = {
+        t['topic_id'] for i in instructors for t in i.get('topics', [])
+        if t['topic_id'] not in topics_by_id
+    }
+    assert not unknown, f'{len(unknown)} unknown topic(s), e.g. {sorted(unknown)[:5]}'
+
+
 def test_instructor_days_taught_matches_its_count(instructors):
     drifted = [
         i['instructor_name'] for i in instructors
@@ -616,25 +673,39 @@ def test_instructor_pages_overshoot_is_bounded(live_db, instructors):
 
 # --- topics ----------------------------------------------------------------------
 #
-# The program-wide rollup, one document per (topic_id, name). It is keyed on the pair
-# rather than the id alone because three ids were renamed at the source and both names
-# are still in the data -- see test_a_renamed_topic_keeps_one_document_per_name.
+# The program-wide rollup, one document per topic_id, built by ingestion/build_topics.py.
+# One document per topic is what lets the Topics tab list them: a topic appearing twice
+# is not a list.
 #
-# That makes students.topics[] the wrong thing to reconcile against document for
-# document: build_students keys a student's history on the topic id, so a student who
-# worked both names has a single entry there, filed under whichever name that student
-# saw first. The two aggregates do line up when the comparison is made per *id*, and
-# every reconciliation below is written that way.
+# Three ids carry two names each, and only one of them is a rename -- PK-3121-00, where
+# the old name stops the week the new one starts. On the other two, both names run side
+# by side for the topic's whole life. So the name is settled by a rule rather than a map
+# (most recently used, then most sessions, then alphabetical) and the names not chosen
+# are kept in also_known_as.
+#
+# The builder reads dwp_reports and calls build_students.build_topic_history per student,
+# so this collection and students.topics[] are not independent measurements -- they share
+# the code that decides what an assignment is. What the reconciliations below catch is the
+# two builds having been run against different snapshots of dwp_reports, which is the
+# realistic way they drift. The first, ad-hoc build of this collection came out two
+# sessions short of the student rollup, and that is exactly what showed it.
 
 REQUIRED_TOPIC_FIELDS = [
     'topic_id', 'name', 'sessions', 'times_worked_on', 'times_completed',
     'times_mastered', 'first_taught', 'last_taught', 'unique_students',
-    'unique_instructors', 'shares_id_with',
+    'unique_instructors', 'instructors', 'also_known_as', 'students_finished',
+    'students_on_plan', 'students_removed', 'students_ever_finished',
+    'total_reassignments',
 ]
+
+# median_sessions_to_finish is deliberately absent: it is null for a topic nobody has
+# finished, which is a real answer rather than a missing field. See
+# test_the_median_is_present_exactly_when_someone_finished.
 
 TOPIC_COUNT_FIELDS = [
     'sessions', 'times_worked_on', 'times_completed', 'times_mastered',
-    'unique_students', 'unique_instructors',
+    'unique_students', 'unique_instructors', 'students_finished', 'students_on_plan',
+    'students_removed', 'students_ever_finished', 'total_reassignments',
 ]
 
 
@@ -642,38 +713,14 @@ TOPIC_COUNT_FIELDS = [
 def topics(live_db):
     docs = list(live_db['topics'].find())
     if not docs:
-        pytest.skip('topics collection is empty')
+        pytest.skip('topics collection is empty -- run ingestion/build_topics.py')
     return docs
 
 
 @pytest.fixture(scope='module')
-def topic_names_by_id(topics):
-    names = {}
-    for t in topics:
-        names.setdefault(t['topic_id'], set()).add(t['name'])
-    return names
-
-
-@pytest.fixture(scope='module')
 def topics_by_id(topics):
-    """The collection folded back to one entry per id -- the grain students uses."""
-    folded = {}
-    for t in topics:
-        entry = folded.setdefault(t['topic_id'], {
-            'sessions': 0, 'times_worked_on': 0, 'times_completed': 0,
-            'times_mastered': 0, 'unique_students': 0,
-            'first_taught': None, 'last_taught': None,
-        })
-        for field in ['sessions', 'times_worked_on', 'times_completed',
-                      'times_mastered', 'unique_students']:
-            entry[field] += t.get(field, 0)
-        if t.get('first_taught') and (entry['first_taught'] is None
-                                      or t['first_taught'] < entry['first_taught']):
-            entry['first_taught'] = t['first_taught']
-        if t.get('last_taught') and (entry['last_taught'] is None
-                                     or t['last_taught'] > entry['last_taught']):
-            entry['last_taught'] = t['last_taught']
-    return folded
+    """The collection keyed by id -- the grain students uses, and now its own grain."""
+    return {t['topic_id']: t for t in topics}
 
 
 @pytest.fixture(scope='module')
@@ -684,13 +731,14 @@ def student_topics_by_id(students):
         for t in s.get('topics') or []:
             entry = folded.setdefault(t.get('id'), {
                 'sessions': 0, 'times_worked_on': 0, 'times_completed': 0,
-                'times_mastered': 0, 'students': set(),
+                'times_mastered': 0, 'students': set(), 'reassignments': 0,
                 'first_taught': None, 'last_taught': None,
             })
             for field in ['sessions', 'times_worked_on', 'times_completed',
                           'times_mastered']:
                 entry[field] += t.get(field, 0)
             entry['students'].add(s['student_key'])
+            entry['reassignments'] += t.get('times_assigned', 1) - 1
             if t.get('first_seen') and (entry['first_taught'] is None
                                         or t['first_seen'] < entry['first_taught']):
                 entry['first_taught'] = t['first_seen']
@@ -701,23 +749,50 @@ def student_topics_by_id(students):
 
 
 @pytest.fixture(scope='module')
+def dwp_topic_names(live_db):
+    """Every name the source spells each topic id with -- what the canonical name and
+    also_known_as are checked against."""
+    names = {}
+    for doc in live_db['dwp_reports'].find(
+        {'topics.0': {'$exists': True}}, {'topics': 1}
+    ):
+        for topic in doc.get('topics') or []:
+            if topic.get('status') not in KNOWN_TOPIC_STATUSES:
+                continue  # not rolled up, so it does not get a say in the name
+            names.setdefault(
+                topic.get('id') or topic.get('raw', ''), set()
+            ).add(topic.get('name'))
+    return names
+
+
+@pytest.fixture(scope='module')
 def dwp_topic_rollup(live_db):
     """One pass over dwp_reports for the session count and the distinct instructors
-    behind each (topic_id, name) -- the source both aggregates are derived from."""
+    behind each topic id -- the source both aggregates are derived from.
+
+    Keyed on the id alone, matching the collection: a renamed topic's sessions belong to
+    the one topic, whichever name the row happened to spell it with."""
     sessions, instructors_seen = {}, {}
     for doc in live_db['dwp_reports'].find(
         {'topics.0': {'$exists': True}}, {'topics': 1, 'instructors': 1}
     ):
+        # Stripped and blank-dropped the way build_topics does. This is checking the
+        # counting, not the name cleanup -- normalising differently here would fail on
+        # whitespace the builder is right to remove.
         names = {
-            i['name'] if isinstance(i, dict) else i
+            (i['name'] if isinstance(i, dict) else i).strip()
             for i in doc.get('instructors') or []
+            if i and (i['name'] if isinstance(i, dict) else i).strip()
         }
         for topic in doc.get('topics') or []:
             if topic.get('status') not in KNOWN_TOPIC_STATUSES:
                 continue  # not rolled up, by design
-            pair = (topic.get('id') or topic.get('raw', ''), topic.get('name'))
-            sessions[pair] = sessions.get(pair, 0) + 1
-            instructors_seen.setdefault(pair, set()).update(names)
+            topic_id = topic.get('id') or topic.get('raw', '')
+            sessions[topic_id] = sessions.get(topic_id, 0) + 1
+            if names:
+                counts = instructors_seen.setdefault(topic_id, {})
+                for name in names:
+                    counts[name] = counts.get(name, 0) + 1
     return sessions, instructors_seen
 
 
@@ -734,36 +809,41 @@ def test_every_topic_has_the_required_fields(topics):
     assert not missing, f'{len(missing)} missing field(s), e.g. {missing[:5]}'
 
 
-def test_topic_id_and_name_together_are_unique(topics):
-    pairs = [(t['topic_id'], t['name']) for t in topics]
-    duplicates = {p for p in pairs if pairs.count(p) > 1}
-    assert not duplicates, f'duplicate (topic_id, name): {sorted(duplicates)[:5]}'
+def test_topic_ids_are_unique(topics):
+    """A topic that appears twice is not a list, and the Topics tab lists topics."""
+    ids = [t['topic_id'] for t in topics]
+    duplicates = {i for i in ids if ids.count(i) > 1}
+    assert not duplicates, f'duplicate topic_id: {sorted(duplicates)[:5]}'
 
 
 def test_the_topic_key_index_is_unique(live_db):
-    """The pair is the document's identity, so a rebuild that writes one name twice
-    under an id has to fail at the database rather than quietly split a topic in three."""
+    """The id is the document's identity, so a rebuild that writes one twice has to fail
+    at the database rather than quietly split a topic across two rows."""
     indexes = live_db['topics'].index_information()
     key_indexes = [
         spec for spec in indexes.values()
-        if [f for f, _ in spec['key']] == ['topic_id', 'name']
+        if [f for f, _ in spec['key']] == ['topic_id']
     ]
-    assert key_indexes, 'no compound index on (topic_id, name)'
+    assert key_indexes, 'no index on topic_id'
     assert any(spec.get('unique') for spec in key_indexes)
 
 
-def test_topics_are_listable_by_id_alone(live_db):
-    """shares_id_with gives a caller the other names on an id; this is the index that
-    lets it go fetch them without a collection scan."""
+def test_topics_are_listable_in_the_order_the_tab_wants(live_db):
+    """The Topics tab leads with the most worked topics, and searches by name. Neither
+    should be a collection scan."""
     keys = [
         [f for f, _ in spec['key']]
         for spec in live_db['topics'].index_information().values()
     ]
-    assert any(k[:1] == ['topic_id'] for k in keys), 'no index led by topic_id'
+    assert any(k[:1] == ['sessions'] for k in keys), 'no index led by sessions'
+    assert any(k[:1] == ['name'] for k in keys), 'no index led by name'
 
 
-def test_topic_sessions_account_for_every_status(topics):
-    """sessions is the whole history, so the three rungs of the ladder must exhaust it."""
+def test_topic_collection_sessions_account_for_every_status(topics):
+    """sessions is the whole history, so the three rungs of the ladder must exhaust it.
+
+    Named apart from the students-side check of the same shape above: two module-level
+    functions of one name would leave only the second one running."""
     drifted = [
         (t['topic_id'], t['name']) for t in topics
         if t['sessions'] != (t.get('times_worked_on', 0)
@@ -808,7 +888,7 @@ def test_topic_counts_are_non_negative(topics):
     )
 
 
-def test_topic_dates_are_ordered(topics):
+def test_topic_collection_dates_are_ordered(topics):
     backwards = [
         (t['topic_id'], t['name']) for t in topics
         if t.get('first_taught') and t.get('last_taught')
@@ -826,32 +906,38 @@ def test_a_topic_cannot_have_more_students_than_sessions(topics):
     assert not impossible, f'{len(impossible)} with more students than sessions, e.g. {impossible[:5]}'
 
 
-def test_a_renamed_topic_keeps_one_document_per_name(topics):
-    """Three ids were renamed at the source and both names are still in the data, so the
-    collection holds more documents than ids. If this ever reads equal the build started
-    collapsing names, and one of the two histories is being hidden rather than shown."""
-    ids = {t['topic_id'] for t in topics}
-    assert len(topics) > len(ids), (
-        'every topic_id holds exactly one name -- the renamed topics were collapsed'
-    )
+def test_a_topic_carrying_two_names_is_still_one_document(topics_by_id, dwp_topic_names):
+    """Three ids are spelled two ways in the source. Each has to come out as one document
+    with the alternate recorded -- the first build of this collection kept both names as
+    separate rows, which is what made the topics unlistable."""
+    multi = {
+        topic_id for topic_id, names in dwp_topic_names.items()
+        if len({n for n in names if n}) > 1
+    }
+    assert multi, 'no topic id carries two names -- the source changed, recheck the rule'
+    missing = [topic_id for topic_id in multi if topic_id not in topics_by_id]
+    assert not missing, f'{len(missing)} multi-named id(s) with no document: {missing[:5]}'
+    silent = [topic_id for topic_id in multi if not topics_by_id[topic_id]['also_known_as']]
+    assert not silent, f'{len(silent)} id(s) carrying two names but listing no alternate'
 
 
-def test_shares_id_with_names_the_other_documents_on_that_id(topics, topic_names_by_id):
-    """The pointer that makes the name split navigable: without it a caller listing
-    topics cannot tell that two rows are one curriculum item that got renamed."""
+def test_also_known_as_holds_exactly_the_names_not_chosen(topics_by_id, dwp_topic_names):
+    """A search for the old name still has to find the topic, so every name the source
+    wrote is either the chosen one or an alternate -- none are dropped."""
     wrong = [
-        (t['topic_id'], t['name'], t.get('shares_id_with'))
-        for t in topics
-        if sorted(t.get('shares_id_with') or [])
-        != sorted(topic_names_by_id[t['topic_id']] - {t['name']})
+        (topic_id, doc['name'], doc.get('also_known_as'))
+        for topic_id, doc in topics_by_id.items()
+        if topic_id in dwp_topic_names
+        and sorted(doc.get('also_known_as') or [])
+        != sorted({n for n in dwp_topic_names[topic_id] if n} - {doc['name']})
     ]
-    assert not wrong, f'{len(wrong)} bad shares_id_with, e.g. {wrong[:3]}'
+    assert not wrong, f'{len(wrong)} bad also_known_as, e.g. {wrong[:3]}'
 
 
-def test_a_topic_never_points_at_itself(topics):
+def test_a_topic_is_never_listed_under_its_own_alternate_name(topics):
     self_referential = [
         (t['topic_id'], t['name']) for t in topics
-        if t['name'] in (t.get('shares_id_with') or [])
+        if t['name'] in (t.get('also_known_as') or [])
     ]
     assert not self_referential, f'e.g. {self_referential[:5]}'
 
@@ -888,43 +974,68 @@ def test_topic_dates_reconcile_to_students(topics_by_id, student_topics_by_id):
     assert not drifted, f'{len(drifted)} date(s) out of sync, e.g. {drifted[:5]}'
 
 
-def test_no_topic_loses_students(topics_by_id, student_topics_by_id):
-    """Summing unique_students across an id's documents can only overshoot the real
-    number of students, and only on a renamed id, where someone who worked both names is
-    counted under each. Coming in below it means students went missing."""
-    short = [
+def test_topic_student_counts_reconcile_to_students(topics_by_id, student_topics_by_id):
+    """One document per id means unique_students is now exact, not an upper bound.
+
+    Under the old one-document-per-name layout this could only be checked as an
+    inequality, because a student who worked both names of a renamed topic was counted
+    under each. Collapsing to the id removed that double count.
+    """
+    drifted = [
         (topic_id, topics_by_id[topic_id]['unique_students'],
          len(student_topics_by_id[topic_id]['students']))
         for topic_id in set(topics_by_id) & set(student_topics_by_id)
         if topics_by_id[topic_id]['unique_students']
-        < len(student_topics_by_id[topic_id]['students'])
-    ]
-    assert not short, f'{len(short)} id(s) missing students, e.g. {short[:5]}'
-
-
-def test_only_renamed_ids_double_count_their_students(
-    topics, topic_names_by_id, student_topics_by_id
-):
-    """The flip side: an id carrying a single name has no way to double count, so its
-    unique_students must be exact."""
-    drifted = [
-        (t['topic_id'], t['unique_students'],
-         len(student_topics_by_id[t['topic_id']]['students']))
-        for t in topics
-        if len(topic_names_by_id[t['topic_id']]) == 1
-        and t['topic_id'] in student_topics_by_id
-        and t['unique_students'] != len(student_topics_by_id[t['topic_id']]['students'])
+        != len(student_topics_by_id[topic_id]['students'])
     ]
     assert not drifted, f'{len(drifted)} student count(s) out of sync, e.g. {drifted[:5]}'
 
 
-def test_topic_documents_cover_every_taught_pair(topics, dwp_topic_rollup):
+def test_topic_reassignments_reconcile_to_students(topics_by_id, student_topics_by_id):
+    """Both sides count an assignment with the same code, so a disagreement here is the
+    two builds having read different dwp_reports."""
+    assert sum(t['total_reassignments'] for t in topics_by_id.values()) == sum(
+        entry['reassignments'] for entry in student_topics_by_id.values()
+    )
+
+
+def test_topic_states_partition_the_students(topics):
+    """Every student who worked a topic finished it, is still on it, or came off it."""
+    drifted = [
+        t['topic_id'] for t in topics
+        if t['students_finished'] + t['students_on_plan'] + t['students_removed']
+        != t['unique_students']
+    ]
+    assert not drifted, f'{len(drifted)} topic(s) whose states do not add up, e.g. {drifted[:5]}'
+
+
+def test_ever_finished_is_never_below_finished_now(topics):
+    """'Ever' cannot be rarer than 'now': everyone finished now finished it at least once.
+    The gap the other way is expected -- that is a topic finished and then handed back."""
+    impossible = [
+        t['topic_id'] for t in topics
+        if t['students_ever_finished'] < t['students_finished']
+    ]
+    assert not impossible, f'{len(impossible)} topic(s), e.g. {impossible[:5]}'
+
+
+def test_the_median_is_present_exactly_when_someone_finished(topics):
+    """Null is the honest answer for a topic nobody has finished, and the only case."""
+    drifted = [
+        t['topic_id'] for t in topics
+        if (t.get('median_sessions_to_finish') is None)
+        != (t['students_ever_finished'] == 0)
+    ]
+    assert not drifted, f'{len(drifted)} topic(s) with a mismatched median, e.g. {drifted[:5]}'
+
+
+def test_topic_documents_cover_every_taught_topic(topics, dwp_topic_rollup):
     sessions, _ = dwp_topic_rollup
-    live = {(t['topic_id'], t['name']) for t in topics}
+    live = {t['topic_id'] for t in topics}
     missing = set(sessions) - live
     unbacked = live - set(sessions)
     assert not missing and not unbacked, (
-        f'{len(missing)} taught pair(s) with no document, e.g. {sorted(missing)[:5]}; '
+        f'{len(missing)} taught topic(s) with no document, e.g. {sorted(missing)[:5]}; '
         f'{len(unbacked)} document(s) no session backs, e.g. {sorted(unbacked)[:5]}'
     )
 
@@ -934,16 +1045,87 @@ def test_topic_instructor_counts_reconcile_to_dwp_reports(topics, dwp_topic_roll
     instructor -- so this is the only check on the dwp join behind it."""
     _, instructors_seen = dwp_topic_rollup
     drifted = [
-        (t['topic_id'], t['name'], t['unique_instructors'],
-         len(instructors_seen.get((t['topic_id'], t['name']), ())))
+        (t['topic_id'], t['unique_instructors'],
+         len(instructors_seen.get(t['topic_id'], ())))
         for t in topics
-        if t['unique_instructors'] != len(instructors_seen.get((t['topic_id'], t['name']), ()))
+        if t['unique_instructors'] != len(instructors_seen.get(t['topic_id'], ()))
     ]
     assert not drifted, f'{len(drifted)} instructor count(s) out of sync, e.g. {drifted[:5]}'
 
 
+def test_the_instructor_ranking_reconciles_to_dwp_reports(topics, dwp_topic_rollup):
+    """Not just how many taught a topic, but how much each of them taught it -- the
+    numbers the topic page ranks on."""
+    _, instructors_seen = dwp_topic_rollup
+    drifted = [
+        (t['topic_id'], t['name'])
+        for t in topics
+        if {i['name']: i['sessions'] for i in t.get('instructors', [])}
+        != instructors_seen.get(t['topic_id'], {})
+    ]
+    assert not drifted, f'{len(drifted)} ranking(s) out of sync, e.g. {drifted[:5]}'
+
+
+def test_the_instructor_list_is_ranked_by_sessions(topics):
+    """The page reads it top down, so the order is the data, not a detail."""
+    unsorted_topics = [
+        t['topic_id'] for t in topics
+        if [(-i['sessions'], i['name']) for i in t.get('instructors', [])]
+        != sorted((-i['sessions'], i['name']) for i in t.get('instructors', []))
+    ]
+    assert not unsorted_topics, f'{len(unsorted_topics)} out of order, e.g. {unsorted_topics[:5]}'
+
+
+def test_unique_instructors_matches_the_instructor_list(topics):
+    drifted = [
+        t['topic_id'] for t in topics
+        if t['unique_instructors'] != len(t.get('instructors', []))
+    ]
+    assert not drifted, f'{len(drifted)} topic(s), e.g. {drifted[:5]}'
+
+
+def test_every_instructor_credit_is_a_real_session(topics):
+    empty = [
+        (t['topic_id'], i['name']) for t in topics
+        for i in t.get('instructors', []) if i['sessions'] < 1
+    ]
+    assert not empty, f'{len(empty)} credit(s) of nothing, e.g. {empty[:5]}'
+
+
+def test_co_teaching_makes_the_credits_overshoot_the_sessions(topics):
+    """Each instructor on a co-taught session is credited the whole entry, so the credits
+    across a topic can exceed its sessions -- they are per-instructor figures, not a
+    breakdown. Asserting equality here would be wrong; what must never happen is coming in
+    *under* the session count, which would mean sessions with nobody credited."""
+    short = [
+        (t['topic_id'], sum(i['sessions'] for i in t.get('instructors', [])), t['sessions'])
+        for t in topics
+        if t.get('instructors')
+        and sum(i['sessions'] for i in t['instructors']) < t['sessions']
+    ]
+    assert not short, f'{len(short)} topic(s) crediting less than they taught, e.g. {short[:5]}'
+
+    credited = sum(i['sessions'] for t in topics for i in t.get('instructors', []))
+    taught = sum(t['sessions'] for t in topics)
+    assert credited > taught, (
+        'no co-taught overshoot at all -- 10% of topic entries have two instructors, so '
+        'either the credit rule changed or the join is dropping them'
+    )
+
+
+def test_topic_instructors_are_real_instructors(live_db, topics):
+    """Mirrors the instructor-roster check: a name here that has no document cannot be
+    linked to from the topic page."""
+    known = {i['instructor_name'] for i in live_db['instructors'].find({}, {'instructor_name': 1})}
+    unknown = {
+        i['name'] for t in topics for i in t.get('instructors', [])
+        if i['name'] not in known
+    }
+    assert not unknown, f'{len(unknown)} unknown instructor(s), e.g. {sorted(unknown)[:5]}'
+
+
 def test_topic_sessions_reconcile_to_dwp_reports(topics, dwp_topic_rollup):
-    """The source rows behind each name, counted straight off dwp_reports.
+    """The source rows behind each topic, counted straight off dwp_reports.
 
     A session is one topic entry on one report, not one report: two reports list the
     same topic twice in their own topics[], once Worked On and once Mastered. Both
@@ -953,9 +1135,9 @@ def test_topic_sessions_reconcile_to_dwp_reports(topics, dwp_topic_rollup):
     """
     sessions, _ = dwp_topic_rollup
     drifted = [
-        (t['topic_id'], t['name'], t['sessions'], sessions.get((t['topic_id'], t['name'])))
+        (t['topic_id'], t['sessions'], sessions.get(t['topic_id']))
         for t in topics
-        if t['sessions'] != sessions.get((t['topic_id'], t['name']))
+        if t['sessions'] != sessions.get(t['topic_id'])
     ]
     assert not drifted, (
         f'{len(drifted)} topic(s) whose sessions disagree with dwp_reports '
