@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { formatDate, formatNumber, toDate } from '../../api/bson'
@@ -6,12 +6,17 @@ import { getStudent } from '../../api/endpoints'
 import type { StudentDetailResponse } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
 import { Card } from '../../shell/Card'
+import { Pager } from '../../shell/Pager'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
 import { AttendancePanel } from './AttendancePanel'
 import { SessionHistoryCard } from './SessionHistoryCard'
 import { TopicsCard } from './TopicsCard'
 import './Profile.css'
+
+/** Matches the other two profile tables. The median student has 9 instructors and the
+ *  widest 23, so 43% of profiles need more than one page. */
+const INSTRUCTOR_PAGE = 10
 
 /**
  * One student, everything the API holds about them.
@@ -23,6 +28,7 @@ import './Profile.css'
  */
 export function StudentProfilePage() {
   const { studentKey = '' } = useParams()
+  const [instructorOffset, setInstructorOffset] = useState(0)
   const { data, loading, error } = useApi<StudentDetailResponse>(
     (signal) => getStudent(studentKey, signal),
     [studentKey],
@@ -81,6 +87,13 @@ export function StudentProfilePage() {
   }
 
   const { student, stats, dwp_reports } = data
+
+  // One element serves students/:studentKey, so the offset survives a move to another
+  // student. Snap back when it no longer addresses a row, rather than resetting in an
+  // effect and paying a second render pass -- as the instructor and topic pages do.
+  const offset =
+    instructorOffset < student.instructors.length ? instructorOffset : 0
+  const shownInstructors = student.instructors.slice(offset, offset + INSTRUCTOR_PAGE)
 
   return (
     <div className="page">
@@ -163,7 +176,7 @@ export function StudentProfilePage() {
               </tr>
             </thead>
             <tbody>
-              {student.instructors.map((instructor) => (
+              {shownInstructors.map((instructor) => (
                 <tr key={instructor.name}>
                   <td className="primary-name">
                     {/* The reverse of the instructor profile's roster, which links back
@@ -188,6 +201,20 @@ export function StudentProfilePage() {
           * Co-taught sessions count for each instructor, so these pages sum to more than the
           student's own total.
         </p>
+        {/* The whole list is already in the detail response, so this pages what is in
+            hand. Held back on an empty roster so the card does not answer "No results"
+            where it currently shows nothing. */}
+        {student.instructors.length > 0 && (
+          <Pager
+            page={{
+              limit: INSTRUCTOR_PAGE,
+              offset,
+              total: student.instructors.length,
+              returned: shownInstructors.length,
+            }}
+            onChange={setInstructorOffset}
+          />
+        )}
       </Card>
 
       <SessionHistoryCard reports={dwp_reports} />

@@ -25,6 +25,12 @@ export function Pager({ page, onChange }: PagerProps) {
   const hasPrevious = offset > 0
   const hasNext = last < total
 
+  // Controls only when there is somewhere to go. A pair of permanently disabled buttons
+  // under a table that fits on one page is furniture, not an affordance -- and most cards
+  // on a profile are in that state. The count stays either way: it is the card's own
+  // total, and reading it does not depend on there being pages to turn.
+  const hasPages = total > limit
+
   return (
     <nav className="pager" aria-label="Pagination">
       <span className="pager-status">
@@ -33,28 +39,30 @@ export function Pager({ page, onChange }: PagerProps) {
           : `${formatNumber(first)}–${formatNumber(last)} of ${formatNumber(total)}`}
       </span>
 
-      <div className="pager-buttons">
-        <button
-          type="button"
-          className="button"
-          disabled={!hasPrevious}
-          // Clamped at zero: a short first page would otherwise send a negative offset,
-          // which the API rejects with a 400.
-          onClick={() => onChange(Math.max(0, offset - limit))}
-        >
-          <ChevronIcon className="pager-back" />
-          Previous
-        </button>
-        <button
-          type="button"
-          className="button"
-          disabled={!hasNext}
-          onClick={() => onChange(offset + limit)}
-        >
-          Next
-          <ChevronIcon />
-        </button>
-      </div>
+      {hasPages && (
+        <div className="pager-buttons">
+          <button
+            type="button"
+            className="button"
+            disabled={!hasPrevious}
+            // Clamped at zero: a short first page would otherwise send a negative offset,
+            // which the API rejects with a 400.
+            onClick={() => onChange(Math.max(0, offset - limit))}
+          >
+            <ChevronIcon className="pager-back" />
+            Previous
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={!hasNext}
+            onClick={() => onChange(offset + limit)}
+          >
+            Next
+            <ChevronIcon />
+          </button>
+        </div>
+      )}
     </nav>
   )
 }

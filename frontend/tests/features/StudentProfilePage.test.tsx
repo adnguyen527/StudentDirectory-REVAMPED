@@ -249,6 +249,37 @@ describe('student profile', () => {
     expect(within(row).getByText('Unfinalized')).toBeInTheDocument()
   })
 
+  it('pages the instructors card ten at a time', async () => {
+    // The median student has 9 instructors and the widest 23, so 43% of profiles page.
+    // The whole list arrives in the detail response, so paging it costs no request.
+    const instructors = Array.from({ length: 12 }, (_, i) => ({
+      name: `Instructor ${String(i).padStart(2, '0')}`,
+      sessions: 12 - i,
+      pages_completed: i,
+    }))
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, instructors },
+          stats: { total_dwp_reports: ANTHONY_REPORTS.length },
+          dwp_reports: ANTHONY_REPORTS,
+        }),
+      ),
+    )
+    const { user } = renderApp(PROFILE)
+
+    const card_ = within(await card(/^Instructors$/))
+    expect(await card_.findByText('1–10 of 12')).toBeInTheDocument()
+    expect(card_.getByRole('button', { name: /previous/i })).toBeDisabled()
+
+    await user.click(card_.getByRole('button', { name: /next/i }))
+
+    expect(await card_.findByText('11–12 of 12')).toBeInTheDocument()
+    expect(card_.getByRole('link', { name: 'Instructor 10' })).toBeInTheDocument()
+    expect(card_.queryByRole('link', { name: 'Instructor 00' })).not.toBeInTheDocument()
+    expect(card_.getByRole('button', { name: /next/i })).toBeDisabled()
+  })
+
   it('opens an instructor from the instructors card', async () => {
     // The reverse of the instructor profile's roster, which already links back here.
     const { user } = renderApp(PROFILE)

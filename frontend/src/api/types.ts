@@ -267,5 +267,80 @@ export interface AttendanceResponse {
   visits: AttendanceVisit[]
 }
 
+/**
+ * The program-wide topic rollup -- ingestion/build_topics.py.
+ *
+ * Not to be confused with `Topic` above, which is one topic's history for one *student*.
+ * These are the same curriculum items counted across everybody, and the two shapes share
+ * no fields: this one is keyed on `topic_id` and counts students, that one is keyed on
+ * `id` and counts sessions.
+ *
+ * models/topic.py's LIST_PROJECTION drops `instructors` -- 82 on the widest topic --
+ * leaving `unique_instructors` to say the same thing in one number.
+ */
+export interface TopicRollupBase {
+  _id: ExtOid
+  topic_id: string
+  /** Settled by a rule when the source spells one topic more than one way: most recently
+   *  used, then most sessions, then alphabetical. */
+  name: string
+  /** The names not chosen. Searchable, so an old name still finds the topic. */
+  also_known_as: string[]
+  /** Times worked through, across every student. */
+  sessions: number
+  times_worked_on: number
+  times_completed: number
+  times_mastered: number
+  unique_students: number
+  /** Per (student, topic) pair and mutually exclusive -- these three sum to
+   *  unique_students, because `state` reads a student's last assignment only. */
+  students_finished: number
+  students_on_plan: number
+  students_removed: number
+  /**
+   * Of the students in `students_finished`, how many now sit at Mastered rather than
+   * stopping at Completed. Always <= students_finished, because it is counted inside that
+   * group rather than off the status across everybody. The difference between the two is
+   * exactly the students who completed a topic without mastering it.
+   *
+   * Not `times_mastered`, which counts sessions rather than students.
+   */
+  students_mastered: number
+  /** Ever completed or mastered, even if the topic was later handed back. Can exceed
+   *  students_finished, which is a "now" question. */
+  students_ever_finished: number
+  total_reassignments: number
+  /** Null when nobody has finished it -- an answer, not a missing field. */
+  median_sessions_to_finish: number | null
+  unique_instructors: number
+  first_taught: ExtDate | null
+  last_taught: ExtDate | null
+  last_modified: ExtDate
+}
+
+/** A topic as the list route returns it -- the projected array is absent. */
+export type TopicListItem = TopicRollupBase
+
+/**
+ * One instructor's share of a topic, ranked most-taught first.
+ *
+ * A co-taught session credits each instructor the whole entry, so summing `sessions`
+ * across this list exceeds the topic's own `sessions`. Read each row on its own.
+ */
+export interface TopicInstructor {
+  name: string
+  sessions: number
+}
+
+/** The detail document: the base plus the array the list projection drops. */
+export interface TopicDetail extends TopicRollupBase {
+  instructors: TopicInstructor[]
+}
+
+export interface TopicDetailResponse {
+  topic: TopicDetail
+}
+
 export type StudentsResponse = Paged<'students', StudentListItem>
 export type InstructorsResponse = Paged<'instructors', InstructorListItem>
+export type TopicsResponse = Paged<'topics', TopicListItem>

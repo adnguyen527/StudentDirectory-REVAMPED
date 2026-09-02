@@ -6,6 +6,7 @@ import {
   PlusIcon,
   SettingsIcon,
   StudentsIcon,
+  TopicsIcon,
 } from './Icons'
 import './Sidebar.css'
 
@@ -13,6 +14,7 @@ const NAV = [
   { to: '/', label: 'Home', icon: DashboardIcon, end: true },
   { to: '/students', label: 'Students', icon: StudentsIcon, end: false },
   { to: '/instructors', label: 'Instructors', icon: InstructorsIcon, end: false },
+  { to: '/topics', label: 'Topics', icon: TopicsIcon, end: false },
 ]
 
 /** Fixed left rail: wordmark, primary action, nav, settings pinned to the bottom. */

@@ -5,9 +5,11 @@ from pymongo import ASCENDING
 from database import db
 
 
-# The two arrays that grow with the dataset (272 dates, a 304-student roster at the top
-# end). Only read on the detail view; total_days_taught and unique_students stand in.
-LIST_PROJECTION = {'days_taught': 0, 'students': 0}
+# The three arrays that grow with the dataset (272 dates, a 304-student roster and 504
+# topics at the top end). Only read on the detail view; total_days_taught, unique_students
+# and unique_topics_taught stand in. Leaving topics[] in took the full list response to
+# 757 KB against the students list's 30 KB.
+LIST_PROJECTION = {'days_taught': 0, 'students': 0, 'topics': 0}
 
 # One key suffices here, unlike students: instructor_name is unique, so nothing can tie.
 LIST_SORT = [('instructor_name', ASCENDING)]

@@ -694,8 +694,8 @@ REQUIRED_TOPIC_FIELDS = [
     'topic_id', 'name', 'sessions', 'times_worked_on', 'times_completed',
     'times_mastered', 'first_taught', 'last_taught', 'unique_students',
     'unique_instructors', 'instructors', 'also_known_as', 'students_finished',
-    'students_on_plan', 'students_removed', 'students_ever_finished',
-    'total_reassignments',
+    'students_mastered', 'students_on_plan', 'students_removed',
+    'students_ever_finished', 'total_reassignments',
 ]
 
 # median_sessions_to_finish is deliberately absent: it is null for a topic nobody has
@@ -828,15 +828,49 @@ def test_the_topic_key_index_is_unique(live_db):
     assert any(spec.get('unique') for spec in key_indexes)
 
 
-def test_topics_are_listable_in_the_order_the_tab_wants(live_db):
-    """The Topics tab leads with the most worked topics, and searches by name. Neither
-    should be a collection scan."""
+def test_the_topic_paging_sort_is_index_backed(live_db):
+    """/api/topics pages on (sessions desc, topic_id) -- see models/topic.py. Without the
+    compound index a sessions-only index cannot serve the tiebreak, and every page becomes
+    a collection scan plus a blocking in-memory sort."""
     keys = [
         [f for f, _ in spec['key']]
         for spec in live_db['topics'].index_information().values()
     ]
-    assert any(k[:1] == ['sessions'] for k in keys), 'no index led by sessions'
-    assert any(k[:1] == ['name'] for k in keys), 'no index led by name'
+    assert ['sessions', 'topic_id'] in keys, (
+        'no compound index for the paged sort -- see ingestion/build_topics.py'
+    )
+
+
+def test_paging_never_repeats_or_skips_a_topic(live_db):
+    """Session counts tie constantly -- 670 of 771 topics share theirs with another, and
+    37 sit together on two sessions -- so the tiebreak is not hypothetical: an unstable
+    sort hands the same topic back on two pages and drops another."""
+    from models.topic import LIST_SORT
+
+    seen, offset, limit = [], 0, 200
+    while True:
+        page = list(
+            live_db['topics'].find({}, {'topic_id': 1})
+            .sort(LIST_SORT).skip(offset).limit(limit)
+        )
+        if not page:
+            break
+        seen.extend(t['topic_id'] for t in page)
+        offset += limit
+
+    assert len(seen) == len(set(seen)), 'a topic appeared on two pages'
+    assert len(seen) == live_db['topics'].count_documents({})
+
+
+def test_a_name_ordering_stays_available(live_db):
+    """Not the default any more -- the tab leads with most-worked -- but the column-sort
+    work will ask for name order, and it needs the id in the key to page safely, because
+    90 names are carried by more than one topic."""
+    keys = [
+        [f for f, _ in spec['key']]
+        for spec in live_db['topics'].index_information().values()
+    ]
+    assert ['name', 'topic_id'] in keys, 'no compound index for a name ordering'
 
 
 def test_topic_collection_sessions_account_for_every_status(topics):
@@ -1007,6 +1041,54 @@ def test_topic_states_partition_the_students(topics):
         != t['unique_students']
     ]
     assert not drifted, f'{len(drifted)} topic(s) whose states do not add up, e.g. {drifted[:5]}'
+
+
+def test_mastered_never_exceeds_the_row_it_is_shown_against(topics):
+    """The topic page renders students_mastered / students_finished as a fraction, so a
+    numerator above the denominator would print something like 70/66. Scoping the count to
+    the finished group is what rules it out; this holds the guarantee at the data."""
+    impossible = [
+        (t['topic_id'], t['students_mastered'], t['students_finished'])
+        for t in topics
+        if t['students_mastered'] > t['students_finished']
+    ]
+    assert not impossible, f'{len(impossible)} topic(s), e.g. {impossible[:5]}'
+
+
+def test_mastered_reconciles_to_the_student_statuses(topics_by_id, students):
+    """Both sides read the same students.topics[] entries: finished, and sitting at
+    Mastered."""
+    from_students = {}
+    for s in students:
+        for t in s.get('topics') or []:
+            if t.get('state') == 'finished' and t.get('status') == 'Mastered':
+                from_students[t.get('id')] = from_students.get(t.get('id'), 0) + 1
+
+    drifted = [
+        (topic_id, doc['students_mastered'], from_students.get(topic_id, 0))
+        for topic_id, doc in topics_by_id.items()
+        if doc['students_mastered'] != from_students.get(topic_id, 0)
+    ]
+    assert not drifted, f'{len(drifted)} count(s) out of sync, e.g. {drifted[:5]}'
+
+
+def test_the_students_who_finished_without_mastering_are_the_completed_ones(
+    topics_by_id, students
+):
+    """students_finished - students_mastered is what the topic page calls out as having
+    completed a topic without mastering it, so it has to be exactly the finished students
+    sitting at Completed -- no third status leaking into the remainder."""
+    completed = {}
+    for s in students:
+        for t in s.get('topics') or []:
+            if t.get('state') == 'finished' and t.get('status') == 'Completed':
+                completed[t.get('id')] = completed.get(t.get('id'), 0) + 1
+
+    drifted = [
+        topic_id for topic_id, doc in topics_by_id.items()
+        if doc['students_finished'] - doc['students_mastered'] != completed.get(topic_id, 0)
+    ]
+    assert not drifted, f'{len(drifted)} topic(s), e.g. {drifted[:5]}'
 
 
 def test_ever_finished_is_never_below_finished_now(topics):

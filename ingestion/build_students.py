@@ -124,6 +124,13 @@ def build_topic_history(days):
                     )
                 if date is not None:
                     entry['last_seen'] = date
+            else:
+                # The topic's first day. _new_entry seeded _assignment_best from the first
+                # entry read, which is not the day's best when the topic was worked more
+                # than once that day -- so a topic worked and then mastered in two sessions
+                # of one day read as Mastered while its state said the assignment never
+                # got past Worked On.
+                entry['_assignment_best'] = STATUS_RANK[status]
 
             entry['status'] = status
             entry['_last_day'] = index

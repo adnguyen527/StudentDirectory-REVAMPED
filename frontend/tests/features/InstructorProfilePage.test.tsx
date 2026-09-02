@@ -107,11 +107,16 @@ describe('instructor profile', () => {
     const { user } = renderApp(PROFILE)
 
     const roster = await card(/Roster/)
-    expect(await within(roster).findByText('1–25 of 30')).toBeInTheDocument()
+    expect(await within(roster).findByText('1–10 of 30')).toBeInTheDocument()
 
     await user.click(within(roster).getByRole('button', { name: /next/i }))
 
-    expect(await within(roster).findByText('26–30 of 30')).toBeInTheDocument()
+    expect(await within(roster).findByText('11–20 of 30')).toBeInTheDocument()
+    expect(within(roster).getByRole('button', { name: /next/i })).not.toBeDisabled()
+
+    await user.click(within(roster).getByRole('button', { name: /next/i }))
+
+    expect(await within(roster).findByText('21–30 of 30')).toBeInTheDocument()
     expect(within(roster).getByRole('button', { name: /next/i })).toBeDisabled()
   })
 

@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
+import { ListFilter } from './ListFilter'
 import { StudentsTable } from './StudentsTable'
 
 /**
@@ -38,7 +39,6 @@ export function StudentsPage() {
   }
 
   const page = data?.page
-  const title = query ? `Students matching “${query}”` : 'Students'
 
   return (
     <div className="page">
@@ -51,8 +51,9 @@ export function StudentsPage() {
         </p>
       </div>
 
+      {/* No title: the <h1> above already says Students. */}
       <Card
-        title={title}
+        lead={<ListFilter placeholder="Search students by name" />}
         flush
         controls={
           query ? (

@@ -419,6 +419,166 @@ class TestGetInstructor:
         assert anonymous_client.get('/api/instructors/Dana Reyes').status_code == 401
 
 
+def topic_ids(payload):
+    return [t['topic_id'] for t in payload['topics']]
+
+
+class TestListTopics:
+
+    def test_lists_every_topic(self, client):
+        response = client.get('/api/topics')
+        assert response.status_code == 200
+        assert sorted(topic_ids(response.get_json())) == [
+            'T-100', 'T-110', 'T-115', 'T-200'
+        ]
+
+    def test_most_worked_topics_come_first(self, client):
+        """The top of a 771-row list should be what the program spends its time on.
+        T-115 and T-200 both have one session, so the id settles which comes first."""
+        assert topic_ids(client.get('/api/topics').get_json()) == [
+            'T-100', 'T-110', 'T-115', 'T-200'
+        ]
+
+    def test_paging_across_a_session_tie_never_repeats_a_row(self, client):
+        """Session counts tie constantly -- 670 of the 771 real topics share theirs --
+        so sorting on sessions alone lets one row answer two pages. That is the bug the
+        compound sort exists to stop."""
+        seen = []
+        for offset in range(0, 4):
+            page = client.get(
+                '/api/topics', query_string={'limit': 1, 'offset': offset}
+            ).get_json()
+            seen.extend(topic_ids(page))
+        assert seen == ['T-100', 'T-110', 'T-115', 'T-200']
+        assert len(set(seen)) == 4
+
+    def test_query_filter_searches_by_name(self, client):
+        response = client.get('/api/topics', query_string={'query': 'Angles'})
+        assert topic_ids(response.get_json()) == ['T-200']
+
+    def test_the_instructor_ranking_is_not_shipped_in_a_list(self, client):
+        """82 instructors on the widest topic -- the array that balloons a list page."""
+        listed = client.get('/api/topics').get_json()['topics']
+        assert all('instructors' not in t for t in listed)
+        assert all('unique_instructors' in t for t in listed)
+
+    def test_bson_is_serialised(self, client):
+        fractions = next(
+            t for t in client.get('/api/topics').get_json()['topics']
+            if t['topic_id'] == 'T-100'
+        )
+        assert '$oid' in fractions['_id']
+        assert '$date' in fractions['last_taught']
+
+    def test_empty_result_is_an_empty_list(self, client):
+        body = client.get('/api/topics', query_string={'query': 'nothing'}).get_json()
+        assert body['topics'] == []
+        assert body['page']['total'] == 0
+
+
+class TestSearchTopics:
+
+    def test_search_returns_matches(self, client):
+        response = client.get('/api/topics/search', query_string={'q': 'Decimals'})
+        assert response.status_code == 200
+        assert topic_ids(response.get_json()) == ['T-110', 'T-115']
+
+    def test_a_former_name_still_finds_the_topic(self, client):
+        """T-100 is called Fractions now; the source also called it Halves and Quarters.
+        Finding it by the old name is the whole reason also_known_as is stored."""
+        response = client.get('/api/topics/search', query_string={'q': 'Halves'})
+        assert response.status_code == 200
+        assert topic_ids(response.get_json()) == ['T-100']
+
+    def test_an_id_finds_its_topic(self, client):
+        """The id is a handle staff use, and it is what the list shows to tell topics
+        with the same name apart -- so it has to be searchable."""
+        response = client.get('/api/topics/search', query_string={'q': 'T-200'})
+        assert topic_ids(response.get_json()) == ['T-200']
+
+    def test_an_id_search_is_case_insensitive(self, client):
+        assert topic_ids(
+            client.get('/api/topics/search', query_string={'q': 't-200'}).get_json()
+        ) == ['T-200']
+
+    def test_a_partial_id_matches_every_topic_under_it(self, client):
+        """'T-1' is how someone reaches for a family of ids rather than one topic.
+        Sorted here because the rows come back in name order, which the list tests own."""
+        assert sorted(topic_ids(
+            client.get('/api/topics/search', query_string={'q': 'T-1'}).get_json()
+        )) == ['T-100', 'T-110', 'T-115']
+
+    @pytest.mark.parametrize('params', [{}, {'q': ''}, {'q': 'a'}])
+    def test_short_or_missing_query_is_rejected(self, client, params):
+        response = client.get('/api/topics/search', query_string=params)
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    def test_regex_metacharacters_do_not_error(self, client):
+        response = client.get('/api/topics/search', query_string={'q': '(('})
+        assert response.status_code == 200
+        assert response.get_json()['topics'] == []
+
+    def test_search_pages_too(self, client):
+        body = client.get(
+            '/api/topics/search', query_string={'q': 'Decimals', 'limit': 1}
+        ).get_json()
+        assert len(body['topics']) == 1
+        assert body['page']['total'] == 2
+
+    def test_search_is_not_shadowed_by_the_id_route(self, client):
+        """/topics/search would otherwise read as a topic whose id is 'search'."""
+        response = client.get('/api/topics/search', query_string={'q': 'Decimals'})
+        assert response.status_code == 200
+        assert 'topics' in response.get_json()
+        assert 'topic' not in response.get_json()
+
+
+class TestGetTopic:
+
+    def test_returns_the_topic_with_its_instructor_ranking(self, client):
+        response = client.get('/api/topics/T-100')
+        assert response.status_code == 200
+
+        topic = response.get_json()['topic']
+        assert topic['name'] == 'Fractions'
+        assert topic['unique_students'] == 2
+        assert [i['name'] for i in topic['instructors']] == [
+            'Dana Reyes', 'Marcus Reyes'
+        ]
+
+    def test_the_names_it_no_longer_goes_by_come_with_it(self, client):
+        topic = client.get('/api/topics/T-100').get_json()['topic']
+        assert topic['also_known_as'] == ['Halves and Quarters']
+
+    def test_the_ranking_links_to_instructors_that_exist(self, client):
+        """The instructor name is the join back to the profile page."""
+        topic = client.get('/api/topics/T-200').get_json()['topic']
+        assert client.get(f"/api/instructors/{topic['instructors'][0]['name']}") \
+            .status_code == 200
+
+    def test_a_topic_nobody_was_recorded_teaching_still_resolves(self, client):
+        topic = client.get('/api/topics/T-115').get_json()['topic']
+        assert topic['instructors'] == []
+        assert topic['unique_instructors'] == 0
+
+    def test_a_median_of_null_survives_serialisation(self, client):
+        """Null is the answer for a topic nobody finished, not a missing field."""
+        topic = client.get('/api/topics/T-115').get_json()['topic']
+        assert topic['median_sessions_to_finish'] is None
+
+    def test_unknown_topic_is_404(self, client):
+        response = client.get('/api/topics/T-999')
+        assert response.status_code == 404
+        assert response.get_json() == {'error': 'Topic not found'}
+
+    def test_a_partial_id_is_404_not_a_lucky_match(self, client):
+        assert client.get('/api/topics/T-1').status_code == 404
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/topics/T-100').status_code == 401
+
+
 class TestMetrics:
 
     def test_totals(self, client):

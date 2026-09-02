@@ -4,7 +4,14 @@ import { MoreIcon } from './Icons'
 import './Card.css'
 
 interface CardProps {
-  title: string
+  /** Optional because `lead` can stand in its place -- see below. */
+  title?: string
+  /**
+   * Replaces the title on the left of the header. The list pages put their filter box
+   * here: the page's own <h1> already names the table, so repeating it in the card was
+   * two words where a control could go.
+   */
+  lead?: ReactNode
   /**
    * The header's right-hand slot. The layout reference gives every card its own controls
    * here -- a period dropdown where the data is time-scoped. Empty for now on the cards
@@ -25,11 +32,21 @@ interface CardProps {
  * reference is cards, and the header controls slot is what the period dropdown and the
  * pinning menu will hang off later.
  */
-export function Card({ title, controls, showOverflow = true, flush, children }: CardProps) {
+export function Card({
+  title,
+  lead,
+  controls,
+  showOverflow = true,
+  flush,
+  children,
+}: CardProps) {
   return (
     <section className="card">
       <header className="card-header">
-        <h2 className="card-title">{title}</h2>
+        {/* A card with a `lead` has no heading of its own. That is deliberate on the list
+            pages -- the page's <h1> names them -- and an unnamed <section> is simply not
+            exposed as a landmark rather than being exposed under a duplicate name. */}
+        {lead ?? <h2 className="card-title">{title}</h2>}
         <div className="card-controls">
           {controls}
           {showOverflow && (

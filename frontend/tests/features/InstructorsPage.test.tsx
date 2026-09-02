@@ -63,6 +63,24 @@ describe('instructors page', () => {
     expect(screen.getByText(/1 matching/)).toBeInTheDocument()
   })
 
+  it('filters from its own box, in place of the card title', async () => {
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.type(screen.getByRole('searchbox', { name: /search instructors/i }), 'Marcus')
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?query=Marcus'))
+    await waitFor(() => expect(tableRows()).toHaveLength(1))
+    expect(screen.getByRole('row', { name: new RegExp(MARCUS) })).toBeInTheDocument()
+  })
+
+  it('shows the filter it arrived with in the box', async () => {
+    renderApp('/instructors?query=Marcus')
+
+    await screen.findByRole('row', { name: new RegExp(MARCUS) })
+    expect(screen.getByRole('searchbox', { name: /search instructors/i })).toHaveValue('Marcus')
+  })
+
   it('clears the filter and the offset together', async () => {
     const { user } = renderApp('/instructors?query=Marcus&offset=0')
     await screen.findByRole('row', { name: new RegExp(MARCUS) })

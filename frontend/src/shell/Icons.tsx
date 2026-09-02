@@ -67,6 +67,17 @@ export function InstructorsIcon({ size = 19, className }: IconProps) {
   )
 }
 
+/** A stack of worksheets: the curriculum items a lesson plan is built from. */
+export function TopicsIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v13.5H5.5A1.5 1.5 0 0 0 4 19V5.5Z" />
+      <path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v13.5h5.5A1.5 1.5 0 0 1 20 19V5.5Z" />
+      <path d="M4 19a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ size = 19, className }: IconProps) {
   return (
     <svg {...base(size, className)}>

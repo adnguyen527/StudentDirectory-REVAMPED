@@ -47,6 +47,16 @@ and a session covers several topics, so charging the session's pages to each top
 would multiply the real number. build_instructors can credit pages in full because its
 unit is the session -- here it is not.
 
+Three similarly-named counts sit near each other and answer different questions:
+
+    times_mastered      sessions that ended at Mastered, across everybody
+    students_finished   students whose last assignment finished, by `state`
+    students_mastered   students in that finished group now sitting at Mastered
+
+The last two nest exactly -- every finished student is at Mastered or Completed, 8,551 and
+398 of the 8,949 -- so students_finished - students_mastered is the number who completed a
+topic without ever mastering it, and the topic page shows the pair as a fraction.
+
 Counts are per (student, topic) pair, not per session: students_finished is how many
 students finished the topic, and a student who worked it across nine sessions counts once.
 `state` reads a student's last assignment only, so the three state counts partition
@@ -173,6 +183,7 @@ def roll_up(days_by_student):
                     'times_mastered':         0,
                     'unique_students':        0,
                     'students_finished':      0,
+                    'students_mastered':      0,
                     'students_on_plan':       0,
                     'students_removed':       0,
                     'students_ever_finished': 0,
@@ -189,6 +200,15 @@ def roll_up(days_by_student):
             t['unique_students']     += 1
             t['total_reassignments'] += entry['times_assigned'] - 1
             t[f"students_{entry['state']}"] += 1
+
+            # Scoped to the finished students rather than counted off the status across
+            # everyone. The two agree on the current data -- every student at Mastered or
+            # Completed is finished -- but only because build_students settles an
+            # assignment's best from the whole day. Reading the status alone would make
+            # this field depend on that staying true, and the topic page divides by
+            # students_finished, so a numerator sourced differently could exceed it.
+            if entry['state'] == 'finished' and entry['status'] == 'Mastered':
+                t['students_mastered'] += 1
 
             if entry['times_completed'] or entry['times_mastered']:
                 t['students_ever_finished'] += 1
@@ -256,8 +276,16 @@ def build_topics():
     if documents:
         # Indexes first, so a bad build fails before the write rather than after.
         topics_collection.create_index([('topic_id', ASCENDING)], unique=True)
-        topics_collection.create_index([('sessions', DESCENDING)])
-        topics_collection.create_index([('name', ASCENDING)])
+        # The paged sort in models/topic.py -- most worked first. Compound rather than
+        # sessions alone because session counts tie constantly (670 of 771 topics share
+        # theirs), and skip/limit over a partial order repeats and drops rows. A plain
+        # sessions index would be a redundant prefix of this one.
+        topics_collection.create_index([('sessions', DESCENDING), ('topic_id', ASCENDING)])
+        # Name order is not the default any more, but it is still a total order over the
+        # same rows and the column-sort work under TODO -> API will ask for it. Kept
+        # because 90 names are carried by more than one topic, so a name sort needs the
+        # id in the key or it cannot page safely either.
+        topics_collection.create_index([('name', ASCENDING), ('topic_id', ASCENDING)])
         topics_collection.insert_many(documents)
 
     print(f"Done. {len(documents)} topics inserted into '{TARGET_COLLECTION}'.")

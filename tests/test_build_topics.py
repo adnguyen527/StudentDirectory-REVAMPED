@@ -205,6 +205,52 @@ class TestRollUp:
         })
         assert only(topics)['total_reassignments'] == 2
 
+    def test_a_finished_student_at_mastered_counts_as_mastered(self):
+        topics = roll_up({'a': student((1, [seen('T-100', 'Mastered')]))})
+        entry = only(topics)
+        assert (entry['students_finished'], entry['students_mastered']) == (1, 1)
+
+    def test_a_finished_student_who_only_completed_it_does_not(self):
+        """The remainder the topic page's fraction exists to show."""
+        topics = roll_up({'a': student((1, [seen('T-100', 'Completed')]))})
+        entry = only(topics)
+        assert (entry['students_finished'], entry['students_mastered']) == (1, 0)
+
+    def test_mastering_it_on_a_busy_first_day_counts(self):
+        """Two sessions on the topic's first day, Worked On then Mastered, and displaced
+        afterwards. This used to read status 'Mastered' with state 'removed' -- see the
+        regression tests in test_build_students.py -- which put the student in neither
+        column. They mastered it, so they belong in both."""
+        topics = roll_up({'a': student(
+            (1, [seen('T-100', 'Worked On'), seen('T-100', 'Mastered')]),
+            (2, others(6)),
+        )})
+        entry = only(topics)
+        assert entry['students_removed'] == 0
+        assert (entry['students_finished'], entry['students_mastered']) == (1, 1)
+
+    def test_a_topic_still_being_worked_counts_in_neither(self):
+        """students_mastered stays scoped to the finished group rather than counted off
+        the status, so the fraction the topic page renders can never exceed its own
+        denominator."""
+        topics = roll_up({'a': student(
+            (1, [seen('T-100', 'Worked On')]),
+            (2, others(6)),
+        )})
+        entry = only(topics)
+        assert entry['students_removed'] == 1
+        assert (entry['students_finished'], entry['students_mastered']) == (0, 0)
+
+    def test_mastered_never_exceeds_finished(self):
+        topics = roll_up({
+            'mastered':  student((1, [seen('T-100', 'Mastered')])),
+            'completed': student((1, [seen('T-100', 'Completed')])),
+            'working':   student((1, [seen('T-100', 'Worked On')])),
+        })
+        entry = only(topics)
+        assert entry['students_mastered'] <= entry['students_finished']
+        assert (entry['students_mastered'], entry['students_finished']) == (1, 2)
+
     def test_ever_finished_can_exceed_finished_now(self):
         """A topic mastered and then handed back is not finished now, but it was."""
         topics = roll_up({'a': student(

@@ -243,6 +243,37 @@ class TestState:
         topics = history((1, [seen('T-100', 'Completed')]))
         assert only(topics)['state'] == 'finished'
 
+    def test_finishing_it_on_a_first_day_of_two_sessions_still_reads_finished(self):
+        """Regression. An assignment's best was seeded from the first entry read and only
+        revised from the second day onward, so a topic worked and then mastered across two
+        sessions of its very first day reported status Mastered with a state that said the
+        assignment never got past Worked On. 70 student-days carry more than one session,
+        and two (student, topic) pairs in the cluster were being recorded as dropped when
+        the student had in fact mastered them."""
+        topics = history(
+            (1, [seen('T-100', 'Worked On'), seen('T-100', 'Mastered')]),
+        )
+        entry = only(topics)
+        assert entry['status'] == 'Mastered'
+        assert entry['state'] == 'finished'
+
+    def test_the_same_day_still_finishes_when_the_topic_is_later_displaced(self):
+        """The case that actually bit: displacement afterwards used to turn it into
+        'removed', because the state fell through to the unfinished branch."""
+        topics = history(
+            (1, [seen('T-100', 'Worked On'), seen('T-100', 'Mastered')]),
+            (2, others(DISPLACED_TOPICS_THRESHOLD)),
+        )
+        assert only(topics)['state'] == 'finished'
+
+    def test_a_first_day_that_never_finishes_is_unaffected(self):
+        """Two sessions, neither above Worked On: still not finished."""
+        topics = history(
+            (1, [seen('T-100', 'Worked On'), seen('T-100', 'Worked On')]),
+            (2, others(DISPLACED_TOPICS_THRESHOLD)),
+        )
+        assert only(topics)['state'] == 'removed'
+
     def test_an_unfinished_topic_worked_recently_is_still_on_the_plan(self):
         topics = history(
             (1, [seen('T-100', 'Worked On')]),

@@ -8,6 +8,7 @@ import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
 import { InstructorsTable } from './InstructorsTable'
+import { ListFilter } from './ListFilter'
 
 /**
  * The full instructor list.
@@ -46,8 +47,9 @@ export function InstructorsPage() {
         </p>
       </div>
 
+      {/* No title: the <h1> above already says Instructors. */}
       <Card
-        title={query ? `Instructors matching “${query}”` : 'Instructors'}
+        lead={<ListFilter placeholder="Search instructors by name" />}
         flush
         controls={
           query ? (

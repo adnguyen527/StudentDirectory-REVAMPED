@@ -3,8 +3,10 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { HomePage } from './features/HomePage'
 import { InstructorsPage } from './features/InstructorsPage'
 import { StudentsPage } from './features/StudentsPage'
+import { TopicsPage } from './features/TopicsPage'
 import { InstructorProfilePage } from './features/profile/InstructorProfilePage'
 import { StudentProfilePage } from './features/profile/StudentProfilePage'
+import { TopicProfilePage } from './features/profile/TopicProfilePage'
 import { AppShell } from './shell/AppShell'
 
 export default function App() {
@@ -21,6 +23,9 @@ export default function App() {
         <Route path="instructors" element={<InstructorsPage />} />
         {/* The name is the key, so it travels in the path URL-encoded. */}
         <Route path="instructors/:instructorName" element={<InstructorProfilePage />} />
+        <Route path="topics" element={<TopicsPage />} />
+        {/* topic_id, e.g. PK-3121-00 -- URL-safe as stored, encoded anyway. */}
+        <Route path="topics/:topicId" element={<TopicProfilePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

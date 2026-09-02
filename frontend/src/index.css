@@ -91,6 +91,18 @@ button:disabled {
   font-weight: 600;
 }
 
+/* A second line under a row's name, for the identifier that disambiguates it. Monospace
+   for the same reason as .account-id: it is compared, not read. Topics need this because
+   90 names are shared by more than one of them. */
+.row-sub {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 /* Underlined only on hover: 50 underlined names at once is noise, but a name that leads
    somewhere has to say so when reached. */
 .row-link:hover {

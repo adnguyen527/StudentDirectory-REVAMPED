@@ -13,7 +13,9 @@ import { Pager } from '../../shell/Pager'
 import { StatTile } from '../../shell/StatTile'
 import './Profile.css'
 
-const ROSTER_PAGE = 25
+/** Matches the topic page's instructor table. 91% of rosters need more than one page --
+ *  the median is 62 students and the widest 304, which is 31 pages. */
+const ROSTER_PAGE = 10
 
 /** days_taught -> [{month: 'YYYY-MM', days}], oldest first. */
 function daysByMonth(days: ExtDate[]): { month: string; days: number }[] {
@@ -85,7 +87,11 @@ export function InstructorProfilePage() {
     )
   }
 
-  const roster = instructor.students.slice(rosterOffset, rosterOffset + ROSTER_PAGE)
+  // One element serves instructors/:instructorName, so the offset survives a move to
+  // another instructor. Snap back when it no longer addresses a row, rather than resetting
+  // in an effect and paying a second render pass.
+  const offset = rosterOffset < instructor.students.length ? rosterOffset : 0
+  const roster = instructor.students.slice(offset, offset + ROSTER_PAGE)
   const perDay = instructor.total_days_taught
     ? instructor.total_sessions_taught / instructor.total_days_taught
     : 0
@@ -222,7 +228,7 @@ export function InstructorProfilePage() {
             <Pager
               page={{
                 limit: ROSTER_PAGE,
-                offset: rosterOffset,
+                offset,
                 total: instructor.students.length,
                 returned: roster.length,
               }}

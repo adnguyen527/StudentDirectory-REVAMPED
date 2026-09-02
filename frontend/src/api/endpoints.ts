@@ -8,6 +8,8 @@ import type {
   Metrics,
   StudentDetailResponse,
   StudentsResponse,
+  TopicDetailResponse,
+  TopicsResponse,
 } from './types'
 
 /** routes/pagination.py: DEFAULT_LIMIT. Matched so the pager's arithmetic is the API's. */
@@ -33,6 +35,32 @@ export function listStudents(params: ListParams = {}, signal?: AbortSignal) {
 
 export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
   return request<InstructorsResponse>('/instructors', { ...params }, signal)
+}
+
+/**
+ * The topic list.
+ *
+ * `query` matches the current name, the names it no longer goes by, and the topic id --
+ * models/topic.py, _search_criteria. There is no dedicated searchTopics(): the page's own
+ * filter bar drives this same `?query=`, and /topics/search exists for a typeahead that
+ * does not exist yet.
+ */
+export function listTopics(params: ListParams = {}, signal?: AbortSignal) {
+  return request<TopicsResponse>('/topics', { ...params }, signal)
+}
+
+/**
+ * One topic, with the instructors who taught it most.
+ *
+ * The id is the key and is URL-safe as stored ('PK-3121-00'), but it is encoded anyway --
+ * nothing guarantees the source keeps it that way.
+ */
+export function getTopic(topicId: string, signal?: AbortSignal) {
+  return request<TopicDetailResponse>(
+    `/topics/${encodeURIComponent(topicId)}`,
+    undefined,
+    signal,
+  )
 }
 
 /**

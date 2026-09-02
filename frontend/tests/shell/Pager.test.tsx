@@ -30,17 +30,25 @@ describe('Pager', () => {
     expect(screen.getByRole('button', { name: /previous/i })).toBeEnabled()
   })
 
-  it('disables Next when one full page is all there is', () => {
+  it('hides the buttons when one full page is all there is', () => {
+    // Exactly at the limit -- the boundary. Two permanently disabled buttons under a table
+    // that fits on one page are furniture, so the count is shown without them.
     render(<Pager page={page({ total: 25, returned: 25 })} onChange={vi.fn()} />)
     expect(screen.getByText('1–25 of 25')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /next/i })).toBeDisabled()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('says no results rather than "1–0 of 0"', () => {
+  it('shows the buttons as soon as one row spills past the limit', () => {
+    // The other side of the same boundary.
+    render(<Pager page={page({ total: 26, returned: 25 })} onChange={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /next/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /previous/i })).toBeDisabled()
+  })
+
+  it('says no results rather than "1–0 of 0", and offers nothing to click', () => {
     render(<Pager page={page({ total: 0, returned: 0 })} onChange={vi.fn()} />)
     expect(screen.getByText('No results')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /next/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /previous/i })).toBeDisabled()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('advances by the limit the server actually used', async () => {

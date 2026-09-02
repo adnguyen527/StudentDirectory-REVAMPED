@@ -40,6 +40,35 @@ describe('students page', () => {
     expect(screen.getByText(/1 matching/)).toBeInTheDocument()
   })
 
+  it('filters from its own box, in place of the card title', async () => {
+    // The page's <h1> already says Students, so the card header carries the filter
+    // instead. Typing narrows the table without leaving the page.
+    const { user } = renderApp('/students')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.type(screen.getByRole('searchbox', { name: /search students by name/i }), 'Chloe')
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?query=Chloe'))
+    await waitFor(() => expect(tableRows()).toHaveLength(1))
+    expect(screen.getByRole('row', { name: /Chloe Tan/ })).toBeInTheDocument()
+  })
+
+  it('shows the filter it arrived with in the box', async () => {
+    // Otherwise a linked-to search looks like an unexplained short list.
+    renderApp('/students?query=Chloe')
+
+    await screen.findByRole('row', { name: /Chloe Tan/ })
+    expect(screen.getByRole('searchbox', { name: /search students by name/i })).toHaveValue('Chloe')
+  })
+
+  it('drops the offset when the filter changes', async () => {
+    const { user } = renderApp('/students?offset=50')
+
+    await user.type(screen.getByRole('searchbox', { name: /search students by name/i }), 'Chloe')
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?query=Chloe'))
+  })
+
   it('clears the filter and the offset together', async () => {
     // Page 2 of a filtered list is not page 2 of the whole one.
     const { user } = renderApp('/students?query=Chloe&offset=0')

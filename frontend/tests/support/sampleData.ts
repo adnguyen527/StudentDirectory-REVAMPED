@@ -23,6 +23,8 @@ import type {
   Metrics,
   StudentDetail,
   StudentListItem,
+  TopicDetail,
+  TopicListItem,
 } from '../../src/api/types'
 
 export const ACCOUNT_NGUYEN = 'a1b2c3d4-0000-4000-8000-000000000001'
@@ -305,6 +307,116 @@ export const DANA_DETAIL: InstructorDetail = {
       pages_completed: 3,
     },
   ],
+}
+
+/*
+ * The topic rollup, carrying the two traps the real collection has.
+ *
+ *   - FRACTIONS was renamed: the source also called it "Halves and Quarters", so a search
+ *     for the old name has to find it.
+ *   - DECIMALS and DECIMALS_TWO share a name under different ids, as 90 real topics do.
+ *     Only the id separates them, which is why the list shows it.
+ */
+export const FRACTIONS_ID = 'T-100'
+export const DECIMALS_ID = 'T-110'
+export const DECIMALS_TWO_ID = 'T-115'
+export const ANGLES_ID = 'T-200'
+
+export const FRACTIONS: TopicListItem = {
+  _id: oid('64b000000000000000000a10'),
+  topic_id: FRACTIONS_ID,
+  name: 'Fractions',
+  also_known_as: ['Halves and Quarters'],
+  sessions: 9,
+  times_worked_on: 6,
+  times_completed: 1,
+  times_mastered: 2,
+  unique_students: 3,
+  students_finished: 2,
+  students_mastered: 1,
+  students_on_plan: 1,
+  students_removed: 0,
+  students_ever_finished: 2,
+  total_reassignments: 1,
+  median_sessions_to_finish: 3,
+  unique_instructors: 2,
+  first_taught: day('2026-02-01'),
+  last_taught: day('2026-03-14'),
+  last_modified: at('2026-03-15', '09:00'),
+}
+
+export const DECIMALS: TopicListItem = {
+  ...FRACTIONS,
+  _id: oid('64b000000000000000000a20'),
+  topic_id: DECIMALS_ID,
+  name: 'Decimals',
+  also_known_as: [],
+  sessions: 4,
+  unique_students: 2,
+  students_finished: 1,
+  students_mastered: 1,
+  students_on_plan: 1,
+  students_removed: 0,
+  students_ever_finished: 1,
+  total_reassignments: 0,
+  median_sessions_to_finish: 2,
+  unique_instructors: 1,
+}
+
+/** Same name as DECIMALS, different id -- and nobody has finished it. */
+export const DECIMALS_TWO: TopicListItem = {
+  ...DECIMALS,
+  _id: oid('64b000000000000000000a30'),
+  topic_id: DECIMALS_TWO_ID,
+  sessions: 1,
+  unique_students: 1,
+  students_finished: 0,
+  students_mastered: 0,
+  students_on_plan: 0,
+  students_removed: 1,
+  students_ever_finished: 0,
+  // Nobody finished it, so there is no median. Null, not zero.
+  median_sessions_to_finish: null,
+  unique_instructors: 0,
+}
+
+export const ANGLES: TopicListItem = {
+  ...DECIMALS,
+  _id: oid('64b000000000000000000a40'),
+  topic_id: ANGLES_ID,
+  name: 'Angles',
+  sessions: 2,
+  unique_students: 1,
+  students_finished: 1,
+  students_mastered: 1,
+  students_on_plan: 0,
+  students_removed: 0,
+  students_ever_finished: 1,
+  median_sessions_to_finish: 1,
+  unique_instructors: 1,
+}
+
+/**
+ * Most worked first, as models/topic.py's LIST_SORT returns them -- 9, 4, 2, 1 sessions.
+ *
+ * The handlers slice this array as given rather than sorting it, so this order *is* the
+ * API's order as far as these tests are concerned. The session-count tie that the real
+ * sort has to break is covered on the Python side, in tests/test_routes.py.
+ */
+export const TOPICS: TopicListItem[] = [FRACTIONS, DECIMALS, ANGLES, DECIMALS_TWO]
+
+export const FRACTIONS_DETAIL: TopicDetail = {
+  ...FRACTIONS,
+  instructors: [
+    { name: DANA, sessions: 6 },
+    { name: MARCUS, sessions: 3 },
+  ],
+}
+
+/** The unstaffed case: a topic no instructor was ever recorded on. */
+export const DECIMALS_TWO_DETAIL: TopicDetail = {
+  ...DECIMALS_TWO,
+  instructors: [],
 }
 
 export const METRICS: Metrics = {
