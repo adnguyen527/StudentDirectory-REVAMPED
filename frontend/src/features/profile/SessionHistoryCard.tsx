@@ -86,7 +86,17 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                   return (
                     <Fragment key={id}>
                       <tr
-                        className={hasDetail ? 'row-expandable' : undefined}
+                        className={
+                          hasDetail
+                            ? isOpen
+                              ? 'row-expandable row-open'
+                              : 'row-expandable'
+                            : undefined
+                        }
+                        // Says the row is open to anything that is not looking at the
+                        // colour, and is what lets a test ask for the selected row by
+                        // role rather than by class name.
+                        aria-expanded={hasDetail ? isOpen : undefined}
                         onClick={() => hasDetail && setExpanded(isOpen ? null : id)}
                       >
                         <td className="primary-name">{formatDate(report.date)}</td>
@@ -141,7 +151,7 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                       </tr>
 
                       {isOpen && (
-                        <tr className="row-detail">
+                        <tr className="row-detail row-open-detail">
                           <td colSpan={8}>
                             <Note label="Session summary" value={report.session_summary_notes} />
                             {/* Staff commentary about a named child: labelled so it is

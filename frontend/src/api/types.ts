@@ -102,6 +102,13 @@ export interface Topic {
 export interface StudentInstructor {
   name: string
   sessions: number
+  /**
+   * Sessions with a recorded page count, which is exactly the finalized ones -- the two
+   * are the same thing in this data. It is the denominator for pages per session:
+   * dividing by `sessions` folds in reports nobody ever completed and understates the
+   * rate on 23.7% of the rows the profile shows it for.
+   */
+  finalized_sessions: number
   pages_completed: number
 }
 

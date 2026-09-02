@@ -158,6 +158,61 @@ def test_no_orphaned_dwp_report_references(live_db, students):
     assert found == len(referenced), f'{len(referenced) - found} orphaned reference(s)'
 
 
+def test_an_instructors_finalized_sessions_never_exceed_their_sessions(students):
+    """finalized_sessions is the denominator the profile divides pages by, so it being
+    larger than the sessions it counts a subset of would print a rate off a fiction."""
+    impossible = [
+        (s['student_key'], i['name'], i['finalized_sessions'], i['sessions'])
+        for s in students for i in s.get('instructors') or []
+        if i['finalized_sessions'] > i['sessions']
+    ]
+    assert not impossible, f'{len(impossible)} entry(s), e.g. {impossible[:5]}'
+
+
+def test_finalized_sessions_reconcile_to_dwp_reports(live_db, students):
+    """The count is 'sessions with a page count', and `finalized` is exactly that in this
+    data -- 28,314 finalized rows all carry pages and 1,068 unfinalized all carry null.
+    This holds the rollup to the reports it summarises."""
+    from collections import defaultdict
+
+    counted = defaultdict(int)
+    for doc in live_db['dwp_reports'].find(
+        {'finalized': True},
+        {'account_id': 1, 'student_name': 1, 'instructors': 1},
+    ):
+        account_id, name = doc.get('account_id'), doc.get('student_name')
+        if not account_id or not name or not str(name).strip():
+            continue
+        key = make_student_key(account_id, str(name).strip())
+        for instructor in doc.get('instructors') or []:
+            if instructor and instructor.strip():
+                counted[(key, instructor.strip())] += 1
+
+    drifted = [
+        (s['student_key'], i['name'], i['finalized_sessions'],
+         counted.get((s['student_key'], i['name']), 0))
+        for s in students for i in s.get('instructors') or []
+        if i['finalized_sessions'] != counted.get((s['student_key'], i['name']), 0)
+    ]
+    assert not drifted, f'{len(drifted)} count(s) out of sync, e.g. {drifted[:5]}'
+
+
+def test_a_pages_rate_is_only_shown_where_it_has_a_denominator(students):
+    """The profile shows the rate from five sessions up. No row that clears that bar may
+    have zero finalized sessions, or the page would be dividing by nothing.
+
+    The five is a display rule, not a property of the data, so it is spelled out here
+    rather than imported -- it mirrors PAGES_PER_SESSION_MIN in
+    frontend/src/features/profile/StudentProfilePage.tsx and has to move with it.
+    """
+    stranded = [
+        (s['student_key'], i['name'])
+        for s in students for i in s.get('instructors') or []
+        if i['sessions'] >= 5 and i['finalized_sessions'] == 0
+    ]
+    assert not stranded, f'{len(stranded)} row(s) would divide by zero, e.g. {stranded[:5]}'
+
+
 def test_session_counts_match_the_reference_lists(students):
     drifted = [
         s['student_key'] for s in students

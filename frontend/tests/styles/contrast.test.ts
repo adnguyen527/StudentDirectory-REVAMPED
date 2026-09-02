@@ -64,6 +64,9 @@ const PAIRS: [label: string, fg: string, bg: string][] = [
   ['faint text on a card', '--text-faint', '--surface'],
   ['accent link on a card', '--accent', '--surface'],
   ['active nav on its wash', '--accent', '--accent-soft'],
+  // The selected session row takes the same wash, and carries ordinary row text over it.
+  ['selected row text', '--text', '--accent-soft'],
+  ['selected row muted text', '--text-muted', '--accent-soft'],
   ['button label on accent', '--text-on-accent', '--accent'],
   ['center tag', '--wash-1-ink', '--wash-1'],
   ['tile ink 2', '--wash-2-ink', '--wash-2'],

@@ -114,8 +114,12 @@ export const ANTHONY_DETAIL: StudentDetail = {
   ...ANTHONY,
   dwp_report_ids: [oid('64b0000000000000000000a1'), oid('64b0000000000000000000a2')],
   instructors: [
-    { name: DANA, sessions: 2, pages_completed: 12 },
-    { name: MARCUS, sessions: 1, pages_completed: 7 },
+    // Six sessions, one never finalized. Above the five-session threshold, and 60/5 = 12.0
+    // rather than the 10.0 a naive pages ÷ sessions would show -- so a test asserting 12.0
+    // fails if the wrong denominator is used.
+    { name: DANA, sessions: 6, finalized_sessions: 5, pages_completed: 60 },
+    // One session: under the threshold, so this row shows a dash.
+    { name: MARCUS, sessions: 1, finalized_sessions: 1, pages_completed: 7 },
   ],
   topics: [
     {

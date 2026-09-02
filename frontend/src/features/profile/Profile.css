@@ -108,6 +108,31 @@
   cursor: pointer;
 }
 
+/*
+ * The open row, and the panel under it, as one block.
+ *
+ * --accent-soft is this palette's "active" wash -- the same one the selected nav item
+ * uses -- so a selected row reads the way selection reads everywhere else here.
+ *
+ * Written at (0,2,3) and repeated for :hover because index.css has
+ * `.table tbody tr:hover td { background: var(--surface-sunken) }` at that same
+ * specificity. A plain `.row-open td` is (0,1,1) and would lose to it, blanking the
+ * highlight exactly when the pointer is on the row.
+ */
+.table tbody tr.row-open td,
+.table tbody tr.row-open:hover td {
+  background: var(--accent-soft);
+}
+
+/* Colour alone should not carry the selection: the edge marks it for anyone who cannot
+   separate the wash from the surrounding white. Carried down the panel too, which keeps
+   its own sunken ground -- washing a block of prose in violet is louder than the job
+   needs, and the shared edge is enough to bind the two together. */
+.table tbody tr.row-open td:first-child,
+.table tbody tr.row-open-detail td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .row-detail td {
   padding: var(--space-4) var(--space-5);
   background: var(--surface-sunken);

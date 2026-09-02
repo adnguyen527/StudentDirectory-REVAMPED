@@ -123,7 +123,8 @@ Aggregated per-student profiles built from `dwp_reports`. Each document is a ful
 dashboard view. Rebuilt by `ingestion/build_students.py`.
 
 `student_key`, `account_id`, `student_name`, `total_sessions`, `total_pages_completed`,
-`last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics[]`,
+`last_session_date`, `last_assessment`, `centers[]`, `instructors[]` (each
+`{name, sessions, finalized_sessions, pages_completed}`), `topics[]`,
 `total_unique_topics_mastered`, `total_unique_topics_completed`,
 `total_unique_topics_finished`, `total_topic_reassignments`, `total_topics_on_plan`,
 `total_topics_removed`, `dwp_report_ids[]`, `last_modified`.
@@ -399,7 +400,7 @@ identify the session, with the hash demoted to change-detection.
 ```bash
 pip install -r requirements-dev.txt
 pytest                  # 539 offline tests -- no network, no credentials (~3s)
-pytest --integration    # + 90 read-only checks against the real cluster
+pytest --integration    # + 93 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -424,7 +425,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 188 tests, Vitest + Testing Library (~13s)
+npm test                # 191 tests, Vitest + Testing Library (~13s)
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```

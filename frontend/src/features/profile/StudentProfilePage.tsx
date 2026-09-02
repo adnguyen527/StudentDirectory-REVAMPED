@@ -18,6 +18,10 @@ import './Profile.css'
  *  widest 23, so 43% of profiles need more than one page. */
 const INSTRUCTOR_PAGE = 10
 
+/** Below this many sessions a pages-per-session figure is noise, not a pace. The median
+ *  (student, instructor) pair is 2 sessions, so most rows show a dash. */
+const PAGES_PER_SESSION_MIN = 5
+
 /**
  * One student, everything the API holds about them.
  *
@@ -173,6 +177,7 @@ export function StudentProfilePage() {
                 <th>Instructor</th>
                 <th className="numeric">Sessions</th>
                 <th className="numeric">Pages completed</th>
+                <th className="numeric">Pages / session</th>
               </tr>
             </thead>
             <tbody>
@@ -190,6 +195,19 @@ export function StudentProfilePage() {
                   </td>
                   <td className="numeric">{formatNumber(instructor.sessions)}</td>
                   <td className="numeric">{formatNumber(instructor.pages_completed)}</td>
+                  {/* Withheld under five sessions: two sessions do not make a rate, and a
+                      single heavy day would read as this instructor's normal pace. The
+                      zero-denominator guard cannot fire on today's data -- no row with
+                      five sessions has none finalized -- but that is a fact about the
+                      data, not a rule. */}
+                  <td className="numeric">
+                    {instructor.sessions < PAGES_PER_SESSION_MIN ||
+                    instructor.finalized_sessions === 0 ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      (instructor.pages_completed / instructor.finalized_sessions).toFixed(1)
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -199,7 +217,9 @@ export function StudentProfilePage() {
             for each of them. The column does not add up to the tile above, by design. */}
         <p className="muted table-footnote">
           * Co-taught sessions count for each instructor, so these pages sum to more than the
-          student's own total.
+          student&rsquo;s own total. Pages per session is shown from{' '}
+          {PAGES_PER_SESSION_MIN} sessions and averages over sessions with a recorded page
+          count, so it will not equal pages ÷ sessions where a report was never finalized.
         </p>
         {/* The whole list is already in the detail response, so this pages what is in
             hand. Held back on an empty roster so the card does not answer "No results"

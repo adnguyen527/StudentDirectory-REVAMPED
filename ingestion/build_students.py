@@ -255,13 +255,26 @@ def build_students():
 
         # Instructors
         pages = doc.get('pages_completed') or 0
+        # An unfinalized report has no page count at all -- `finalized` and a recorded
+        # page count are the same thing in this data, with no exceptions either way. So
+        # those sessions count as sessions but must stay out of any pages-per-session
+        # denominator, or an instructor whose paperwork is behind reads as one whose
+        # student did nothing. Counted separately for the same reason attendance_reports
+        # keeps sessions_timed apart from sessions.
+        finalized = 1 if doc.get('finalized') else 0
         for name in doc.get('instructors', []):
             name = name.strip()
             if name:
                 if name not in s['instructors']:
-                    s['instructors'][name] = {'name': name, 'sessions': 0, 'pages_completed': 0}
-                s['instructors'][name]['sessions']        += 1
-                s['instructors'][name]['pages_completed'] += pages
+                    s['instructors'][name] = {
+                        'name': name,
+                        'sessions': 0,
+                        'finalized_sessions': 0,
+                        'pages_completed': 0,
+                    }
+                s['instructors'][name]['sessions']           += 1
+                s['instructors'][name]['finalized_sessions'] += finalized
+                s['instructors'][name]['pages_completed']    += pages
 
         # Topics, held by day until the whole student has been read
         day = s['days'].setdefault(dt, [])

@@ -47,8 +47,13 @@ STUDENTS = [
         'last_assessment': 'Algebra I',
         'total_pages_completed': 12,
         'instructors': [
-            {'name': 'Dana Reyes', 'sessions': 2, 'pages_completed': 12},
-            {'name': 'Marcus Reyes', 'sessions': 1, 'pages_completed': 7},
+            # Six sessions, one of them never finalized: above the display threshold,
+            # and the 60/5 average differs from the 60/6 a naive divide would give.
+            {'name': 'Dana Reyes', 'sessions': 6, 'finalized_sessions': 5,
+             'pages_completed': 60},
+            # Below the threshold, so no rate is shown for them.
+            {'name': 'Marcus Reyes', 'sessions': 1, 'finalized_sessions': 1,
+             'pages_completed': 7},
         ],
         # Two topics over two sessions: Fractions climbs the ladder, Decimals was
         # mastered on 3/7 and handed straight back on 3/14 -- assigned a second time.
@@ -86,7 +91,10 @@ STUDENTS = [
         'last_session_date': _day(2026, 3, 10),
         'last_assessment': 'Pre-Algebra',
         'total_pages_completed': 4,
-        'instructors': [{'name': 'Dana Reyes', 'sessions': 1, 'pages_completed': 4}],
+        'instructors': [
+            {'name': 'Dana Reyes', 'sessions': 1, 'finalized_sessions': 1,
+             'pages_completed': 4},
+        ],
         # Her one topic carries a status outside the ladder, so nothing is rolled up.
         'topics': [],
         'total_unique_topics_mastered': 0,
@@ -107,7 +115,10 @@ STUDENTS = [
         'last_session_date': _day(2026, 2, 1),
         'last_assessment': 'Geometry',
         'total_pages_completed': 7,
-        'instructors': [{'name': 'Sam Ortiz', 'sessions': 1, 'pages_completed': 7}],
+        'instructors': [
+            {'name': 'Sam Ortiz', 'sessions': 1, 'finalized_sessions': 1,
+             'pages_completed': 7},
+        ],
         # Completed but not mastered -- the rarest of the three states, 398 pairs live.
         'topics': [
             {'id': 'T-200', 'name': 'Angles', 'sessions': 1,

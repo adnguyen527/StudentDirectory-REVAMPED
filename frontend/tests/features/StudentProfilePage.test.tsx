@@ -8,6 +8,8 @@ import {
   ANTHONY_DETAIL,
   ANTHONY_KEY,
   ANTHONY_REPORTS,
+  DANA,
+  MARCUS,
   day,
 } from '../support/sampleData'
 import { server } from '../support/server'
@@ -225,6 +227,38 @@ describe('student profile', () => {
     expect(screen.getByText('Prefers worked examples first.')).toBeInTheDocument()
   })
 
+  it('marks the open session row, and unmarks it on close', async () => {
+    // Without this the only sign of which session is open is a panel below it, which is
+    // easy to lose on a 25-row page. The unmarking half is the part that rots quietly.
+    const { user } = renderApp(PROFILE)
+
+    const history = within(await card(/Session history/))
+    const row = await history.findByRole('row', { name: /Mar 14, 2026/ })
+    expect(row).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(row)
+    await waitFor(() => expect(row).toHaveAttribute('aria-expanded', 'true'))
+    expect(row).toHaveClass('row-open')
+
+    await user.click(row)
+    await waitFor(() => expect(row).toHaveAttribute('aria-expanded', 'false'))
+    expect(row).not.toHaveClass('row-open')
+  })
+
+  it('never marks a row that has nothing to open', async () => {
+    // The Mar 10 report has no notes, assessment or topics, so clicking it does nothing
+    // -- and must not look like it did.
+    const { user } = renderApp(PROFILE)
+
+    const history = within(await card(/Session history/))
+    const row = await history.findByRole('row', { name: /Mar 10, 2026/ })
+    expect(row).not.toHaveAttribute('aria-expanded')
+
+    await user.click(row)
+
+    expect(row).not.toHaveClass('row-open')
+  })
+
   it('renders the session wall clock the source recorded', async () => {
     renderApp(PROFILE)
     // 17:53Z stored naive; a local reading would say 12:53 PM.
@@ -247,6 +281,37 @@ describe('student profile', () => {
     const history = within(await card(/Session history/))
     const row = await history.findByRole('row', { name: /Mar 10, 2026/ })
     expect(within(row).getByText('Unfinalized')).toBeInTheDocument()
+  })
+
+  it('averages pages over the sessions that recorded any', async () => {
+    // Dana has 6 sessions but one was never finalized, so it carries no page count:
+    // 60 pages over the 5 that do = 12.0. Dividing by all 6 would read 10.0, which is the
+    // mistake this asserts against -- and it understates 23.7% of the rows shown.
+    renderApp(PROFILE)
+
+    const instructors = within(await card(/^Instructors$/))
+    const dana = await instructors.findByRole('row', { name: new RegExp(DANA) })
+    expect(within(dana).getByText('12.0')).toBeInTheDocument()
+    expect(within(dana).queryByText('10.0')).not.toBeInTheDocument()
+  })
+
+  it('withholds the rate below five sessions rather than printing noise', async () => {
+    // Marcus has one session. A single heavy day is not a pace, and the median
+    // (student, instructor) pair in the real data is 2 sessions.
+    renderApp(PROFILE)
+
+    const instructors = within(await card(/^Instructors$/))
+    const marcus = await instructors.findByRole('row', { name: new RegExp(MARCUS) })
+    expect(within(marcus).getByText('—')).toBeInTheDocument()
+  })
+
+  it('says how the rate is worked out, since it is not pages over sessions', async () => {
+    renderApp(PROFILE)
+
+    const instructors = within(await card(/^Instructors$/))
+    expect(
+      await instructors.findByText(/averages over sessions with a recorded page count/),
+    ).toBeInTheDocument()
   })
 
   it('pages the instructors card ten at a time', async () => {
