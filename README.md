@@ -1050,6 +1050,25 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       An unrecognised center name returns an empty page rather than a `400`. That looks
       like the `sort` allowlist under **API**, but it is the opposite case: "no students at
       Xyz" is a correct answer to a filter, while `sort=bogus` has no correct answer.
+- [ ] `P2` **Show "Clear filters" whenever anything is filtered, not just a name.** Both
+      list cards gate the button on `query`, so ticking a center leaves no way back to the
+      whole list except unticking each box one at a time — and the more filters the column
+      item below adds, the worse that gets.
+
+      **The action is already right**: `setParams(new URLSearchParams())` drops every
+      parameter, center included. Only the visibility test is name-specific, so this is a
+      condition change rather than new behaviour.
+
+      Make the test **"the URL carries any parameter other than `offset`"** rather than
+      naming the filters. That covers `query`, `center` and every filter added later on the
+      day it lands, with nothing to remember to update. `offset` is the one exclusion:
+      paging is not filtering, so page 2 of an unfiltered list must not offer to clear
+      anything — though clearing does reset it, since page 3 of a filtered list is not
+      page 3 of the whole.
+
+      Plural label, since it can now be clearing several at once. And give the **Topics**
+      list the same button — it has a search bar and no way to clear it at all, which is
+      the third inconsistency between the three list headers.
 - [ ] `P2` **Filter and sort each list by its own columns.** Both lists take only a name
       substring today and are stuck in name order, so a column can be read but not asked
       about — there is no way to say "Southlake only", "fewer than 5 sessions", "nothing
