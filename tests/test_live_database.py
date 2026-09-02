@@ -570,22 +570,6 @@ def test_instructor_rosters_point_at_real_students(live_db, instructors):
     assert not dangling, f'{len(dangling)} unknown student_key(s), e.g. {sorted(dangling)[:5]}'
 
 
-def test_instructor_roster_size_matches_its_count(instructors):
-    drifted = [
-        i['instructor_name'] for i in instructors
-        if i.get('unique_students') != len(i.get('students', []))
-    ]
-    assert not drifted, f'{len(drifted)} roster count(s) out of sync, e.g. {drifted[:5]}'
-
-
-def test_instructor_topic_counts_match_their_list(instructors):
-    drifted = [
-        i['instructor_name'] for i in instructors
-        if i.get('unique_topics_taught') != len(i.get('topics', []))
-    ]
-    assert not drifted, f'{len(drifted)} instructor(s), e.g. {drifted[:5]}'
-
-
 def test_instructor_topics_are_ranked_by_sessions(instructors):
     """The profile page reads 'most taught' top down."""
     unsorted_instructors = [
@@ -633,14 +617,6 @@ def test_instructor_topics_point_at_real_topics(instructors, topics_by_id):
         if t['topic_id'] not in topics_by_id
     }
     assert not unknown, f'{len(unknown)} unknown topic(s), e.g. {sorted(unknown)[:5]}'
-
-
-def test_instructor_days_taught_matches_its_count(instructors):
-    drifted = [
-        i['instructor_name'] for i in instructors
-        if i.get('total_days_taught') != len(i.get('days_taught', []))
-    ]
-    assert not drifted, f'{len(drifted)} day count(s) out of sync, e.g. {drifted[:5]}'
 
 
 def test_co_taught_sessions_are_a_subset_of_sessions_taught(instructors):
@@ -693,7 +669,7 @@ def test_instructor_pages_overshoot_is_bounded(live_db, instructors):
 REQUIRED_TOPIC_FIELDS = [
     'topic_id', 'name', 'sessions', 'times_worked_on', 'times_completed',
     'times_mastered', 'first_taught', 'last_taught', 'unique_students',
-    'unique_instructors', 'instructors', 'also_known_as', 'students_finished',
+    'instructors', 'also_known_as', 'students_finished',
     'students_mastered', 'students_on_plan', 'students_removed',
     'students_ever_finished', 'total_reassignments',
 ]
@@ -704,7 +680,7 @@ REQUIRED_TOPIC_FIELDS = [
 
 TOPIC_COUNT_FIELDS = [
     'sessions', 'times_worked_on', 'times_completed', 'times_mastered',
-    'unique_students', 'unique_instructors', 'students_finished', 'students_on_plan',
+    'unique_students', 'students_finished', 'students_on_plan',
     'students_removed', 'students_ever_finished', 'total_reassignments',
 ]
 
@@ -898,7 +874,7 @@ def test_every_topic_was_taught_to_somebody(topics):
 
 
 def test_an_unstaffed_session_still_counts(topics):
-    """unique_instructors == 0 is a real state, not a broken join.
+    """An empty instructors[] is a real state, not a broken join.
 
     73 dwp rows name no instructor, 23 of them carrying topics, and one topic --
     PK-0140-06 'Volume', a single session -- has no staffed session at all. The rollup
@@ -906,7 +882,7 @@ def test_an_unstaffed_session_still_counts(topics):
     actually did because the paperwork was incomplete. Anything using this field to
     rank instructors has to treat zero as unknown rather than as a real zero.
     """
-    unstaffed = [t for t in topics if t.get('unique_instructors', 0) == 0]
+    unstaffed = [t for t in topics if not t.get('instructors')]
     assert all(t['sessions'] >= 1 and t['unique_students'] >= 1 for t in unstaffed), (
         'an unstaffed topic still has to have the session and student behind it'
     )
@@ -1123,14 +1099,14 @@ def test_topic_documents_cover_every_taught_topic(topics, dwp_topic_rollup):
 
 
 def test_topic_instructor_counts_reconcile_to_dwp_reports(topics, dwp_topic_rollup):
-    """unique_instructors cannot come from students.topics[] -- that carries no
+    """The instructor list cannot come from students.topics[] -- that carries no
     instructor -- so this is the only check on the dwp join behind it."""
     _, instructors_seen = dwp_topic_rollup
     drifted = [
-        (t['topic_id'], t['unique_instructors'],
+        (t['topic_id'], len(t['instructors']),
          len(instructors_seen.get(t['topic_id'], ())))
         for t in topics
-        if t['unique_instructors'] != len(instructors_seen.get(t['topic_id'], ()))
+        if len(t['instructors']) != len(instructors_seen.get(t['topic_id'], ()))
     ]
     assert not drifted, f'{len(drifted)} instructor count(s) out of sync, e.g. {drifted[:5]}'
 
@@ -1156,14 +1132,6 @@ def test_the_instructor_list_is_ranked_by_sessions(topics):
         != sorted((-i['sessions'], i['name']) for i in t.get('instructors', []))
     ]
     assert not unsorted_topics, f'{len(unsorted_topics)} out of order, e.g. {unsorted_topics[:5]}'
-
-
-def test_unique_instructors_matches_the_instructor_list(topics):
-    drifted = [
-        t['topic_id'] for t in topics
-        if t['unique_instructors'] != len(t.get('instructors', []))
-    ]
-    assert not drifted, f'{len(drifted)} topic(s), e.g. {drifted[:5]}'
 
 
 def test_every_instructor_credit_is_a_real_session(topics):

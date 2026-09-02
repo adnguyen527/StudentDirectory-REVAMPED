@@ -18,6 +18,7 @@
 import type {
   AttendanceResponse,
   DwpReport,
+  InstructorBase,
   InstructorDetail,
   InstructorListItem,
   Metrics,
@@ -252,18 +253,27 @@ export const ANTHONY_ATTENDANCE: AttendanceResponse = {
 
 // --- Instructors ---------------------------------------------------------
 
-export const DANA_LIST: InstructorListItem = {
+/**
+ * What both instructor shapes share. The list adds the two counts the server derives with
+ * $size; the detail adds the arrays they were derived from. Neither carries both, which is
+ * what /api/instructors and /api/instructors/<name> actually return.
+ */
+const DANA_BASE: InstructorBase = {
   _id: oid('64b0000000000000000000e0'),
   instructor_name: DANA,
   total_sessions_taught: 4,
   co_taught_sessions: 1,
   unfinalized_sessions: 1,
   total_pages_completed: 20,
-  total_days_taught: 2,
   last_session_date: day('2026-03-14'),
-  unique_students: 3,
   centers: [{ name: 'Westside', sessions: 3 }, { name: 'Eastside', sessions: 1 }],
   last_modified: at('2026-03-15', '09:00'),
+}
+
+export const DANA_LIST: InstructorListItem = {
+  ...DANA_BASE,
+  unique_students: 3,
+  total_days_taught: 2,
 }
 
 export const MARCUS_LIST: InstructorListItem = {
@@ -282,7 +292,7 @@ export const MARCUS_LIST: InstructorListItem = {
 export const INSTRUCTORS: InstructorListItem[] = [DANA_LIST, MARCUS_LIST]
 
 export const DANA_DETAIL: InstructorDetail = {
-  ...DANA_LIST,
+  ...DANA_BASE,
   days_taught: [day('2026-02-02'), day('2026-03-14')],
   students: [
     {
@@ -339,7 +349,6 @@ export const FRACTIONS: TopicListItem = {
   students_ever_finished: 2,
   total_reassignments: 1,
   median_sessions_to_finish: 3,
-  unique_instructors: 2,
   first_taught: day('2026-02-01'),
   last_taught: day('2026-03-14'),
   last_modified: at('2026-03-15', '09:00'),
@@ -360,7 +369,6 @@ export const DECIMALS: TopicListItem = {
   students_ever_finished: 1,
   total_reassignments: 0,
   median_sessions_to_finish: 2,
-  unique_instructors: 1,
 }
 
 /** Same name as DECIMALS, different id -- and nobody has finished it. */
@@ -377,7 +385,6 @@ export const DECIMALS_TWO: TopicListItem = {
   students_ever_finished: 0,
   // Nobody finished it, so there is no median. Null, not zero.
   median_sessions_to_finish: null,
-  unique_instructors: 0,
 }
 
 export const ANGLES: TopicListItem = {
@@ -393,7 +400,6 @@ export const ANGLES: TopicListItem = {
   students_removed: 0,
   students_ever_finished: 1,
   median_sessions_to_finish: 1,
-  unique_instructors: 1,
 }
 
 /**

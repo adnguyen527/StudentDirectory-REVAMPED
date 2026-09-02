@@ -213,7 +213,7 @@ export function TopicProfilePage() {
         </div>
       </Card>
 
-      <Card title={`Taught most by · ${formatNumber(topic.unique_instructors)} instructors`} flush>
+      <Card title={`Taught most by · ${formatNumber(topic.instructors.length)} instructors`} flush>
         {topic.instructors.length === 0 ? (
           <p className="state">
             No instructor was recorded on any session of this topic — incomplete paperwork

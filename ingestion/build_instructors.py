@@ -11,6 +11,11 @@ one instructor, so summing total_pages_completed across instructors comes to mor
 the pages in dwp_reports (168,720 vs 153,360). That is expected. These are per-instructor
 figures -- do not sum them for a center-wide total; aggregate dwp_reports for that.
 
+No document here stores a count of its own arrays. The list shows a Students and a Days
+column and does not ship days_taught or students to do it -- models/instructor.py derives
+both with $size at query time, so the number crosses the wire without the array. Storing
+them was 942 KB of arrays or two fields that could drift; deriving them is neither.
+
 topics[] ranks what each instructor taught most, for the instructor profile page. It holds
 the same (instructor, topic) counts as topics.instructors[], read from the other side --
 the same way students[] here mirrors students.instructors[]. Both sides credit each
@@ -183,12 +188,9 @@ def build_instructors():
             'co_taught_sessions':    inst['co_taught_sessions'],
             'unfinalized_sessions':  inst['unfinalized_sessions'],
             'total_pages_completed': inst['total_pages_completed'],
-            'total_days_taught':     len(days),
             'days_taught':           days,
             'last_session_date':     days[-1] if days else None,
-            'unique_students':       len(students_list),
             'students':              students_list,
-            'unique_topics_taught':  len(topics_list),
             'topics':                topics_list,
             'centers':               centers_list,
             'last_modified':         datetime.now(timezone.utc),
@@ -204,12 +206,12 @@ def build_instructors():
           f"(exceeds {total_dwp} dwp_reports -- co-taught counted once per instructor)")
     print(f"  pages, full credit to each instructor: "
           f"{sum(d['total_pages_completed'] for d in documents)}")
-    print(f"  roster entries: {sum(d['unique_students'] for d in documents)}")
-    print(f"  (instructor, topic) pairs: {sum(d['unique_topics_taught'] for d in documents)} "
+    print(f"  roster entries: {sum(len(d['students']) for d in documents)}")
+    print(f"  (instructor, topic) pairs: {sum(len(d['topics']) for d in documents)} "
           f"(same pairs as topics.instructors[], from the other side)")
-    widest = max(documents, key=lambda d: d['unique_topics_taught'])
+    widest = max(documents, key=lambda d: len(d['topics']))
     print(f"    widest: {widest['instructor_name']} taught "
-          f"{widest['unique_topics_taught']} distinct topics")
+          f"{len(widest['topics'])} distinct topics")
     unfinalized = sum(d['unfinalized_sessions'] for d in documents)
     worst = sorted(documents, key=lambda d: -d['unfinalized_sessions'])[:3]
     print(f"  unfinalized sessions: {unfinalized}")

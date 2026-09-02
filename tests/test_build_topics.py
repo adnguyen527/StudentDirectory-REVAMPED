@@ -336,9 +336,9 @@ class TestDocuments:
     def test_a_topic_with_no_name_falls_back_to_its_id(self):
         assert self.document()['name'] == 'T-100'
 
-    def test_unique_instructors_counts_distinct_people(self):
+    def test_one_entry_per_distinct_instructor(self):
         doc = self.document(instructors={'T-100': {'Ada': 9, 'Grace': 1}})
-        assert doc['unique_instructors'] == 2
+        assert len(doc['instructors']) == 2
 
     def test_instructors_are_ranked_by_how_much_they_taught_it(self):
         """What the topic page's 'taught most by' list reads."""
@@ -358,11 +358,6 @@ class TestDocuments:
         """73 dwp rows name no instructor, and one topic has no staffed session at all."""
         doc = self.document()
         assert doc['instructors'] == []
-        assert doc['unique_instructors'] == 0
-
-    def test_unique_instructors_always_matches_the_list(self):
-        doc = self.document(instructors={'T-100': {'Ada': 1, 'Grace': 2, 'Kay': 3}})
-        assert doc['unique_instructors'] == len(doc['instructors'])
 
     def test_the_working_field_is_not_stored(self):
         assert '_sessions_to_finish' not in self.document()

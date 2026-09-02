@@ -241,7 +241,6 @@ def make_documents(topics, names, instructors):
             'instructors':               [
                 {'name': n, 'sessions': s} for n, s in taught_by
             ],
-            'unique_instructors':        len(taught_by),
             # Sessions the finishing students spent on the topic, counting every
             # assignment -- a topic handed back and finished again carries both.
             'median_sessions_to_finish': median(to_finish) if to_finish else None,
@@ -298,7 +297,7 @@ def build_topics():
     for d in renamed:
         print(f"    {d['topic_id']}: '{d['name']}' also {d['also_known_as']}")
     credited = sum(i['sessions'] for d in documents for i in d['instructors'])
-    print(f"  instructor roster entries: {sum(d['unique_instructors'] for d in documents)}")
+    print(f"  instructor roster entries: {sum(len(d['instructors']) for d in documents)}")
     print(f"  sessions credited to instructors: {credited} "
           f"(exceeds the {sum(d['sessions'] for d in documents)} entries -- co-taught "
           f"sessions credit each instructor in full)")

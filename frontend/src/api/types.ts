@@ -156,9 +156,10 @@ export interface StudentDetailResponse {
 /**
  * The instructor fields both routes return.
  *
- * models/instructor.py's LIST_PROJECTION drops days_taught and students -- the two arrays
- * that grow with the dataset. total_days_taught and unique_students say the same thing in
- * one number each, which is why the list can do without them.
+ * models/instructor.py ships neither days_taught nor students in a list -- with them a
+ * page of 50 is 942 KB against 21 KB. Nothing stores a count of them either: the list
+ * derives both with $size at query time, which is why they sit on the list item below
+ * rather than here, and why the detail counts the arrays it already has.
  *
  * Keyed on instructor_name, because a name is all the source data carries. Two people
  * sharing a name merge into one document and nothing here can tell them apart.
@@ -176,15 +177,19 @@ export interface InstructorBase {
    * of them. Summing this across instructors exceeds the true total -- do not.
    */
   total_pages_completed: number
-  total_days_taught: number
   last_session_date: ExtDate | null
-  unique_students: number
   centers: CenterCount[]
   last_modified: ExtDate
 }
 
-/** An instructor as the list routes return them -- the projected arrays are absent. */
-export type InstructorListItem = InstructorBase
+/**
+ * An instructor as the list routes return them: the arrays are absent, and in their place
+ * two counts the server derived from them. The detail shape has it the other way round.
+ */
+export type InstructorListItem = InstructorBase & {
+  unique_students: number
+  total_days_taught: number
+}
 
 /**
  * One student on an instructor's roster.
@@ -275,8 +280,9 @@ export interface AttendanceResponse {
  * no fields: this one is keyed on `topic_id` and counts students, that one is keyed on
  * `id` and counts sessions.
  *
- * models/topic.py's LIST_PROJECTION drops `instructors` -- 82 on the widest topic --
- * leaving `unique_instructors` to say the same thing in one number.
+ * models/topic.py's LIST_PROJECTION drops `instructors` -- 82 on the widest topic. The
+ * list shows no instructor column, so nothing stands in for it there; the detail view
+ * counts the array when it needs a total.
  */
 export interface TopicRollupBase {
   _id: ExtOid
@@ -312,7 +318,6 @@ export interface TopicRollupBase {
   total_reassignments: number
   /** Null when nobody has finished it -- an answer, not a missing field. */
   median_sessions_to_finish: number | null
-  unique_instructors: number
   first_taught: ExtDate | null
   last_taught: ExtDate | null
   last_modified: ExtDate

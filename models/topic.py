@@ -6,8 +6,9 @@ from database import db
 
 
 # The one array that grows with the dataset (82 instructors on the widest topic, 16,932
-# roster entries across the collection). Only read on the detail view; unique_instructors
-# stands in. This is the same omission that took the instructors list from 757 KB to 21 KB.
+# roster entries across the collection). Only read on the detail view, which is the only
+# place that asks who taught a topic -- the list shows no instructor column. This is the
+# same omission that took the instructors list from 757 KB to 21 KB.
 LIST_PROJECTION = {'instructors': 0}
 
 # Most worked first: the top of a 771-row list should be the topics the program actually

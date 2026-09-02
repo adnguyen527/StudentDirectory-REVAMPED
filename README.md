@@ -205,9 +205,8 @@ Aggregated instructor profiles built from `dwp_reports`. Rebuilt by
 `ingestion/build_instructors.py`.
 
 `instructor_name`, `total_sessions_taught`, `co_taught_sessions`, `unfinalized_sessions`,
-`total_pages_completed`, `total_days_taught`, `days_taught[]`, `last_session_date`,
-`unique_students`, `students[]` (roster keyed by `student_key`), `unique_topics_taught`,
-`topics[]`, `centers[]`, `last_modified`.
+`total_pages_completed`, `days_taught[]`, `last_session_date`, `students[]` (roster keyed
+by `student_key`), `topics[]`, `centers[]`, `last_modified`.
 
 **Index**: `instructor_name` (**unique** - Instructors are identified by name alone, because that is all the source data carries.
 Two distinct people sharing a name would merge into one document.).
@@ -255,7 +254,7 @@ One document per topic across the whole program, built from `dwp_reports` by
 `topic_id`, `name`, `also_known_as[]`, `sessions`, `times_worked_on`, `times_completed`,
 `times_mastered`, `unique_students`, `students_finished`, `students_mastered`,
 `students_on_plan`, `students_removed`, `students_ever_finished`, `total_reassignments`,
-`median_sessions_to_finish`, `unique_instructors`, `instructors[]`, `first_taught`,
+`median_sessions_to_finish`, `instructors[]`, `first_taught`,
 `last_taught`, `last_modified`.
 
 **Indexes**: `topic_id` (**unique**), `(sessions, topic_id)` — the list's default order,
@@ -296,8 +295,7 @@ first, then alphabetical so the order is stable between builds. This is what the
 page's "taught most by" list reads. It is a detail-view array: 16,932 roster entries
 across 771 topics, a median of 17 per topic and 82 at the widest, so when `models/topic.py`
 lands it should sit in a `LIST_PROJECTION` exclusion the way `topics[]` and `instructors[]`
-already do on students (`models/student.py:11`). `unique_instructors` is kept alongside it
-so a list view has the count without pulling the array.
+already do on students (`models/student.py:11`).
 
 **Co-taught sessions credit each instructor in full here too.** 5,216 of 50,900 topic
 entries have more than one instructor, so the credits summed across a topic exceed that
@@ -400,8 +398,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 540 offline tests -- no network, no credentials (~3s)
-pytest --integration    # + 94 read-only checks against the real cluster
+pytest                  # 539 offline tests -- no network, no credentials (~3s)
+pytest --integration    # + 90 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -426,7 +424,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 178 tests, Vitest + Testing Library (~13s)
+npm test                # 188 tests, Vitest + Testing Library (~13s)
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -645,7 +643,7 @@ Items are listed in priority order within each group.
       per topic with per-status counts, reassignments and current standing. Rebuilt:
       13,598 topic entries, 187 students with a reassigned topic.
 - [x] `P2` **Add most-taught topics to `instructors`.** Done, as `topics[]` — ranked
-      `{topic_id, name, sessions}` per instructor, plus `unique_topics_taught`. The mirror
+      `{topic_id, name, sessions}` per instructor. The mirror
       of `topics.instructors[]`: the same 16,932 pairs from the other side, same co-taught
       full-credit rule, named by the same `canonical_name`, and reconciled pair for pair in
       the integration tests. 103 instructors, a median of 126 distinct topics each.
@@ -721,8 +719,7 @@ Items are listed in priority order within each group.
       matters because the list shows ids to tell same-named topics apart — a list that
       displays them but cannot search them would be incoherent.
       `instructors[]` is excluded from the list projection — 16,932 roster entries would
-      otherwise ride along on every page — leaving `unique_instructors` to stand in, and
-      the list comes to 27 KB. The list sorts on `(sessions, topic_id)` over a compound
+      otherwise ride along on every page — and the list comes to 27 KB. The list sorts on `(sessions, topic_id)` over a compound
       index — most worked first, with the id breaking the constant session ties.
       The three detail-page stats are still open, under **Data integrity**.
       Both open questions are settled. **Built, not computed per request**, matching the

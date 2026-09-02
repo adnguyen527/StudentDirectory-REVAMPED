@@ -92,9 +92,10 @@ export function InstructorProfilePage() {
   // in an effect and paying a second render pass.
   const offset = rosterOffset < instructor.students.length ? rosterOffset : 0
   const roster = instructor.students.slice(offset, offset + ROSTER_PAGE)
-  const perDay = instructor.total_days_taught
-    ? instructor.total_sessions_taught / instructor.total_days_taught
-    : 0
+  // The detail response carries the arrays, so it counts them rather than being told.
+  const daysTaught = instructor.days_taught.length
+  const rosterSize = instructor.students.length
+  const perDay = daysTaught ? instructor.total_sessions_taught / daysTaught : 0
   const unfinalizedShare = instructor.total_sessions_taught
     ? (100 * instructor.unfinalized_sessions) / instructor.total_sessions_taught
     : 0
@@ -131,13 +132,13 @@ export function InstructorProfilePage() {
         />
         <StatTile
           label="Students taught"
-          value={formatNumber(instructor.unique_students)}
+          value={formatNumber(rosterSize)}
           icon={<StudentsIcon size={22} />}
           wash={2}
         />
         <StatTile
           label="Days taught"
-          value={formatNumber(instructor.total_days_taught)}
+          value={formatNumber(daysTaught)}
           sub={`${perDay.toFixed(1)} sessions per day`}
           icon={<DashboardIcon size={22} />}
           wash={3}
@@ -186,7 +187,7 @@ export function InstructorProfilePage() {
         </AsyncBoundary>
       </Card>
 
-      <Card title={`Roster · ${formatNumber(instructor.unique_students)} students`} flush>
+      <Card title={`Roster · ${formatNumber(rosterSize)} students`} flush>
         {instructor.students.length === 0 ? (
           <p className="state">No students on this roster.</p>
         ) : (

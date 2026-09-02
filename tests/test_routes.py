@@ -457,10 +457,11 @@ class TestListTopics:
         assert topic_ids(response.get_json()) == ['T-200']
 
     def test_the_instructor_ranking_is_not_shipped_in_a_list(self, client):
-        """82 instructors on the widest topic -- the array that balloons a list page."""
+        """82 instructors on the widest topic -- the array that balloons a list page.
+        Nothing stands in for it: the list has no instructor column to fill."""
         listed = client.get('/api/topics').get_json()['topics']
+        assert listed
         assert all('instructors' not in t for t in listed)
-        assert all('unique_instructors' in t for t in listed)
 
     def test_bson_is_serialised(self, client):
         fractions = next(
@@ -560,7 +561,6 @@ class TestGetTopic:
     def test_a_topic_nobody_was_recorded_teaching_still_resolves(self, client):
         topic = client.get('/api/topics/T-115').get_json()['topic']
         assert topic['instructors'] == []
-        assert topic['unique_instructors'] == 0
 
     def test_a_median_of_null_survives_serialisation(self, client):
         """Null is the answer for a topic nobody finished, not a missing field."""

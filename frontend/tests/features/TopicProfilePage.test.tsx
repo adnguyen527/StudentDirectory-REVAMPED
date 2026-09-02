@@ -9,7 +9,6 @@ import { server } from '../support/server'
 /** A ranked instructor list of `count`, sessions descending so the order is checkable. */
 function manyInstructors(count: number) {
   return {
-    unique_instructors: count,
     instructors: Array.from({ length: count }, (_, i) => ({
       name: `Instructor ${String(i).padStart(2, '0')}`,
       sessions: count - i,
