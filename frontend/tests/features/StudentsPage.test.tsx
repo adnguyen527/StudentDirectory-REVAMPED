@@ -69,6 +69,27 @@ describe('students page', () => {
     await waitFor(() => expect(currentLocation()).toBe('/students?query=Chloe'))
   })
 
+  it('filters by center, alongside the name search rather than instead of it', async () => {
+    // The two narrow together: Chloe is the only Eastside student, and she is not a
+    // Nguyen, so both filters at once find nobody.
+    const { user } = renderApp('/students?query=Nguyen')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?query=Nguyen&center=Eastside'))
+    expect(await screen.findByText(/No students match/)).toBeInTheDocument()
+  })
+
+  it('takes the center filter from the URL, so a filtered list is linkable', async () => {
+    renderApp('/students?center=Eastside')
+
+    expect(await screen.findByRole('row', { name: /Chloe Tan/ })).toBeInTheDocument()
+    await waitFor(() => expect(tableRows()).toHaveLength(1))
+    expect(screen.getByRole('button', { name: /Eastside/ })).toBeInTheDocument()
+  })
+
   it('clears the filter and the offset together', async () => {
     // Page 2 of a filtered list is not page 2 of the whole one.
     const { user } = renderApp('/students?query=Chloe&offset=0')

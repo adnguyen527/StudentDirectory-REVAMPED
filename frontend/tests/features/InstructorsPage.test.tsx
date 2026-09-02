@@ -81,6 +81,69 @@ describe('instructors page', () => {
     expect(screen.getByRole('searchbox', { name: /search instructors/i })).toHaveValue('Marcus')
   })
 
+  it('filters by center from the dropdown, and says so on the trigger', async () => {
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    // Closed, the trigger has to say the list is unfiltered.
+    const trigger = screen.getByRole('button', { name: /all centers/i })
+    await user.click(trigger)
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?center=Eastside'))
+    expect(screen.getByRole('button', { name: /Eastside/ })).toBeInTheDocument()
+  })
+
+  it('returns an instructor at two centers once when both are ticked', async () => {
+    // Dana works at Westside and Eastside, as 11 of the 103 real instructors work at more
+    // than one. The union is not a partition: she must appear once, not twice.
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Westside' }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe('/instructors?center=Westside&center=Eastside'),
+    )
+    // Both ticked, so the trigger counts rather than naming one.
+    expect(screen.getByRole('button', { name: /2 centers/ })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getAllByRole('row', { name: new RegExp(DANA) })).toHaveLength(1),
+    )
+  })
+
+  it('drops the offset when the center selection changes', async () => {
+    const { user } = renderApp('/instructors?offset=50')
+
+    await user.click(await screen.findByRole('button', { name: /all centers/i }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?center=Eastside'))
+  })
+
+  it('closes the panel on Escape and on a click outside it', async () => {
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    expect(await screen.findByRole('checkbox', { name: 'Eastside' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('checkbox', { name: 'Eastside' })).not.toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    await screen.findByRole('checkbox', { name: 'Eastside' })
+    await user.click(document.body)
+
+    await waitFor(() =>
+      expect(screen.queryByRole('checkbox', { name: 'Eastside' })).not.toBeInTheDocument(),
+    )
+  })
+
   it('clears the filter and the offset together', async () => {
     const { user } = renderApp('/instructors?query=Marcus&offset=0')
     await screen.findByRole('row', { name: new RegExp(MARCUS) })

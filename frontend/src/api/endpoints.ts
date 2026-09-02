@@ -3,6 +3,7 @@
 import { request } from './client'
 import type {
   AttendanceResponse,
+  CentersResponse,
   InstructorDetailResponse,
   InstructorsResponse,
   Metrics,
@@ -27,14 +28,24 @@ export interface ListParams {
   offset?: number
   /** Substring match on the name, case-insensitive. */
   query?: string
+  /**
+   * Centers to keep, as repeated `?center=` params. Several are a union, and they narrow
+   * *with* `query` rather than replacing it. Empty means no center filter at all.
+   */
+  centers?: string[]
+}
+
+/** `centers` is sent as repeated `center` keys -- see buildQuery in client.ts. */
+function listQuery({ centers, ...rest }: ListParams) {
+  return { ...rest, center: centers }
 }
 
 export function listStudents(params: ListParams = {}, signal?: AbortSignal) {
-  return request<StudentsResponse>('/students', { ...params }, signal)
+  return request<StudentsResponse>('/students', listQuery(params), signal)
 }
 
 export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
-  return request<InstructorsResponse>('/instructors', { ...params }, signal)
+  return request<InstructorsResponse>('/instructors', listQuery(params), signal)
 }
 
 /**
@@ -46,7 +57,13 @@ export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
  * does not exist yet.
  */
 export function listTopics(params: ListParams = {}, signal?: AbortSignal) {
-  return request<TopicsResponse>('/topics', { ...params }, signal)
+  return request<TopicsResponse>('/topics', listQuery(params), signal)
+}
+
+/** The center names the filter offers. Served rather than hard-coded, so a new center
+ *  appears in the checkboxes without a release. */
+export function listCenters(signal?: AbortSignal) {
+  return request<CentersResponse>('/centers', undefined, signal)
 }
 
 /**

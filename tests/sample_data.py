@@ -224,7 +224,9 @@ INSTRUCTORS = [
             {'topic_id': 'T-110', 'name': 'Decimals', 'sessions': 2},
             {'topic_id': 'T-100', 'name': 'Fractions', 'sessions': 2},
         ],
-        'centers': [{'name': 'Westside', 'sessions': 3}],
+        # Two centers, mirroring the 11 of 103 real instructors who work at more than
+        # one: ticking both must return her once, not twice.
+        'centers': [{'name': 'Westside', 'sessions': 2}, {'name': 'Eastside', 'sessions': 1}],
         'last_modified': _day(2026, 3, 15),
     },
     {

@@ -399,7 +399,7 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 539 offline tests -- no network, no credentials (~3s)
+pytest                  # 549 offline tests -- no network, no credentials (~3s)
 pytest --integration    # + 93 read-only checks against the real cluster
 ```
 
@@ -425,7 +425,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 191 tests, Vitest + Testing Library (~13s)
+npm test                # 205 tests, Vitest + Testing Library (~13s)
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -467,11 +467,12 @@ proving nothing.
 | GET | `/api/auth/me` | the logged-in user, or `401` — how a browser client knows to show the login page |
 | GET | `/api/health` | liveness |
 | GET | `/api/metrics` | collection counts and averages |
-| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings |
+| GET | `/api/centers` | the center names the two list filters offer |
+| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings, `?center=` (repeatable) to filter |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
-| GET | `/api/instructors` | a page of instructors; `?query=` to search by name |
+| GET | `/api/instructors` | a page of instructors; `?query=` to search by name, `?center=` (repeatable) to filter |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
 | GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
 | GET | `/api/topics` | a page of topics, most worked first; `?query=` to search name, former names or id |
@@ -734,7 +735,10 @@ Items are listed in priority order within each group.
       controls under **Frontend**. `/api/students` and `/api/instructors` accept only
       `query` (plus `account_id` on students). They need one filter per column — `center`,
       numeric ranges, a last-session date range — plus `sort` and `direction`, each optional
-      and combinable with the existing paging. `sort` is validated against an allowlist of
+      and combinable with the existing paging. **`center` is multi-valued**: the checkbox
+      control under **Frontend** ticks several at once, so it repeats as `?center=` and
+      matches `centers.name` `$in` the list, and on instructors the result is a union rather
+      than a partition. `sort` is validated against an allowlist of
       sortable fields and an unrecognised value is a `400`, not a silent fallback to name
       order, in the same spirit as `pagination.parse` refusing a bad `limit`.
 
@@ -1025,6 +1029,27 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
 
       The `PK` / `GF` / `WCH` / `FO` / `WOB` warning on the list item applies here too:
       every rate on this page means something different for a non-`PK` item.
+- [x] `P2` **Filter the two lists by center.** Done — a multi-select dropdown beside each
+      list's search bar, in the `Card` header's `lead` slot. Several centers can be ticked,
+      no ticks means all of them, and the selection rides in the URL as repeated `?center=`
+      so a filtered view is linkable; changing it drops the offset. `FilterDropdown` in
+      `src/shell/` is the reusable half — trigger, checkbox panel, outside-click and Escape
+      dismissal — so the filters under the item below can join the same row.
+
+      The options come from `GET /api/centers`, the union of distinct `centers.name` across
+      both collections, rather than four names written into a component that would be
+      silently wrong the day a fifth center opens.
+
+      ⚠️ **The same filter is a partition on one page and a union on the other.** Students
+      belong to exactly one center, so ticking North Dallas and Southlake returns
+      395 + 234 = **629**. Instructors do not — 11 of 103 work at two or more — so the same
+      two ticks return **62, not 67**: five instructors answer both boxes without being ten
+      people. Do not put a per-option count beside an instructor checkbox without saying
+      that, and never present the instructor total as a sum of its ticked parts.
+
+      An unrecognised center name returns an empty page rather than a `400`. That looks
+      like the `sort` allowlist under **API**, but it is the opposite case: "no students at
+      Xyz" is a correct answer to a filter, while `sort=bogus` has no correct answer.
 - [ ] `P2` **Filter and sort each list by its own columns.** Both lists take only a name
       substring today and are stuck in name order, so a column can be read but not asked
       about — there is no way to say "Southlake only", "fewer than 5 sessions", "nothing
@@ -1036,7 +1061,7 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       |---|---|---|---|
       | name | ✓ | ✓ | text — **exists** as `?query=` |
       | account | ✓ | — | exact — **exists** as `?account_id=` |
-      | center | ✓ | ✓ | select |
+      | center | ✓ | ✓ | multi-select — **done**, see the center item above |
       | sessions | ✓ | ✓ | numeric range |
       | topics finished / students taught | ✓ | ✓ | numeric range |
       | on plan / days taught | ✓ | ✓ | numeric range |

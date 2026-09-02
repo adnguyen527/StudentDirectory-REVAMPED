@@ -44,13 +44,16 @@ def get_students():
 
     account_id = request.args.get('account_id')
     query = request.args.get('query')
+    # Repeatable: the center filter is multi-select, and several names are a union.
+    # Combines with account_id and query rather than replacing either.
+    centers = request.args.getlist('center')
 
     if account_id:
-        students, total = Student.find_by_account(account_id, limit, offset)
+        students, total = Student.find_by_account(account_id, limit, offset, centers)
     elif query:
-        students, total = Student.search(query, limit, offset)
+        students, total = Student.search(query, limit, offset, centers)
     else:
-        students, total = Student.find_all(limit, offset)
+        students, total = Student.find_all(limit, offset, centers)
 
     return jsonify(
         pagination.envelope('students', students, total, limit, offset)

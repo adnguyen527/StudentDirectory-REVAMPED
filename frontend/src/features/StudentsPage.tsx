@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
+import { CenterFilter } from './CenterFilter'
 import { ListFilter } from './ListFilter'
 import { StudentsTable } from './StudentsTable'
 
@@ -20,10 +21,14 @@ export function StudentsPage() {
   const [params, setParams] = useSearchParams()
   const query = params.get('query') ?? ''
   const offset = Math.max(0, Number(params.get('offset') ?? 0) || 0)
+  // Repeatable: several ticked centers are a union. Joined for the dep array because an
+  // array literal is a new reference every render.
+  const centers = params.getAll('center')
+  const centerKey = centers.join('|')
 
   const { data, loading, error } = useApi<StudentsResponse>(
-    (signal) => listStudents({ limit: PAGE_SIZE, offset, query }, signal),
-    [query, offset],
+    (signal) => listStudents({ limit: PAGE_SIZE, offset, query, centers }, signal),
+    [query, offset, centerKey],
   )
 
   function goToOffset(next: number) {
@@ -53,7 +58,12 @@ export function StudentsPage() {
 
       {/* No title: the <h1> above already says Students. */}
       <Card
-        lead={<ListFilter placeholder="Search students by name" />}
+        lead={
+          <div className="list-controls">
+            <ListFilter placeholder="Search students by name" />
+            <CenterFilter />
+          </div>
+        }
         flush
         controls={
           query ? (

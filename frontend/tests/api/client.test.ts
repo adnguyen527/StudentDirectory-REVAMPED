@@ -29,6 +29,33 @@ describe('request', () => {
     expect(seen).toBe('?limit=10')
   })
 
+  it('repeats a key for an array, rather than keeping only the last value', async () => {
+    // A multi-select filter sends ?center=A&center=B, which is what Flask's
+    // request.args.getlist reads. URLSearchParams.set would keep only B.
+    let seen = ''
+    server.use(
+      http.get('/api/students', ({ request: req }) => {
+        seen = new URL(req.url).search
+        return HttpResponse.json({ students: [], page: { limit: 50, offset: 0, total: 0, returned: 0 } })
+      }),
+    )
+    await request('/students', { center: ['Westside', 'Eastside'] })
+    expect(seen).toBe('?center=Westside&center=Eastside')
+  })
+
+  it('drops an empty array, as it drops an empty string', async () => {
+    // Nothing ticked is not a filter on nothing.
+    let seen = 'unset'
+    server.use(
+      http.get('/api/students', ({ request: req }) => {
+        seen = new URL(req.url).search
+        return HttpResponse.json({ students: [], page: { limit: 50, offset: 0, total: 0, returned: 0 } })
+      }),
+    )
+    await request('/students', { center: [], limit: 10 })
+    expect(seen).toBe('?limit=10')
+  })
+
   it('sends no query string when there are no params', async () => {
     let seen = 'unset'
     server.use(

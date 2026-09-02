@@ -74,6 +74,87 @@ class TestListStudents:
         assert body['page']['total'] == 0
 
 
+class TestCenterFilter:
+    """?center= on the two list routes -- repeatable, and a union across the values."""
+
+    def test_one_center_narrows_the_list(self, client):
+        response = client.get('/api/students', query_string={'center': 'Eastside'})
+        assert names(response.get_json()) == ['Chloe Tan']
+
+    def test_two_centers_are_a_union(self, client):
+        response = client.get(
+            '/api/students', query_string=[('center', 'Westside'), ('center', 'Eastside')]
+        )
+        assert names(response.get_json()) == ['Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan']
+
+    def test_a_center_combines_with_the_name_filter(self, client):
+        """Not either/or: the two narrow together."""
+        response = client.get(
+            '/api/students', query_string={'query': 'Nguyen', 'center': 'Eastside'}
+        )
+        assert names(response.get_json()) == []
+
+    def test_a_center_combines_with_the_account_filter(self, client):
+        response = client.get(
+            '/api/students',
+            query_string={'account_id': ACCOUNT_NGUYEN, 'center': 'Westside'},
+        )
+        assert names(response.get_json()) == ['Anthony Nguyen', 'Ava Nguyen']
+
+    def test_an_unknown_center_is_an_empty_page_not_an_error(self, client):
+        """"No students at Xyz" is a correct answer to a filter, unlike a bad sort key."""
+        response = client.get('/api/students', query_string={'center': 'Nowhere'})
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['students'] == []
+        assert body['page']['total'] == 0
+
+    def test_a_blank_center_means_no_filter_at_all(self, client):
+        """A truncated URL should not read as "no students here". `?query=` already
+        ignores its own empty value, and the two have to agree."""
+        response = client.get('/api/students', query_string={'center': ''})
+        assert names(response.get_json()) == ['Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan']
+
+    def test_a_blank_center_beside_a_real_one_is_ignored(self, client):
+        response = client.get(
+            '/api/students', query_string=[('center', ''), ('center', 'Eastside')]
+        )
+        assert names(response.get_json()) == ['Chloe Tan']
+
+    def test_the_total_follows_the_center_filter(self, client):
+        body = client.get(
+            '/api/students', query_string={'center': 'Westside', 'limit': 1}
+        ).get_json()
+        assert body['page']['total'] == 2
+        assert body['page']['returned'] == 1
+
+    def test_instructors_filter_by_center_too(self, client):
+        assert instructor_names(
+            client.get('/api/instructors', query_string={'center': 'Eastside'}).get_json()
+        ) == ['Dana Reyes', 'Sam Ortiz']
+
+    def test_an_instructor_at_two_centers_is_returned_once(self, client):
+        """The union is not a partition. Dana works at both, and 11 of the 103 real
+        instructors do the same -- ticking both centers must not count her twice."""
+        body = client.get(
+            '/api/instructors',
+            query_string=[('center', 'Westside'), ('center', 'Eastside')],
+        ).get_json()
+        assert instructor_names(body) == ['Dana Reyes', 'Marcus Reyes', 'Sam Ortiz']
+        assert body['page']['total'] == 3
+
+
+class TestCenters:
+
+    def test_lists_every_center_across_both_collections(self, client):
+        response = client.get('/api/centers')
+        assert response.status_code == 200
+        assert response.get_json() == {'centers': ['Eastside', 'Westside']}
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/centers').status_code == 401
+
+
 class TestSearchStudents:
 
     def test_search_returns_matches(self, client):

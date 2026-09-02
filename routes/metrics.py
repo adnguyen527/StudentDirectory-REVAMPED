@@ -7,6 +7,20 @@ metrics_bp = Blueprint('metrics', __name__, url_prefix='/api')
 def health_check():
     return jsonify({'status': 'ok', 'message': 'Backend is running'}), 200
 
+@metrics_bp.route('/centers', methods=['GET'])
+def get_centers():
+    """Every center name the two list routes can be filtered by.
+
+    Served rather than hard-coded in the frontend: four names written into a component
+    would be silently wrong the day a fifth center opens. The union of what the two
+    filterable collections actually hold is exactly the set of values that can match
+    something, and both are small enough (893 + 103) to read distinct values from.
+    """
+    names = Student.center_names() | Instructor.center_names()
+    # Sorted so the checkboxes hold still between requests; a set has no order.
+    return jsonify({'centers': sorted(names)}), 200
+
+
 @metrics_bp.route('/metrics', methods=['GET'])
 def get_metrics():
     try:

@@ -353,6 +353,11 @@ export interface TopicDetailResponse {
   topic: TopicDetail
 }
 
+/** The center names the two list routes can be filtered by -- routes/metrics.py. */
+export interface CentersResponse {
+  centers: string[]
+}
+
 export type StudentsResponse = Paged<'students', StudentListItem>
 export type InstructorsResponse = Paged<'instructors', InstructorListItem>
 export type TopicsResponse = Paged<'topics', TopicListItem>

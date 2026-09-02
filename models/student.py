@@ -3,6 +3,7 @@ import re
 from pymongo import ASCENDING
 
 from database import db
+from models.filters import center_criteria
 
 
 # Three arrays that grow with every session and are only needed on the detail view.
@@ -44,8 +45,8 @@ class Student:
         return {'student_name': {'$regex': re.escape(query), '$options': 'i'}}
 
     @staticmethod
-    def find_all(limit, offset=0):
-        return Student._page({}, limit, offset)
+    def find_all(limit, offset=0, centers=None):
+        return Student._page(center_criteria(centers), limit, offset)
 
     @staticmethod
     def find_by_key(student_key):
@@ -53,13 +54,23 @@ class Student:
         return Student._collection().find_one({'student_key': student_key})
 
     @staticmethod
-    def find_by_account(account_id, limit, offset=0):
+    def find_by_account(account_id, limit, offset=0, centers=None):
         """Every student on one household account, i.e. a set of siblings."""
-        return Student._page({'account_id': account_id}, limit, offset)
+        return Student._page(
+            {'account_id': account_id, **center_criteria(centers)}, limit, offset
+        )
 
     @staticmethod
-    def search(query, limit, offset=0):
-        return Student._page(Student._name_criteria(query), limit, offset)
+    def search(query, limit, offset=0, centers=None):
+        # Different keys, so the two criteria merge into one AND.
+        return Student._page(
+            {**Student._name_criteria(query), **center_criteria(centers)}, limit, offset
+        )
+
+    @staticmethod
+    def center_names():
+        """Distinct center names on this collection, for the filter's checkbox list."""
+        return set(Student._collection().distinct('centers.name'))
 
     @staticmethod
     def count_all():

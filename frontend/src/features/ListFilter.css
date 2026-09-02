@@ -57,3 +57,18 @@
     max-width: none;
   }
 }
+
+/* The card header's left slot, once it holds more than the search box. The search takes
+   the slack and each filter keeps its own width, so more filters can join the row. */
+.list-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .list-controls {
+    flex-wrap: wrap;
+  }
+}

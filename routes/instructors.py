@@ -19,10 +19,15 @@ def get_instructors():
         return jsonify({'error': error}), 400
 
     query = request.args.get('query')
+    # Repeatable, as on /api/students. On instructors the union is not a partition: 11 of
+    # 103 work at more than one center, so ticking two returns fewer than the two counts
+    # added together.
+    centers = request.args.getlist('center')
+
     if query:
-        instructors, total = Instructor.search(query, limit, offset)
+        instructors, total = Instructor.search(query, limit, offset, centers)
     else:
-        instructors, total = Instructor.find_all(limit, offset)
+        instructors, total = Instructor.find_all(limit, offset, centers)
 
     return jsonify(
         pagination.envelope('instructors', instructors, total, limit, offset)

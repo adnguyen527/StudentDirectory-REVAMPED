@@ -40,6 +40,17 @@ function envelope<K extends string, T>(key: K, rows: T[], url: URL) {
   }
 }
 
+/**
+ * routes/students.py and routes/instructors.py: repeated `?center=`, matched against
+ * `centers.name` with $in. A union, so an instructor at two centers answers either -- and
+ * is returned once when both are ticked, which is the case the real data has 11 of.
+ */
+function atCenters<T extends { centers: { name: string }[] }>(rows: T[], url: URL) {
+  const wanted = url.searchParams.getAll('center')
+  if (wanted.length === 0) return rows
+  return rows.filter((row) => row.centers.some((c) => wanted.includes(c.name)))
+}
+
 function matching<T>(rows: T[], query: string | null, name: (row: T) => string) {
   if (!query) return rows
   const needle = query.toLowerCase()
@@ -76,11 +87,14 @@ export const handlers = [
 
   http.get('/api/metrics', () => HttpResponse.json(METRICS)),
 
+  // routes/metrics.py: the union across both collections, sorted.
+  http.get('/api/centers', () => HttpResponse.json({ centers: ['Eastside', 'Westside'] })),
+
   // --- Students ---
 
   http.get('/api/students', ({ request }) => {
     const url = new URL(request.url)
-    const rows = matching(STUDENTS, url.searchParams.get('query'), studentName)
+    const rows = atCenters(matching(STUDENTS, url.searchParams.get('query'), studentName), url)
     return HttpResponse.json(envelope('students', rows, url))
   }),
 
@@ -127,7 +141,10 @@ export const handlers = [
 
   http.get('/api/instructors', ({ request }) => {
     const url = new URL(request.url)
-    const rows = matching(INSTRUCTORS, url.searchParams.get('query'), instructorName)
+    const rows = atCenters(
+      matching(INSTRUCTORS, url.searchParams.get('query'), instructorName),
+      url,
+    )
     return HttpResponse.json(envelope('instructors', rows, url))
   }),
 

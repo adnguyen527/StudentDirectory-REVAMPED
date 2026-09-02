@@ -3,6 +3,7 @@ import re
 from pymongo import ASCENDING
 
 from database import db
+from models.filters import center_criteria
 
 
 # The three arrays that grow with the dataset (272 dates, a 304-student roster and 504
@@ -59,8 +60,8 @@ class Instructor:
         return documents, collection.count_documents(criteria)
 
     @staticmethod
-    def find_all(limit, offset=0):
-        return Instructor._page({}, limit, offset)
+    def find_all(limit, offset=0, centers=None):
+        return Instructor._page(center_criteria(centers), limit, offset)
 
     @staticmethod
     def find_by_name(instructor_name):
@@ -68,10 +69,18 @@ class Instructor:
         return Instructor._collection().find_one({'instructor_name': instructor_name})
 
     @staticmethod
-    def search(query, limit, offset=0):
+    def search(query, limit, offset=0, centers=None):
         # re.escape: the query reaches $regex directly -- see Student._name_criteria.
-        criteria = {'instructor_name': {'$regex': re.escape(query), '$options': 'i'}}
+        criteria = {
+            'instructor_name': {'$regex': re.escape(query), '$options': 'i'},
+            **center_criteria(centers),
+        }
         return Instructor._page(criteria, limit, offset)
+
+    @staticmethod
+    def center_names():
+        """Distinct center names on this collection, for the filter's checkbox list."""
+        return set(Instructor._collection().distinct('centers.name'))
 
     @staticmethod
     def count_all():
