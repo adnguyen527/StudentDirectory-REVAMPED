@@ -1,7 +1,8 @@
 from flask import Blueprint, jsonify, request
 
 from models import Instructor
-from routes import pagination
+from models.instructor import FILTERABLE, SORTABLE
+from routes import filtering, pagination, sorting
 from routes.serialization import serialize
 
 instructors_bp = Blueprint('instructors', __name__, url_prefix='/api')
@@ -18,6 +19,16 @@ def get_instructors():
     if error:
         return jsonify({'error': error}), 400
 
+    # Students and Days sort too, though they are derived rather than stored -- see
+    # Instructor._page for what that costs.
+    sort, direction, error = sorting.parse(request.args, SORTABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
+    ranges, error = filtering.parse(request.args, FILTERABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
     query = request.args.get('query')
     # Repeatable, as on /api/students. On instructors the union is not a partition: 11 of
     # 103 work at more than one center, so ticking two returns fewer than the two counts
@@ -25,9 +36,13 @@ def get_instructors():
     centers = request.args.getlist('center')
 
     if query:
-        instructors, total = Instructor.search(query, limit, offset, centers)
+        instructors, total = Instructor.search(
+            query, limit, offset, centers, sort, direction, ranges
+        )
     else:
-        instructors, total = Instructor.find_all(limit, offset, centers)
+        instructors, total = Instructor.find_all(
+            limit, offset, centers, sort, direction, ranges
+        )
 
     return jsonify(
         pagination.envelope('instructors', instructors, total, limit, offset)

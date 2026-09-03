@@ -27,3 +27,32 @@ def center_criteria(centers):
     """
     wanted = [name for name in (centers or []) if name]
     return {'centers.name': {'$in': wanted}} if wanted else {}
+
+
+def range_criteria(bounds, filterable):
+    """`{field: {'$gte': low, '$lte': high}}` for the columns a caller bounded.
+
+    `bounds` is what routes/filtering.py parsed -- `{column: (low, high)}` in the URL's
+    names -- and `filterable` maps those to the stored fields, so the two halves stay
+    honest about which columns exist without either importing the other.
+
+    Both ends are inclusive. "5 or more sessions" is what a person means by a minimum of
+    5, and the dates are stored at midnight, so `$lte` on a date includes that whole day.
+
+    ⚠️ A bounded column excludes the documents that have no value for it, because null
+    satisfies neither `$gte` nor `$lte`. That is right -- a topic nobody has finished has
+    no median, and asking for medians under 5 is not asking for it -- but it means a
+    filter on a nullable column silently shrinks the list by more than the bound suggests,
+    and the UI has to say so where it offers one.
+    """
+    criteria = {}
+    for column, (low, high) in (bounds or {}).items():
+        field, _ = filterable[column]
+        bound = {}
+        if low is not None:
+            bound['$gte'] = low
+        if high is not None:
+            bound['$lte'] = high
+        if bound:
+            criteria[field] = bound
+    return criteria

@@ -16,6 +16,18 @@ import { server } from '../support/server'
 
 const PROFILE = `/students/${encodeURIComponent(ANTHONY_KEY)}`
 
+/** The instructor names in the order the card shows them. */
+function instructorNames() {
+  const table = within(
+    screen.getByRole('heading', { name: /^Instructors$/ }).closest('.card') as HTMLElement,
+  ).getByRole('table')
+  return within(table)
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getAllByRole('cell')[0].textContent)
+}
+
+
 /**
  * The card with this title.
  *
@@ -343,6 +355,83 @@ describe('student profile', () => {
     expect(card_.getByRole('link', { name: 'Instructor 10' })).toBeInTheDocument()
     expect(card_.queryByRole('link', { name: 'Instructor 00' })).not.toBeInTheDocument()
     expect(card_.getByRole('button', { name: /next/i })).toBeDisabled()
+  })
+
+  it('sorts the instructors card from its headers', async () => {
+    // Dana has 6 sessions with Anthony, Marcus 1.
+    const { user } = renderApp(PROFILE)
+    const instructors = within(await card(/^Instructors$/))
+    await instructors.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(instructors.getByRole('button', { name: 'Sessions' }))
+    await waitFor(() => expect(instructorNames()).toEqual([DANA, MARCUS]))
+
+    await user.click(instructors.getByRole('button', { name: 'Sessions' }))
+    await waitFor(() => expect(instructorNames()).toEqual([MARCUS, DANA]))
+
+    // Third click returns the card to the order the response carried.
+    await user.click(instructors.getByRole('button', { name: 'Sessions' }))
+    await waitFor(() => expect(instructorNames()).toEqual([DANA, MARCUS]))
+  })
+
+  it('keeps the card sort out of the URL', async () => {
+    // Three tables on this page, so one ?sort= between them would belong to whichever
+    // was clicked last -- and the card pages in local state, so a linked URL would
+    // restore an order but not the page it was on.
+    const { user } = renderApp(PROFILE)
+    const instructors = within(await card(/^Instructors$/))
+    await instructors.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(instructors.getByRole('button', { name: 'Sessions' }))
+
+    await waitFor(() => expect(instructorNames()).toEqual([DANA, MARCUS]))
+    expect(currentLocation()).toBe(PROFILE)
+  })
+
+  it('sorts an instructor with no rate to the bottom, either way round', async () => {
+    // Marcus has one session, so there is no pages-per-session figure for him. A dash is
+    // not a zero, and an ascending sort must not lead with it.
+    const { user } = renderApp(PROFILE)
+    const instructors = within(await card(/^Instructors$/))
+    await instructors.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(instructors.getByRole('button', { name: 'Pages / session' }))
+    await waitFor(() => expect(instructorNames()).toEqual([DANA, MARCUS]))
+
+    await user.click(instructors.getByRole('button', { name: 'Pages / session' }))
+    await waitFor(() => expect(instructorNames()).toEqual([DANA, MARCUS]))
+  })
+
+  it('filters the instructors card to a range, and counts what is left', async () => {
+    const { user } = renderApp(PROFILE)
+    const instructors = within(await card(/^Instructors$/))
+    await instructors.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(instructors.getByRole('button', { name: /filter by sessions/i }))
+    await user.type(screen.getByRole('spinbutton', { name: /minimum sessions/i }), '5')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(instructorNames()).toEqual([DANA]))
+    // The pager counts the filtered list, not the roster -- "1-10 of 2" over one row
+    // would be a pager describing rows the table is not showing.
+    expect(instructors.getByText('1–1 of 1')).toBeInTheDocument()
+    expect(currentLocation()).toBe(PROFILE)
+  })
+
+  it('says that a rate range leaves out the instructors who have no rate', async () => {
+    const { user } = renderApp(PROFILE)
+    const instructors = within(await card(/^Instructors$/))
+    await instructors.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(instructors.getByRole('button', { name: /filter by pages per session/i }))
+    expect(await screen.findByText(/have no rate, so any range here leaves them out/i))
+      .toBeInTheDocument()
+
+    await user.type(screen.getByRole('spinbutton', { name: /minimum pages per session/i }), '1')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    // Marcus has no rate, so no range matches him -- including one he would pass on pages.
+    await waitFor(() => expect(instructorNames()).toEqual([DANA]))
   })
 
   it('opens an instructor from the instructors card', async () => {

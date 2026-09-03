@@ -20,6 +20,11 @@ function tableRows() {
   return within(screen.getByRole('table')).getAllByRole('row').slice(1)
 }
 
+/** The first cell of each row, in the order served -- which is what a sort changes. */
+function firstColumn() {
+  return tableRows().map((row) => within(row).getAllByRole('cell')[0].textContent)
+}
+
 describe('students page', () => {
   it('shows a row per student with the figures a list is read for', async () => {
     renderApp('/students')
@@ -99,6 +104,248 @@ describe('students page', () => {
 
     await waitFor(() => expect(currentLocation()).toBe('/students'))
     expect(await screen.findByRole('row', { name: /Anthony Nguyen/ })).toBeInTheDocument()
+  })
+
+  it('offers to clear a center filter, which is the one that has no box to empty', async () => {
+    // A search term can be cleared by deleting it; a ticked checkbox is only undone from
+    // the dropdown, so the button appearing is what says the list is a subset at all.
+    const { user } = renderApp('/students?center=Eastside')
+    await screen.findByRole('row', { name: /Chloe Tan/ })
+
+    await user.click(screen.getByRole('button', { name: /clear filter/i }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students'))
+    expect(await screen.findByRole('row', { name: /Anthony Nguyen/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /all centers/i })).toBeInTheDocument()
+  })
+
+  it('clears every filter at once, and says so in the plural', async () => {
+    renderApp('/students?query=Nguyen&center=Westside&offset=50')
+
+    expect(await screen.findByRole('button', { name: 'Clear filters' })).toBeInTheDocument()
+  })
+
+  it('offers nothing to clear on an unfiltered list, paged or not', async () => {
+    // The offset positions the list rather than narrowing it, so page 2 is not "filtered".
+    renderApp('/students?offset=50')
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /clear filter/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('sorts by a column from its header, and states the order in the markup', async () => {
+    const { user } = renderApp('/students')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: 'Sessions' }))
+
+    // A count column opens largest-first: most sessions is the end anyone clicks for.
+    await waitFor(() => expect(currentLocation()).toBe('/students?sort=sessions&direction=desc'))
+    await waitFor(() => expect(firstColumn()).toEqual(['Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan']))
+    expect(screen.getByRole('columnheader', { name: /sessions/i })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+  })
+
+  it('reverses on a second click and turns off on a third', async () => {
+    // The third state is the point: an order set by accident has to be undoable from the
+    // button that set it, and the resting order is not always the name column.
+    const { user } = renderApp('/students')
+    await screen.findByRole('button', { name: 'Sessions' })
+    // Re-queried before every click: the table is replaced while the next request is in
+    // flight, so a header held across a click is a detached node that swallows it.
+    // Exact, because the cell also holds a filter trigger that names the same column.
+    const header = () => screen.getByRole('button', { name: 'Sessions' })
+
+    await user.click(header())
+    await waitFor(() => expect(currentLocation()).toBe('/students?sort=sessions&direction=desc'))
+
+    await user.click(header())
+    await waitFor(() => expect(currentLocation()).toBe('/students?sort=sessions&direction=asc'))
+    // Ava and Chloe both have one session; the tie-break holds them in a fixed order.
+    await waitFor(() => expect(firstColumn()).toEqual(['Ava Nguyen', 'Chloe Tan', 'Anthony Nguyen']))
+
+    await user.click(header())
+    await waitFor(() => expect(currentLocation()).toBe('/students'))
+    expect(screen.getByRole('columnheader', { name: /sessions/i })).toHaveAttribute(
+      'aria-sort',
+      'none',
+    )
+  })
+
+  it('opens a name column A-Z, not largest-first', async () => {
+    // "First" means something different per column type, and the API agrees per column.
+    const { user } = renderApp('/students')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: 'Student' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?sort=name&direction=asc'))
+  })
+
+  it('drops the offset when the order changes', async () => {
+    // Page 3 of one ordering is not page 3 of another, and the rows are not the ones you
+    // were looking at.
+    const { user } = renderApp('/students?offset=1')
+
+    await user.click(await screen.findByRole('button', { name: 'Sessions' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?sort=sessions&direction=desc'))
+  })
+
+  it('shows the order it arrived with, so a sorted list is linkable', async () => {
+    renderApp('/students?sort=sessions&direction=asc')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    expect(screen.getByRole('columnheader', { name: /sessions/i })).toHaveAttribute(
+      'aria-sort',
+      'ascending',
+    )
+    await waitFor(() => expect(firstColumn()).toEqual(['Ava Nguyen', 'Chloe Tan', 'Anthony Nguyen']))
+  })
+
+  it('resolves a sort with no direction the way the API does', async () => {
+    // ?sort=sessions alone is a legitimate URL -- the column supplies the direction --
+    // so the header has to draw an arrow rather than none.
+    renderApp('/students?sort=sessions')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    expect(screen.getByRole('columnheader', { name: /sessions/i })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+  })
+
+  it('does not count an order as a filter', async () => {
+    // Sorting does not narrow the list, so there is nothing to clear and no button.
+    renderApp('/students?sort=sessions&direction=desc')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    expect(screen.queryByRole('button', { name: /clear filter/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps the order when the filters are cleared', async () => {
+    const { user } = renderApp('/students?query=Nguyen&sort=sessions&direction=asc')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /clear filter/i }))
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe('/students?sort=sessions&direction=asc'),
+    )
+  })
+
+  it('says the order it is actually in, not the one it rests in', async () => {
+    // The line under the title claimed "sorted by name" whatever the order was, which a
+    // sorted list turned into a wrong statement about the rows underneath it.
+    renderApp('/students?sort=sessions&direction=desc')
+
+    expect(await screen.findByText(/most sessions first/)).toBeInTheDocument()
+    expect(screen.queryByText(/sorted by name/)).not.toBeInTheDocument()
+  })
+
+  it('reads a sort with no direction the way the column does', async () => {
+    renderApp('/students?sort=last_session')
+
+    expect(await screen.findByText(/most recent session first/)).toBeInTheDocument()
+  })
+
+  it('filters a column to a range from its own header', async () => {
+    // Anthony has 2 sessions; Ava and Chloe have 1 each.
+    const { user } = renderApp('/students')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /filter by sessions/i }))
+    await user.type(screen.getByRole('spinbutton', { name: /minimum sessions/i }), '2')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?sessions_min=2'))
+    await waitFor(() => expect(firstColumn()).toEqual(['Anthony Nguyen']))
+  })
+
+  it('applies both bounds as one edit, not one per keystroke', async () => {
+    // A range is a single question. Typing "1" on the way to "12" is not a question
+    // anyone asked, and firing it would flash a wrong list on the way to the right one.
+    const { user } = renderApp('/students')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /filter by sessions/i }))
+    await user.type(screen.getByRole('spinbutton', { name: /minimum sessions/i }), '1')
+    await user.type(screen.getByRole('spinbutton', { name: /maximum sessions/i }), '1')
+    expect(currentLocation()).toBe('/students')
+
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(currentLocation()).toBe('/students?sessions_min=1&sessions_max=1'))
+    await waitFor(() => expect(firstColumn()).toEqual(['Ava Nguyen', 'Chloe Tan']))
+  })
+
+  it('says on the trigger what the column is filtered to', async () => {
+    // A closed panel that only named the column would leave a filtered list looking
+    // unfiltered -- the same reason the center trigger says "2 centers".
+    renderApp('/students?sessions_min=2')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    expect(
+      screen.getByRole('button', { name: /filter by sessions: 2 or more sessions/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('drops the offset when a range changes', async () => {
+    const { user } = renderApp('/students?offset=1')
+
+    await user.click(await screen.findByRole('button', { name: /filter by sessions/i }))
+    await user.type(screen.getByRole('spinbutton', { name: /minimum sessions/i }), '2')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?sessions_min=2'))
+  })
+
+  it('counts a range as a filter, so it can be cleared with the others', async () => {
+    const { user } = renderApp('/students?sessions_min=2&sort=name&direction=asc')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /clear filter/i }))
+
+    // The range goes; the order stays, because an order is not a filter.
+    await waitFor(() => expect(currentLocation()).toBe('/students?sort=name&direction=asc'))
+  })
+
+  it('filters by a date window, both ends inclusive', async () => {
+    // Anthony 3/14, Ava 3/10, Chloe 2/1.
+    renderApp('/students?last_session_from=2026-03-10')
+
+    await waitFor(() => expect(firstColumn()).toEqual(['Anthony Nguyen', 'Ava Nguyen']))
+    expect(
+      screen.getByRole('button', { name: /filter by last session: since mar 10, 2026/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('offers date windows measured from the data, not from today', async () => {
+    // The imported data ends long before the clock does, so "last 30 days" read off
+    // today would match nobody. The preset names the date it resolves to.
+    const { user } = renderApp('/students')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /filter by last session/i }))
+
+    // The fixture's newest session is 2026-03-14, so 30 days back is 2026-02-12.
+    const preset = await screen.findByRole('button', { name: /last 30 days/i })
+    expect(preset).toHaveTextContent('Feb 12, 2026')
+
+    await user.click(preset)
+    await waitFor(() => expect(currentLocation()).toBe('/students?last_session_from=2026-02-12'))
+  })
+
+  it('clears one column filter without touching the others', async () => {
+    const { user } = renderApp('/students?sessions_min=1&finished_min=1')
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(screen.getByRole('button', { name: /filter by sessions/i }))
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/students?finished_min=1'))
   })
 
   it('opens a student from their name in the list', async () => {

@@ -1,7 +1,8 @@
 from flask import Blueprint, jsonify, request
 
 from models import Topic
-from routes import pagination
+from models.topic import FILTERABLE, SORTABLE
+from routes import filtering, pagination, sorting
 from routes.serialization import serialize
 
 topics_bp = Blueprint('topics', __name__, url_prefix='/api')
@@ -18,11 +19,19 @@ def get_topics():
     if error:
         return jsonify({'error': error}), 400
 
+    sort, direction, error = sorting.parse(request.args, SORTABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
+    ranges, error = filtering.parse(request.args, FILTERABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
     query = request.args.get('query')
     if query:
-        topics, total = Topic.search(query, limit, offset)
+        topics, total = Topic.search(query, limit, offset, sort, direction, ranges)
     else:
-        topics, total = Topic.find_all(limit, offset)
+        topics, total = Topic.find_all(limit, offset, sort, direction, ranges)
 
     return jsonify(pagination.envelope('topics', topics, total, limit, offset)), 200
 

@@ -3,10 +3,14 @@ import { Link, useParams } from 'react-router-dom'
 
 import { formatDate, formatNumber, toDate } from '../../api/bson'
 import { getStudent } from '../../api/endpoints'
-import type { StudentDetailResponse } from '../../api/types'
+import type { StudentDetailResponse, StudentInstructor } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
 import { Card } from '../../shell/Card'
 import { Pager } from '../../shell/Pager'
+import { NumberRangeFilter } from '../NumberRangeFilter'
+import { ColumnHeader } from '../SortHeader'
+import { useCardRange } from '../ranges'
+import { useCardSort } from '../useSort'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
 import { AttendancePanel } from './AttendancePanel'
@@ -23,6 +27,41 @@ const INSTRUCTOR_PAGE = 10
 const PAGES_PER_SESSION_MIN = 5
 
 /**
+ * An instructor's pages per session with this student, or null where there is no rate to
+ * quote -- under five sessions together, or nothing finalized to divide by.
+ *
+ * One function for the cell, the sort and the filter, so a row cannot display one figure
+ * and be ordered by another. Null is the same answer in all three: shown as a dash, sorted
+ * to the bottom, and matched by no range -- the same shape as topics' median, and for the
+ * same reason.
+ */
+function pagesPerSession(instructor: StudentInstructor): number | null {
+  if (instructor.sessions < PAGES_PER_SESSION_MIN) return null
+  if (instructor.finalized_sessions === 0) return null
+  return instructor.pages_completed / instructor.finalized_sessions
+}
+
+/** The value a column is read, sorted and filtered by. */
+const INSTRUCTOR_VALUES: Record<string, (row: StudentInstructor) => number | null> = {
+  sessions: (row) => row.sessions,
+  pages: (row) => row.pages_completed,
+  rate: pagesPerSession,
+}
+
+/** Rows within a bound, with the rows that have no value left out -- see range_criteria. */
+function withinBound(rows: StudentInstructor[], column: string, low: string, high: string) {
+  if (!low && !high) return rows
+  const valueOf = INSTRUCTOR_VALUES[column]
+  return rows.filter((row) => {
+    const value = valueOf(row)
+    if (value === null) return false
+    if (low && value < Number(low)) return false
+    if (high && value > Number(high)) return false
+    return true
+  })
+}
+
+/**
  * One student, everything the API holds about them.
  *
  * A single request carries it all -- the aggregate document plus every session report --
@@ -33,6 +72,14 @@ const PAGES_PER_SESSION_MIN = 5
 export function StudentProfilePage() {
   const { studentKey = '' } = useParams()
   const [instructorOffset, setInstructorOffset] = useState(0)
+  // Local rather than in the URL: this page holds three tables, so one `?sort=` between
+  // them would be owned by whichever card was clicked last -- and the card pages in local
+  // state over rows the detail response already carried, so a linked URL would restore an
+  // order but not the page it was on. See useCardSort.
+  const instructorSort = useCardSort()
+  const sessionsRange = useCardRange()
+  const pagesRange = useCardRange()
+  const rateRange = useCardRange()
   const { data, loading, error } = useApi<StudentDetailResponse>(
     (signal) => getStudent(studentKey, signal),
     [studentKey],
@@ -95,9 +142,37 @@ export function StudentProfilePage() {
   // One element serves students/:studentKey, so the offset survives a move to another
   // student. Snap back when it no longer addresses a row, rather than resetting in an
   // effect and paying a second render pass -- as the instructor and topic pages do.
-  const offset =
-    instructorOffset < student.instructors.length ? instructorOffset : 0
-  const shownInstructors = student.instructors.slice(offset, offset + INSTRUCTOR_PAGE)
+  // Filter, then order, then page -- in that order, because paging a list you have not
+  // finished narrowing shows the wrong ten rows.
+  let instructors = student.instructors
+  instructors = withinBound(instructors, 'sessions', sessionsRange.low, sessionsRange.high)
+  instructors = withinBound(instructors, 'pages', pagesRange.low, pagesRange.high)
+  instructors = withinBound(instructors, 'rate', rateRange.low, rateRange.high)
+
+  if (instructorSort.column) {
+    const valueOf = INSTRUCTOR_VALUES[instructorSort.column]
+    const sign = instructorSort.direction === 'asc' ? 1 : -1
+    instructors = [...instructors].sort((left, right) => {
+      if (!valueOf) {
+        // The name column, which is the only text one here.
+        return left.name.localeCompare(right.name) * sign
+      }
+      const a = valueOf(left)
+      const b = valueOf(right)
+      // A missing rate sorts to the bottom whichever way the column runs, rather than
+      // reading as the smallest -- as the API does for topics' median.
+      if (a === null || b === null) {
+        if (a === b) return left.name.localeCompare(right.name)
+        return a === null ? 1 : -1
+      }
+      // Instructor names are unique per student, so this is a total order and the pager
+      // cannot repeat or drop a row across a page boundary.
+      return (a - b) * sign || left.name.localeCompare(right.name)
+    })
+  }
+
+  const offset = instructorOffset < instructors.length ? instructorOffset : 0
+  const shownInstructors = instructors.slice(offset, offset + INSTRUCTOR_PAGE)
 
   return (
     <div className="page">
@@ -174,10 +249,52 @@ export function StudentProfilePage() {
           <table className="table">
             <thead>
               <tr>
-                <th>Instructor</th>
-                <th className="numeric">Sessions</th>
-                <th className="numeric">Pages completed</th>
-                <th className="numeric">Pages / session</th>
+                <ColumnHeader sortable column="name" first="asc" sort={instructorSort}>
+                  Instructor
+                </ColumnHeader>
+                <ColumnHeader
+                  sortable
+                  column="sessions"
+                  className="numeric"
+                  sort={instructorSort}
+                  filter={
+                    <NumberRangeFilter
+                      column="sessions"
+                      label="sessions"
+                      range={sessionsRange}
+                    />
+                  }
+                >
+                  Sessions
+                </ColumnHeader>
+                <ColumnHeader
+                  sortable
+                  column="pages"
+                  className="numeric"
+                  sort={instructorSort}
+                  filter={
+                    <NumberRangeFilter column="pages" label="pages" range={pagesRange} />
+                  }
+                >
+                  Pages completed
+                </ColumnHeader>
+                <ColumnHeader
+                  sortable
+                  column="rate"
+                  className="numeric"
+                  sort={instructorSort}
+                  filter={
+                    <NumberRangeFilter
+                      column="rate"
+                      label="pages per session"
+                      range={rateRange}
+                      // The dashes are not zeroes, and no range matches one.
+                      note={`Instructors under ${PAGES_PER_SESSION_MIN} sessions have no rate, so any range here leaves them out.`}
+                    />
+                  }
+                >
+                  Pages / session
+                </ColumnHeader>
               </tr>
             </thead>
             <tbody>
@@ -201,11 +318,8 @@ export function StudentProfilePage() {
                       five sessions has none finalized -- but that is a fact about the
                       data, not a rule. */}
                   <td className="numeric">
-                    {instructor.sessions < PAGES_PER_SESSION_MIN ||
-                    instructor.finalized_sessions === 0 ? (
+                    {pagesPerSession(instructor)?.toFixed(1) ?? (
                       <span className="muted">—</span>
-                    ) : (
-                      (instructor.pages_completed / instructor.finalized_sessions).toFixed(1)
                     )}
                   </td>
                 </tr>
@@ -224,12 +338,14 @@ export function StudentProfilePage() {
         {/* The whole list is already in the detail response, so this pages what is in
             hand. Held back on an empty roster so the card does not answer "No results"
             where it currently shows nothing. */}
-        {student.instructors.length > 0 && (
+        {instructors.length > 0 && (
           <Pager
             page={{
               limit: INSTRUCTOR_PAGE,
+              // The filtered total, not the roster's: a pager counting rows the table is
+              // not showing would say "1-10 of 23" over three.
               offset,
-              total: student.instructors.length,
+              total: instructors.length,
               returned: shownInstructors.length,
             }}
             onChange={setInstructorOffset}

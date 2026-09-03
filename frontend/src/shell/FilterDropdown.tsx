@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-
-import { ChevronIcon } from './Icons'
+import { FilterPopover } from './FilterPopover'
 import './FilterDropdown.css'
 
 interface FilterDropdownProps {
@@ -22,8 +20,9 @@ interface FilterDropdownProps {
  * of these eventually and a search box beside them: each filter costs one button's width
  * this way, however many options it has.
  *
- * The trigger says what the closed panel is hiding. Without that a filtered list looks
- * unfiltered -- the whole reason the lists grew a visible search box in the first place.
+ * The trigger and its dismissal are FilterPopover's, shared with the range filters in the
+ * column headers. What is left here is the only thing that is actually about a list of
+ * options: the summary, and toggling one.
  */
 export function FilterDropdown({
   label,
@@ -33,27 +32,6 @@ export function FilterDropdown({
   emptyLabel,
   countNoun,
 }: FilterDropdownProps) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  // Same dismissal as GlobalSearch: a panel that can only be closed by the button that
-  // opened it is a trap once there are several of them in a row.
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
-
   function toggle(option: string) {
     onChange(
       selected.includes(option)
@@ -70,36 +48,21 @@ export function FilterDropdown({
         : `${selected.length} ${countNoun}`
 
   return (
-    <div className="filter-dropdown" ref={containerRef}>
-      <button
-        type="button"
-        className={selected.length > 0 ? 'filter-trigger filter-trigger-on' : 'filter-trigger'}
-        aria-expanded={open}
-        aria-label={`${label}: ${summary}`}
-        onClick={() => setOpen((wasOpen) => !wasOpen)}
-      >
-        {summary}
-        <ChevronIcon className="filter-trigger-caret" />
-      </button>
-
-      {open && (
-        <div className="filter-panel" role="group" aria-label={label}>
-          {options.length === 0 ? (
-            <p className="filter-empty">Nothing to filter by.</p>
-          ) : (
-            options.map((option) => (
-              <label key={option} className="filter-option">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(option)}
-                  onChange={() => toggle(option)}
-                />
-                {option}
-              </label>
-            ))
-          )}
-        </div>
+    <FilterPopover label={label} summary={summary} active={selected.length > 0}>
+      {options.length === 0 ? (
+        <p className="filter-empty">Nothing to filter by.</p>
+      ) : (
+        options.map((option) => (
+          <label key={option} className="filter-option">
+            <input
+              type="checkbox"
+              checked={selected.includes(option)}
+              onChange={() => toggle(option)}
+            />
+            {option}
+          </label>
+        ))
       )}
-    </div>
+    </FilterPopover>
   )
 }

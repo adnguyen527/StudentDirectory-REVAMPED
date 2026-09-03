@@ -24,6 +24,11 @@ function filterBox() {
   return screen.getByRole('searchbox', { name: /search topics/i })
 }
 
+/** The id under each topic name, which is what tells two same-named topics apart. */
+function topicIds() {
+  return tableRows().map((row) => within(row).getByText(/^[A-Z]+-\d+$/).textContent)
+}
+
 describe('topics page', () => {
   it('shows the figures a topic list is read for', async () => {
     renderApp('/topics')
@@ -114,6 +119,78 @@ describe('topics page', () => {
     await user.type(filterBox(), 'Angles')
 
     await waitFor(() => expect(currentLocation()).toBe('/topics?query=Angles'))
+  })
+
+  it('clears its filter from the header, as the other two lists do', async () => {
+    // The box can be emptied by hand, but the three list headers should not each offer a
+    // different way out of a filtered list.
+    const { user } = renderApp('/topics?query=Angles')
+    await screen.findByRole('link', { name: 'Angles' })
+
+    await user.click(screen.getByRole('button', { name: /clear filter/i }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/topics'))
+    expect(filterBox()).toHaveValue('')
+  })
+
+  it('sorts by a column, most first', async () => {
+    const { user } = renderApp('/topics')
+    await screen.findByRole('link', { name: 'Fractions' })
+
+    await user.click(screen.getByRole('button', { name: 'Students' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/topics?sort=students&direction=desc'))
+  })
+
+  it('keeps the topics with no median at the bottom, either way round', async () => {
+    // Null is not zero and not "instant": 109 of 771 real topics have never been
+    // finished, and an ascending sort that led with them would bury the answer.
+    const { user } = renderApp('/topics')
+    await screen.findByRole('button', { name: 'Median sessions' })
+    // Re-queried per click: the table is replaced while the next request is in flight.
+    // Exact, because the cell also holds a filter trigger naming the same column.
+    const header = () => screen.getByRole('button', { name: 'Median sessions' })
+
+    await user.click(header())
+    await waitFor(() => expect(currentLocation()).toBe('/topics?sort=median&direction=desc'))
+    await waitFor(() => expect(topicIds()).toEqual(['T-100', 'T-110', 'T-200', 'T-115']))
+
+    await user.click(header())
+    await waitFor(() => expect(currentLocation()).toBe('/topics?sort=median&direction=asc'))
+    await waitFor(() => expect(topicIds()).toEqual(['T-200', 'T-110', 'T-100', 'T-115']))
+  })
+
+  it('breaks a tie on the id, so a paged list cannot repeat a row', async () => {
+    // Two topics are called Decimals, as 90 real names are carried by more than one.
+    const { user } = renderApp('/topics')
+    await screen.findByRole('link', { name: 'Fractions' })
+
+    await user.click(screen.getByRole('button', { name: 'Topic' }))
+
+    await waitFor(() => expect(topicIds()).toEqual(['T-200', 'T-110', 'T-115', 'T-100']))
+  })
+
+  it('warns that a median range leaves out the topics that have none', async () => {
+    // 109 of 771 real topics have never been finished, so no range can match them. The
+    // filter is right to drop them and wrong to do it silently.
+    const { user } = renderApp('/topics')
+    await screen.findByRole('link', { name: 'Fractions' })
+
+    await user.click(screen.getByRole('button', { name: /filter by median sessions/i }))
+
+    expect(await screen.findByText(/nobody has finished have no median/i)).toBeInTheDocument()
+  })
+
+  it('filters topics by a count range', async () => {
+    const { user } = renderApp('/topics')
+    await screen.findByRole('link', { name: 'Fractions' })
+
+    await user.click(screen.getByRole('button', { name: /filter by students/i }))
+    await user.type(screen.getByRole('spinbutton', { name: /minimum students/i }), '2')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/topics?students_min=2'))
+    await waitFor(() => expect(topicIds()).toEqual(['T-100', 'T-110']))
   })
 
   it('opens a topic by id from the list', async () => {

@@ -111,3 +111,45 @@ export function MoreIcon({ size = 18, className }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * The arrow on a sortable column header.
+ *
+ * Three states, because "unsorted" has to look different from both sorted ones without
+ * looking broken: a pair of faint chevrons says the column can be sorted, and one solid
+ * chevron says which way it is. The pair is dimmed in CSS rather than here, so a header
+ * can brighten it on hover.
+ */
+export function SortIcon({
+  size = 14,
+  className,
+  direction,
+}: IconProps & { direction?: 'asc' | 'desc' }) {
+  if (!direction) {
+    return (
+      <svg {...base(size, className)}>
+        <path d="m7 10 5-5 5 5" />
+        <path d="m7 14 5 5 5-5" />
+      </svg>
+    )
+  }
+  return (
+    <svg {...base(size, className)}>
+      <path d={direction === 'asc' ? 'm6 14 6-6 6 6' : 'm6 10 6 6 6-6'} />
+    </svg>
+  )
+}
+
+/**
+ * The filter control in a column header.
+ *
+ * A funnel rather than a caret: the header already has a caret for sorting, and the two
+ * controls sit side by side in the same cell, so they cannot share a glyph.
+ */
+export function FunnelIcon({ size = 13, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M3 5h18l-7 8v6l-4 2v-8Z" />
+    </svg>
+  )
+}

@@ -430,6 +430,8 @@ export const DECIMALS_TWO_DETAIL: TopicDetail = {
 }
 
 export const METRICS: Metrics = {
+  // Anthony's 3/14 session, the newest in this fixture -- what the date presets anchor on.
+  latest_session_date: day('2026-03-14'),
   total_students: 3,
   total_instructors: 2,
   total_dwp_reports: 4,

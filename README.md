@@ -466,21 +466,34 @@ proving nothing.
 | POST | `/api/auth/logout` | revokes the session server-side and clears the cookie |
 | GET | `/api/auth/me` | the logged-in user, or `401` — how a browser client knows to show the login page |
 | GET | `/api/health` | liveness |
-| GET | `/api/metrics` | collection counts and averages |
+| GET | `/api/metrics` | collection counts and averages, plus `latest_session_date` — the newest session in the data, which the date filter's presets count back from |
 | GET | `/api/centers` | the center names the two list filters offer |
-| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings, `?center=` (repeatable) to filter |
+| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings, `?center=` (repeatable), `?sessions_min=`/`_max`, `?finished_min=`/`_max`, `?on_plan_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
-| GET | `/api/instructors` | a page of instructors; `?query=` to search by name, `?center=` (repeatable) to filter |
+| GET | `/api/instructors` | a page of instructors; `?query=`, `?center=` (repeatable), `?sessions_min=`/`_max`, `?unfinalized_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
 | GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
-| GET | `/api/topics` | a page of topics, most worked first; `?query=` to search name, former names or id |
+| GET | `/api/topics` | a page of topics, most worked first; `?query=` to search name, former names or id, a `_min`/`_max` pair per count column, `?sort=`+`?direction=` |
 | GET | `/api/topics/search?q=` | search, minimum 2 characters — matches `name`, `also_known_as` and `topic_id` |
 | GET | `/api/topics/<topic_id>` | one topic, with its ranked instructors |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
+
+### List parameters
+
+Three optional groups, each parsed by its own module and combinable with the others and
+with paging: `routes/pagination.py` (`limit`, `offset`), `routes/sorting.py` (`sort`,
+`direction`) and `routes/filtering.py` (the `_min`/`_max` and `_from`/`_to` pairs). Which
+columns each list accepts is declared per model as `SORTABLE` and `FILTERABLE`, so the
+allowlist and the field names live next to the documents they describe.
+
+**Refused with a `400`:** an unknown `sort` column, a `direction` that is not `asc`/`desc`,
+a bound that is not a number or a date, and a range that runs backwards. **Ignored:** a
+blank value, and a `_min` on a column that is not filterable. The line between the two is
+whether a correct answer exists — "no students at Xyz" is one, `sort=bogus` is not.
 
 ### Session authentication
 
@@ -731,32 +744,36 @@ Items are listed in priority order within each group.
       Worth correcting the old note here: only `PK-3121-00` is a rename. `PK-3099-00` and
       `PK-3081-00` run both names concurrently for the topic's whole life, so the centers
       rename map would not have fixed them. See the `topics` section above.
-- [ ] `P2` **Filter and sort parameters on the two list routes**, backing the column
-      controls under **Frontend**. `/api/students` and `/api/instructors` accept only
-      `query` (plus `account_id` on students). They need one filter per column — `center`,
-      numeric ranges, a last-session date range — plus `sort` and `direction`, each optional
-      and combinable with the existing paging. **`center` is multi-valued**: the checkbox
-      control under **Frontend** ticks several at once, so it repeats as `?center=` and
-      matches `centers.name` `$in` the list, and on instructors the result is a union rather
-      than a partition. `sort` is validated against an allowlist of
-      sortable fields and an unrecognised value is a `400`, not a silent fallback to name
-      order, in the same spirit as `pagination.parse` refusing a bad `limit`.
+- [x] `P2` **Filter and sort parameters on the three list routes.** Done — `sort`/
+      `direction` in `routes/sorting.py`, the range pairs in `routes/filtering.py`, and the
+      per-model `SORTABLE`/`FILTERABLE` declarations that say which columns each accepts.
+      See **List parameters** above for the contract.
 
-      ⚠️ **Every sort must append the collection's unique key, or paging breaks.** This is
-      correctness, not tuning. `total_topics_on_plan` has **8 distinct values across 893
+      ⚠️ **Every sort appends the collection's unique key, because otherwise paging breaks.**
+      Correctness, not tuning. `total_topics_on_plan` has **8 distinct values across 893
       students, 280 of them sharing one**; `last_session_date` ties 155 rows and
       `total_unique_topics_finished` 141. A page boundary landing inside a tie makes
-      `skip`/`limit` repeat and drop rows — the exact bug **Pagination** already claims is
-      fixed, so reintroducing it would make the docs wrong as well as the pages. `LIST_SORT`
-      in `models/student.py` and `models/instructor.py` already does this for names
-      (`student_name` then `student_key`); it becomes a function of the requested column
-      rather than a constant.
+      `skip`/`limit` repeat and drop rows — the exact bug **Pagination** claims is fixed.
+      `models/sorting.py` appends `student_key` / `instructor_name` / `topic_id` to every
+      order, and it stays **ascending** whichever way the column runs, so the stored
+      `(sessions DESC, topic_id ASC)` index still serves topics' resting order.
 
-      Indexes are the separate, smaller problem: one compound `(sort_field, unique_key)` per
-      sortable column, and `(centers.name, …)` for the center filter — neither collection
-      indexes `centers.name` today. Indexing every *filter × sort* combination is neither
-      practical nor needed at 893 and 103 documents, where an unindexed sort is merely
-      slower. An untied one is wrong.
+      Two collections needed more than a swapped sort key:
+
+      - **Instructors' Students and Days are `$size` of arrays**, so sorting by them moves
+        `$addFields` ahead of `$sort` and sizes every matched document rather than one
+        page's. Free at 103 documents, but it is why those two columns *sort and do not
+        filter*: a bound on them would have to size the whole collection to match one row.
+      - **Topics' median is null on 109 of 771 rows.** Mongo sorts null lowest, so an
+        ascending Median would have opened with the 109 topics that have no median at all.
+        That column sorts through an aggregation that adds a 0/1 missing flag as the
+        leading key; every other order stays a plain indexed `find`.
+
+      Indexes remain the separate, smaller problem: no collection indexes `centers.name` or
+      any count column, so a filtered or non-default sort is a collection scan with a
+      blocking sort. At 893 / 103 / 771 documents that is measured in single-digit
+      milliseconds, and an unindexed sort is merely slower where an untied one is wrong.
+      Worth revisiting if a collection grows an order of magnitude.
 - [ ] `P2` **A list route for `dwp_reports`**, backing the report browser under
       **Frontend**. The collection has no route of its own — it is reachable only through
       `/api/students/<key>`, one student at a time. `/api/reports` in the shared paged
@@ -838,6 +855,20 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       same way at 10, matching the instructor roster and the topic page's instructor
       ranking — every one of those lists arrives whole in its detail response, so paging
       costs no request.
+
+      **The instructors card sorts and filters from its own headers**, using the same
+      `ColumnHeader` and `NumberRangeFilter` as the list pages but backed by local state
+      rather than the URL — `useCardSort` / `useCardRange`. Three tables share this page,
+      so one `?sort=` between them would belong to whichever card was clicked last, and
+      since the card pages in local state a linked URL would restore an order but not the
+      page it was on. It narrows, then orders, then pages, in that order, and the pager
+      counts the filtered rows rather than the whole roster.
+
+      ⚠️ **Pages / session is null, not zero, under five sessions with that instructor.**
+      One function serves the cell, the sort and the filter, so a row cannot show one
+      figure and be ordered by another — and a missing rate sorts to the bottom whichever
+      way the column runs and is matched by no range, exactly as topics' median does. The
+      filter's panel says so.
 - [x] `P1` **Session count panel on the student record.** Date range in the card's header
       controls, showing sessions against days and a per-month breakdown. Defaults to the
       three months ending at that student's **last session, not today** — the route refuses
@@ -960,7 +991,7 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
 - [x] `P2` **Topics tab in the sidebar.** Done — `TopicsPage` / `TopicsTable`, 771 topics
       paged off the shared envelope with the filter and offset in the URL. Per row: students
       who worked it, finished, on plan, removed, median sessions to finish and
-      reassignments. Sorting by column is still open, under *Filter and sort each list*.
+      reassignments, every one of them sortable and filterable from its header.
 
       **The list carries its own search bar, topics only** — not the global dropdown, which
       answers students and instructors and would bury 771 topics in it. It debounces into
@@ -1050,75 +1081,67 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       An unrecognised center name returns an empty page rather than a `400`. That looks
       like the `sort` allowlist under **API**, but it is the opposite case: "no students at
       Xyz" is a correct answer to a filter, while `sort=bogus` has no correct answer.
-- [ ] `P2` **Show "Clear filters" whenever anything is filtered, not just a name.** Both
-      list cards gate the button on `query`, so ticking a center leaves no way back to the
-      whole list except unticking each box one at a time — and the more filters the column
-      item below adds, the worse that gets.
+- [x] `P2` **Show "Clear filters" whenever anything is filtered, not just a name.** Done —
+      `ClearFilters` in `frontend/src/features/`, in all three list card headers. Each page
+      used to gate its own button on `query`, so ticking a center filtered the list with
+      nothing on screen offering to undo it.
 
-      **The action is already right**: `setParams(new URLSearchParams())` drops every
-      parameter, center included. Only the visibility test is name-specific, so this is a
-      condition change rather than new behaviour.
+      The test is **"the URL carries any parameter other than `offset`"**, not a list of
+      filter names. The inversion is the whole point: a filter added later shows up in the
+      button on the day it lands, while a new *view* control is one word added to
+      `VIEW_PARAMS`. `offset` is that one exclusion — paging is not filtering, so page 2 of
+      an unfiltered list offers nothing to clear, though clearing does reset it, since
+      page 3 of a filtered list is not page 3 of the whole.
 
-      Make the test **"the URL carries any parameter other than `offset`"** rather than
-      naming the filters. That covers `query`, `center` and every filter added later on the
-      day it lands, with nothing to remember to update. `offset` is the one exclusion:
-      paging is not filtering, so page 2 of an unfiltered list must not offer to clear
-      anything — though clearing does reset it, since page 3 of a filtered list is not
-      page 3 of the whole.
+      A blank value does not count: `?query=` and `?center=` are both ignored by the list
+      routes, so a truncated URL must not light the button up either. The label is singular
+      while exactly one filter is on — "Clear filters" beside a lone search term reads like
+      something else is set that you cannot see.
+- [x] `P2` **Filter and sort each list by its own columns.** Done — `SortHeader` /
+      `ColumnHeader`, `NumberRangeFilter`, `DateRangeFilter` and the `useSort` / `ranges`
+      hooks, on all three lists. Every column that can be read can now be asked about.
 
-      Plural label, since it can now be clearing several at once. And give the **Topics**
-      list the same button — it has a search bar and no way to clear it at all, which is
-      the third inconsistency between the three list headers.
-- [ ] `P2` **Filter and sort each list by its own columns.** Both lists take only a name
-      substring today and are stuck in name order, so a column can be read but not asked
-      about — there is no way to say "Southlake only", "fewer than 5 sessions", "nothing
-      since June", or "most sessions first". Every column gets a filter, and its **type
-      follows the column**, so the whole thing is one pattern applied seven times rather
-      than seven separate features:
+      **Sorting** is the header itself: clicking cycles **descending → ascending → off**,
+      and the third click drops both parameters so the list returns to its resting order.
+      That third state is not a nicety — the resting order is name on two lists and
+      most-worked on topics, so "click Name to get back" would not be an answer. Counts and
+      dates open largest-first, names A-Z, matching what the API defaults per column.
 
-      | column | students | instructors | filter |
-      |---|---|---|---|
-      | name | ✓ | ✓ | text — **exists** as `?query=` |
-      | account | ✓ | — | exact — **exists** as `?account_id=` |
-      | center | ✓ | ✓ | multi-select — **done**, see the center item above |
-      | sessions | ✓ | ✓ | numeric range |
-      | topics finished / students taught | ✓ | ✓ | numeric range |
-      | on plan / days taught | ✓ | ✓ | numeric range |
-      | unfinalized | — | ✓ | numeric range |
-      | last session | ✓ | ✓ | date range |
+      **Filtering** is a funnel in the same cell, opening a range popover: `_min`/`_max` on
+      the counts, `_from`/`_to` on Last session. Both bounds apply on submit rather than
+      per keystroke — a range is one question, and firing at "1" on the way to "12" asks
+      one nobody asked. Ranges beat checkboxes on these columns: "has topics on plan"
+      matches 822 of 893 students and "has unfinalized reports" 70 of 103 instructors,
+      neither of which narrows anything.
 
-      **The numeric and date columns also sort**, from the same header: clicking one
-      toggles **descending → ascending → descending**. Descending first because that is the
-      end anyone asks for — most sessions, most unfinalized, most recent. One sort at a
-      time; clicking another column starts that column at its own default, and the name
-      column keeps today's ascending-by-name as the list's resting order.
+      ⚠️ **The date presets count back from the newest session in the data**, not from
+      today, and each is labelled with the date it resolves to. The data ends **2025-09-17**
+      while the clock says 2026, so "last 30 days" off the calendar would match nobody and
+      read as a broken filter. `/api/metrics` serves the anchor as `latest_session_date`;
+      until it loads, the panel offers the two date boxes alone rather than a window it
+      cannot honestly name.
 
-      The controls belong in each `Card`'s header slot, hung off the column headers so the
-      filter sits where the value it filters is read, and `sort` and `direction` join
-      `query`, `offset` and the filters in the URL, so a filtered *and* sorted view is
-      linkable and Back steps through it. Changing the sort has to reset the offset, and so
-      does clearing a filter — page 3 of one ordering is not page 3 of another, which the
-      existing "clear filter" button already handles for `query`.
-      Blocked on the query parameters under **API**.
+      `sort` and `direction` are **view** parameters, not filters: they sit in
+      `ClearFilters`' `VIEW_PARAMS` beside `offset`, so an order never lights up "Clear
+      filters" and clearing the filters keeps the order. Changing either the order or any
+      filter drops the offset, since page 3 of one list is not page 3 of another.
 
-      Four things the data says before any of it is built:
+      Two smaller things worth keeping straight:
 
-      - **An instructor center filter means anywhere they have taught**, not their primary
-        center — so one instructor can appear under two centers, deliberately. 395 North
-        Dallas / 234 Southlake / 134 Forney / 130 Tyler. It needs saying because the two
-        readings disagree for a tenth of the roster: **11 of 103 instructors teach at
-        several**, while **no student attends more than one** (0 of 893), which makes the
-        same filter unambiguous on the other list.
-      - ⚠️ **Anchor the last-session range on the latest session in the data, not today.**
-        Same trap as the attendance panel: the data ends 2025-09-17, so a "last 30 days"
-        filter run now matches nobody. For scale, 313 students had no session in the data's
-        final month, 226 in three months, 87 in six.
-      - **A range beats a checkbox on the count columns.** "Has unfinalized reports" would
-        match 70 of 103 instructors and "has topics on plan" 822 of 893 students — neither
-        narrows anything. A minimum is what separates a straggler from a problem.
-      - **Delivery method is not a column and cannot become one yet.** `@Home` / `In-Center`
-        lives on `dwp_reports` and no aggregate carries it, so it needs `build_students.py`
-        to roll it up before it could be shown, let alone filtered.
+      - **`sortable` is opt-in per usage, not per table.** The home page renders the same
+        `StudentsTable` as a fixed top-five preview, where a header that reordered five rows
+        — and wrote `?sort=` into the home page's URL — would mean nothing.
+      - **The line under the page title states the real order.** It used to say "sorted by
+        name" whatever the order was, which sorting turned into a wrong statement about the
+        rows underneath it; `orderPhrase.ts` gives each column its own wording both ways
+        round.
+
+      Two columns carry no control at all, deliberately. **Center has no sort** — a row
+      holds an array of centers, so there is no single value to order by. **Account has
+      neither**: it is an opaque 36-character handle displayed eight characters at a time,
+      so an order over it arranges households by a string nobody reads, and the one real
+      question about it — who else is on this account — is `?account_id=`, which the
+      sibling lookup already serves.
 - [ ] `P2` **Report browser** — a page for reading `dwp_reports` across students. Today a
       report is reachable only one student at a time, through the session history on their
       profile, so questions that span students cannot be asked at all: what came in

@@ -33,11 +33,23 @@ export interface ListParams {
    * *with* `query` rather than replacing it. Empty means no center filter at all.
    */
   centers?: string[]
+  /**
+   * The column to order by, from the API's own allowlist -- an unknown one is a 400, not
+   * an ignored parameter. Omitted means the list's resting order.
+   */
+  sort?: string
+  direction?: 'asc' | 'desc'
+  /**
+   * Column bounds, already in the API's own spelling -- `sessions_min`,
+   * `last_session_from` and their pairs. Passed through rather than translated, which is
+   * what keeps the URL and the request identical; see features/ranges.ts.
+   */
+  ranges?: Record<string, string>
 }
 
 /** `centers` is sent as repeated `center` keys -- see buildQuery in client.ts. */
-function listQuery({ centers, ...rest }: ListParams) {
-  return { ...rest, center: centers }
+function listQuery({ centers, ranges, ...rest }: ListParams) {
+  return { ...rest, ...ranges, center: centers }
 }
 
 export function listStudents(params: ListParams = {}, signal?: AbortSignal) {

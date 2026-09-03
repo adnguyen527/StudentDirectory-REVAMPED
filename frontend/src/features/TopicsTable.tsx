@@ -2,9 +2,12 @@ import { Link } from 'react-router-dom'
 
 import { formatNumber } from '../api/bson'
 import type { TopicListItem } from '../api/types'
+import { NumberRangeFilter } from './NumberRangeFilter'
+import { ColumnHeader } from './SortHeader'
 
 interface TopicsTableProps {
   topics: TopicListItem[]
+  sortable?: boolean
 }
 
 /**
@@ -19,20 +22,82 @@ interface TopicsTableProps {
  * Every figure is all-time: ingestion/build_topics.py batch-builds these and they carry
  * no period.
  */
-export function TopicsTable({ topics }: TopicsTableProps) {
+export function TopicsTable({ topics, sortable }: TopicsTableProps) {
   return (
     <div className="table-scroll">
       <table className="table">
         <thead>
+          {/* Median sessions is the one column that is null rather than 0 on rows
+              with no value -- 109 of 771 topics. The API keeps those at the bottom
+              whichever way it is sorted; see Topic._page. */}
           <tr>
-            <th>Topic</th>
-            <th className="numeric">Sessions</th>
-            <th className="numeric">Students</th>
-            <th className="numeric">Finished</th>
-            <th className="numeric">On plan</th>
-            <th className="numeric">Removed</th>
-            <th className="numeric">Median sessions</th>
-            <th className="numeric">Reassigned</th>
+            <ColumnHeader sortable={sortable} column="name" first="asc">
+              Topic
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="sessions"
+              className="numeric"
+              filter={<NumberRangeFilter column="sessions" label="sessions" />}
+            >
+              Sessions
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="students"
+              className="numeric"
+              filter={<NumberRangeFilter column="students" label="students" />}
+            >
+              Students
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="finished"
+              className="numeric"
+              filter={<NumberRangeFilter column="finished" label="finished" />}
+            >
+              Finished
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="on_plan"
+              className="numeric"
+              filter={<NumberRangeFilter column="on_plan" label="on plan" />}
+            >
+              On plan
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="removed"
+              className="numeric"
+              filter={<NumberRangeFilter column="removed" label="removed" />}
+            >
+              Removed
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="median"
+              className="numeric"
+              filter={
+                <NumberRangeFilter
+                  column="median"
+                  label="median sessions"
+                  // 109 of 771 topics have no median at all, and no range can match a
+                  // null -- so the filter quietly drops them and has to say so.
+                  note="Topics nobody has finished have no median, so any range here leaves them out."
+                />
+              }
+            >
+              Median sessions
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="reassigned"
+              className="numeric"
+              filter={<NumberRangeFilter column="reassigned" label="reassigned" />}
+            >
+              Reassigned
+            </ColumnHeader>
           </tr>
         </thead>
         <tbody>

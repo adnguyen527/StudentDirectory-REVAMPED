@@ -51,6 +51,173 @@ function atCenters<T extends { centers: { name: string }[] }>(rows: T[], url: UR
   return rows.filter((row) => row.centers.some((c) => wanted.includes(c.name)))
 }
 
+/**
+ * routes/sorting.py and models/sorting.py, reimplemented here for the same reason the
+ * search rules are: a fake that sorts more forgivingly than the API lets a header pass a
+ * test it would fail in the browser.
+ *
+ * Each entry maps the URL's column name to the field it orders by and the direction that
+ * column reads first -- names A-Z, counts and dates largest-first.
+ */
+type SortSpec = Record<string, readonly [field: string, first: 'asc' | 'desc']>
+
+const STUDENT_SORTS: SortSpec = {
+  name: ['student_name', 'asc'],
+  sessions: ['total_sessions', 'desc'],
+  finished: ['total_unique_topics_finished', 'desc'],
+  on_plan: ['total_topics_on_plan', 'desc'],
+  last_session: ['last_session_date', 'desc'],
+}
+
+const INSTRUCTOR_SORTS: SortSpec = {
+  name: ['instructor_name', 'asc'],
+  sessions: ['total_sessions_taught', 'desc'],
+  students: ['unique_students', 'desc'],
+  days: ['total_days_taught', 'desc'],
+  unfinalized: ['unfinalized_sessions', 'desc'],
+  last_session: ['last_session_date', 'desc'],
+}
+
+const TOPIC_SORTS: SortSpec = {
+  name: ['name', 'asc'],
+  sessions: ['sessions', 'desc'],
+  students: ['unique_students', 'desc'],
+  finished: ['students_finished', 'desc'],
+  on_plan: ['students_on_plan', 'desc'],
+  removed: ['students_removed', 'desc'],
+  median: ['median_sessions_to_finish', 'desc'],
+  reassigned: ['total_reassignments', 'desc'],
+}
+
+/** A BSON date compares as its ISO string; everything else compares as itself. */
+function comparable(value: unknown): string | number {
+  if (value !== null && typeof value === 'object' && '$date' in value) {
+    return String((value as { $date: string }).$date)
+  }
+  return value as string | number
+}
+
+function compare(a: string | number, b: string | number) {
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  return String(a).localeCompare(String(b))
+}
+
+/**
+ * Rows in the asked-for order, or null when the column is not one -- which the caller
+ * answers with the 400 routes/sorting.py answers, since there is no correct list to serve
+ * for a column nobody has.
+ *
+ * Two properties are worth more than the ordering itself: the tie-break is appended to
+ * every sort and always ascending, so a paged sort cannot repeat or drop a row; and a
+ * missing value sorts last whichever way the column runs, so an ascending Median does not
+ * open with the topics that have no median at all.
+ */
+function sorted<T>(
+  rows: T[],
+  url: URL,
+  spec: SortSpec,
+  tieBreak: string,
+) {
+  const key = url.searchParams.get('sort')
+  if (!key) return rows
+
+  const column = spec[key]
+  if (!column) return null
+
+  const asked = url.searchParams.get('direction')
+  if (asked !== null && asked !== '' && asked !== 'asc' && asked !== 'desc') return null
+
+  const [field, first] = column
+  const direction = asked === 'asc' || asked === 'desc' ? asked : first
+  const sign = direction === 'asc' ? 1 : -1
+
+  // The row types are interfaces, which carry no index signature -- reading a field by
+  // a name held in a variable needs the cast.
+  const field_of = (row: T) => (row as Record<string, unknown>)[field]
+  const tie_of = (row: T) => (row as Record<string, unknown>)[tieBreak]
+
+  return [...rows].sort((a, b) => {
+    const left = field_of(a)
+    const right = field_of(b)
+    const leftMissing = left === null || left === undefined
+    const rightMissing = right === null || right === undefined
+    if (leftMissing !== rightMissing) return leftMissing ? 1 : -1
+    if (!leftMissing) {
+      const order = compare(comparable(left), comparable(right))
+      if (order !== 0) return order * sign
+    }
+    return compare(comparable(tie_of(a)), comparable(tie_of(b)))
+  })
+}
+
+/**
+ * routes/filtering.py: `?<column>_min=` / `_max` on counts, `_from` / `_to` on dates.
+ *
+ * Both ends inclusive, and a bounded column drops the rows whose value is null -- topics
+ * nobody has finished have no median, and no range matches one. Reimplemented rather than
+ * waved through so the page cannot pass a test the API would fail.
+ */
+type RangeSpec = Record<string, readonly [field: string, kind: 'number' | 'date']>
+
+const STUDENT_RANGES: RangeSpec = {
+  sessions: ['total_sessions', 'number'],
+  finished: ['total_unique_topics_finished', 'number'],
+  on_plan: ['total_topics_on_plan', 'number'],
+  last_session: ['last_session_date', 'date'],
+}
+
+const INSTRUCTOR_RANGES: RangeSpec = {
+  sessions: ['total_sessions_taught', 'number'],
+  unfinalized: ['unfinalized_sessions', 'number'],
+  last_session: ['last_session_date', 'date'],
+}
+
+const TOPIC_RANGES: RangeSpec = {
+  sessions: ['sessions', 'number'],
+  students: ['unique_students', 'number'],
+  finished: ['students_finished', 'number'],
+  on_plan: ['students_on_plan', 'number'],
+  removed: ['students_removed', 'number'],
+  median: ['median_sessions_to_finish', 'number'],
+  reassigned: ['total_reassignments', 'number'],
+}
+
+/** A row's value as something comparable to a bound of the same kind. */
+function bounded(value: unknown, kind: 'number' | 'date') {
+  if (value === null || value === undefined) return null
+  if (kind === 'date') {
+    const iso = comparable(value)
+    return typeof iso === 'string' ? iso.slice(0, 10) : null
+  }
+  return value as number
+}
+
+function withinRanges<T>(rows: T[], url: URL, spec: RangeSpec) {
+  let kept = rows
+  for (const [column, [field, kind]] of Object.entries(spec)) {
+    const [lowKey, highKey] =
+      kind === 'number' ? [`${column}_min`, `${column}_max`] : [`${column}_from`, `${column}_to`]
+    const low = url.searchParams.get(lowKey)
+    const high = url.searchParams.get(highKey)
+    if (!low && !high) continue
+
+    kept = kept.filter((row) => {
+      const value = bounded((row as Record<string, unknown>)[field], kind)
+      // Null satisfies neither end, so a bounded column excludes the rows without a value.
+      if (value === null) return false
+      if (low && value < (kind === 'number' ? Number(low) : low)) return false
+      if (high && value > (kind === 'number' ? Number(high) : high)) return false
+      return true
+    })
+  }
+  return kept
+}
+
+const BAD_SORT = HttpResponse.json(
+  { error: 'sort must be one of: name, sessions' },
+  { status: 400 },
+)
+
 function matching<T>(rows: T[], query: string | null, name: (row: T) => string) {
   if (!query) return rows
   const needle = query.toLowerCase()
@@ -94,8 +261,14 @@ export const handlers = [
 
   http.get('/api/students', ({ request }) => {
     const url = new URL(request.url)
-    const rows = atCenters(matching(STUDENTS, url.searchParams.get('query'), studentName), url)
-    return HttpResponse.json(envelope('students', rows, url))
+    const rows = withinRanges(
+      atCenters(matching(STUDENTS, url.searchParams.get('query'), studentName), url),
+      url,
+      STUDENT_RANGES,
+    )
+    const ordered = sorted(rows, url, STUDENT_SORTS, 'student_key')
+    if (!ordered) return BAD_SORT
+    return HttpResponse.json(envelope('students', ordered, url))
   }),
 
   http.get('/api/students/search', ({ request }) => {
@@ -141,11 +314,14 @@ export const handlers = [
 
   http.get('/api/instructors', ({ request }) => {
     const url = new URL(request.url)
-    const rows = atCenters(
-      matching(INSTRUCTORS, url.searchParams.get('query'), instructorName),
+    const rows = withinRanges(
+      atCenters(matching(INSTRUCTORS, url.searchParams.get('query'), instructorName), url),
       url,
+      INSTRUCTOR_RANGES,
     )
-    return HttpResponse.json(envelope('instructors', rows, url))
+    const ordered = sorted(rows, url, INSTRUCTOR_SORTS, 'instructor_name')
+    if (!ordered) return BAD_SORT
+    return HttpResponse.json(envelope('instructors', ordered, url))
   }),
 
   http.get('/api/instructors/search', ({ request }) => {
@@ -168,8 +344,14 @@ export const handlers = [
 
   http.get('/api/topics', ({ request }) => {
     const url = new URL(request.url)
-    const rows = matchingTopics(TOPICS, url.searchParams.get('query'))
-    return HttpResponse.json(envelope('topics', rows, url))
+    const rows = withinRanges(
+      matchingTopics(TOPICS, url.searchParams.get('query')),
+      url,
+      TOPIC_RANGES,
+    )
+    const ordered = sorted(rows, url, TOPIC_SORTS, 'topic_id')
+    if (!ordered) return BAD_SORT
+    return HttpResponse.json(envelope('topics', ordered, url))
   }),
 
   http.get('/api/topics/search', ({ request }) => {

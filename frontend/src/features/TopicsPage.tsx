@@ -7,8 +7,41 @@ import { useApi } from '../hooks/useApi'
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
+import { ClearFilters } from './ClearFilters'
 import { ListFilter } from './ListFilter'
+import { orderPhrase, type OrderPhrase } from './orderPhrase'
+import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 import { TopicsTable } from './TopicsTable'
+
+// As StudentsPage. The resting order here is most-worked rather than by name, which is
+// why the third click on a header has to be able to get back to it.
+// As StudentsPage -- mirrors models/topic.py's FILTERABLE.
+const FILTER_COLUMNS: RangeColumns = {
+  sessions: 'number',
+  students: 'number',
+  finished: 'number',
+  on_plan: 'number',
+  removed: 'number',
+  median: 'number',
+  reassigned: 'number',
+}
+
+const ORDER: Record<string, OrderPhrase> = {
+  name: { first: 'asc', asc: 'sorted by name', desc: 'sorted by name, Z-A' },
+  sessions: { first: 'desc', desc: 'most worked first', asc: 'least worked first' },
+  students: { first: 'desc', desc: 'most students first', asc: 'fewest students first' },
+  finished: { first: 'desc', desc: 'most finished first', asc: 'fewest finished first' },
+  on_plan: { first: 'desc', desc: 'most on plan first', asc: 'fewest on plan first' },
+  removed: { first: 'desc', desc: 'most removed first', asc: 'fewest removed first' },
+  // Topics nobody has finished have no median at all, and the API keeps them at the
+  // bottom either way -- so neither phrase should suggest they are the extreme.
+  median: {
+    first: 'desc',
+    desc: 'slowest to finish first',
+    asc: 'quickest to finish first',
+  },
+  reassigned: { first: 'desc', desc: 'most reassigned first', asc: 'fewest reassigned first' },
+}
 
 /**
  * The full topic list, 771 of them.
@@ -25,10 +58,17 @@ export function TopicsPage() {
   const [params, setParams] = useSearchParams()
   const query = params.get('query') ?? ''
   const offset = Math.max(0, Number(params.get('offset') ?? 0) || 0)
+  // Passed straight through: the URL's spelling is the API's -- routes/sorting.py.
+  const sort = params.get('sort') ?? undefined
+  const direction = (params.get('direction') as 'asc' | 'desc' | null) ?? undefined
+  // Every column bound currently set, and a stable key for the dependency array.
+  const ranges = rangeParams(params, FILTER_COLUMNS)
+  const rangesKey = rangeKey(ranges)
 
   const { data, loading, error } = useApi<TopicsResponse>(
-    (signal) => listTopics({ limit: PAGE_SIZE, offset, query }, signal),
-    [query, offset],
+    (signal) =>
+      listTopics({ limit: PAGE_SIZE, offset, query, sort, direction, ranges }, signal),
+    [query, offset, sort, direction, rangesKey],
   )
 
   function goToOffset(next: number) {
@@ -46,7 +86,8 @@ export function TopicsPage() {
         <h1>Topics</h1>
         <p>
           {page
-            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, most worked first.`
+            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, ` +
+              `${orderPhrase(ORDER, 'most worked first', sort, direction)}.`
             : 'Most worked first.'}
         </p>
       </div>
@@ -54,7 +95,11 @@ export function TopicsPage() {
       {/* No title: the <h1> above already says Topics. The placeholder says what the
           box matches -- the id is a real handle, and the only thing separating two topics
           that share a name. */}
-      <Card flush lead={<ListFilter placeholder="Search topics by name or id" />}>
+      <Card
+        flush
+        lead={<ListFilter placeholder="Search topics by name or id" />}
+        controls={<ClearFilters />}
+      >
         <AsyncBoundary
           loading={loading}
           error={error}
@@ -63,7 +108,7 @@ export function TopicsPage() {
             query ? `No topics match “${query}”.` : 'No topics in the database yet.'
           }
         >
-          <TopicsTable topics={data?.topics ?? []} />
+          <TopicsTable topics={data?.topics ?? []} sortable />
         </AsyncBoundary>
 
         {page && !error && <Pager page={page} onChange={goToOffset} />}

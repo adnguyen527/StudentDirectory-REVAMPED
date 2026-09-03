@@ -44,6 +44,18 @@ describe('home page', () => {
     expect(await screen.findByRole('heading', { name: /Students · first 8 A–Z/ })).toBeInTheDocument()
   })
 
+  it('leaves its copy of the student table unsortable', async () => {
+    // The same StudentsTable as the list page, but here it is a fixed top-five preview:
+    // a header that reordered five rows -- and wrote ?sort= into the home page's URL --
+    // would be a control that does not mean anything.
+    renderApp('/')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    const sessions = screen.getByRole('columnheader', { name: /sessions/i })
+    expect(within(sessions).queryByRole('button')).not.toBeInTheDocument()
+    expect(sessions).not.toHaveAttribute('aria-sort')
+  })
+
   it('carries its own error on the tiles, where a missing key shows up first', async () => {
     server.use(
       http.get('/api/metrics', () =>

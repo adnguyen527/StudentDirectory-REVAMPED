@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify
 from models import Student, Instructor, DigitalWorkoutPlan, Attendance
+from routes.serialization import serialize
 
 metrics_bp = Blueprint('metrics', __name__, url_prefix='/api')
 
@@ -29,7 +30,12 @@ def get_metrics():
         total_dwp_reports = DigitalWorkoutPlan.count_all()
         total_attendance_records = Attendance.count_all()
 
+        # The anchor for the date filter's presets: "the last 30 days" has to mean the
+        # last 30 days of the data, which ends well before today.
+        latest_session = Student.latest_session_date()
+
         return jsonify({
+            'latest_session_date': serialize(latest_session) if latest_session else None,
             'total_students': total_students,
             'total_instructors': total_instructors,
             'total_dwp_reports': total_dwp_reports,

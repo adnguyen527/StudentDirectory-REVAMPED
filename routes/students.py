@@ -3,7 +3,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from models import Attendance, Student, DigitalWorkoutPlan
-from routes import pagination
+from models.student import FILTERABLE, SORTABLE
+from routes import filtering, pagination, sorting
 from routes.serialization import serialize
 
 students_bp = Blueprint('students', __name__, url_prefix='/api')
@@ -42,6 +43,18 @@ def get_students():
     if error:
         return jsonify({'error': error}), 400
 
+    # A bad sort is a 400 rather than a shrug: unlike an unknown center, there is no
+    # correct list to serve for a column that does not exist.
+    sort, direction, error = sorting.parse(request.args, SORTABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
+    # The column ranges: ?sessions_min=, ?last_session_from=, and their pairs. A bad
+    # number or a backwards range is a 400, in the same voice as a bad limit.
+    ranges, error = filtering.parse(request.args, FILTERABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
     account_id = request.args.get('account_id')
     query = request.args.get('query')
     # Repeatable: the center filter is multi-select, and several names are a union.
@@ -49,11 +62,15 @@ def get_students():
     centers = request.args.getlist('center')
 
     if account_id:
-        students, total = Student.find_by_account(account_id, limit, offset, centers)
+        students, total = Student.find_by_account(
+            account_id, limit, offset, centers, sort, direction, ranges
+        )
     elif query:
-        students, total = Student.search(query, limit, offset, centers)
+        students, total = Student.search(
+            query, limit, offset, centers, sort, direction, ranges
+        )
     else:
-        students, total = Student.find_all(limit, offset, centers)
+        students, total = Student.find_all(limit, offset, centers, sort, direction, ranges)
 
     return jsonify(
         pagination.envelope('students', students, total, limit, offset)

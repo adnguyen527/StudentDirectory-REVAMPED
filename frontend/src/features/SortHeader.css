@@ -1,0 +1,79 @@
+/*
+ * A sortable column heading.
+ *
+ * The button has to look like the heading it replaces rather than like a button -- the
+ * header row is read as labels, and seven bordered controls across the top of a table
+ * would read as a toolbar. So it inherits the th's colour and weight, and earns its
+ * affordance from the arrow and the hover.
+ */
+
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  /* The th sets this; the button is what the text is actually in. */
+  white-space: nowrap;
+}
+
+.sort-button:hover {
+  color: var(--text);
+}
+
+.sort-button:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* The sorted column, and only it, is stated in the header's own colour. */
+.sort-button-on {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Unsorted columns keep their arrows nearly invisible: eight equally-weighted arrows
+   across a header row is noise, and the pair is only there to say the column can be
+   sorted at all. The sorted one, and whichever is hovered, is fully drawn. */
+.sort-arrow {
+  flex: none;
+  opacity: 0.25;
+  transition: opacity 120ms ease;
+}
+
+.sort-button:hover .sort-arrow,
+.sort-button:focus-visible .sort-arrow,
+.sort-button-on .sort-arrow {
+  opacity: 1;
+}
+
+/* A right-aligned column has to stay right-aligned: the button is inline-flex, so
+   without this the label sits left inside a right-aligned cell. */
+.table th.numeric .sort-button {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+/* The header cell's contents: the sort control, and the filter beside it. */
+.column-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.table th.numeric .column-head {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The sort button already fills a numeric cell; inside .column-head the filter needs the
+   room, so the button takes only its content and the flex row does the aligning. */
+.table th.numeric .column-head .sort-button {
+  width: auto;
+}

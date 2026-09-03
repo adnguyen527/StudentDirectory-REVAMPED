@@ -227,6 +227,13 @@ export interface InstructorDetailResponse {
 
 /** routes/metrics.py -- all-time counts across the collections. */
 export interface Metrics {
+  /**
+   * The newest session anywhere in the data, which is what the date filter's presets
+   * count back from -- "the last 30 days" has to mean the last 30 days of the data. The
+   * imported data ends well before today, so a window off the calendar matches nobody.
+   * Null on an empty database.
+   */
+  latest_session_date: ExtDate | null
   total_students: number
   total_instructors: number
   total_dwp_reports: number

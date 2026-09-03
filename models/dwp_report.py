@@ -37,7 +37,7 @@ class DigitalWorkoutPlan:
     def find_by_account(account_id):
         """Sessions for every student on a household account."""
         return list(DigitalWorkoutPlan._collection()
-                    .find({'account_id': account_id}, PRIVATE_FIELDS)
+                    .find({'account_id': account_id}, dict(PRIVATE_FIELDS))
                     .sort('date', -1))
 
     @staticmethod

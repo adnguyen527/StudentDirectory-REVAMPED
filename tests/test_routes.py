@@ -17,6 +17,19 @@ def instructor_names(payload):
     return sorted(i['instructor_name'] for i in payload['instructors'])
 
 
+def ordered_students(payload):
+    """Names in the order served. Unlike names(), which sorts and so cannot see one."""
+    return [s['student_name'] for s in payload['students']]
+
+
+def ordered_instructors(payload):
+    return [i['instructor_name'] for i in payload['instructors']]
+
+
+def ordered_topics(payload):
+    return [t['topic_id'] for t in payload['topics']]
+
+
 class TestHealth:
 
     def test_health_is_ok(self, client):
@@ -142,6 +155,222 @@ class TestCenterFilter:
         ).get_json()
         assert instructor_names(body) == ['Dana Reyes', 'Marcus Reyes', 'Sam Ortiz']
         assert body['page']['total'] == 3
+
+
+class TestSortStudents:
+    """?sort= and ?direction= on the student list.
+
+    The fixture is built for this: Ava and Chloe both have one session, so every sort by
+    a count has a tie in it, which is where a paged sort goes wrong if the order is not
+    total. Ava's student_key sorts before Chloe's, so the tie-break is visible.
+    """
+
+    def test_sorts_by_a_count_largest_first(self, client):
+        response = client.get('/api/students?sort=sessions')
+        assert response.status_code == 200
+        assert ordered_students(response.get_json()) == [
+            'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
+
+    def test_reverses_on_request(self, client):
+        response = client.get('/api/students?sort=sessions&direction=asc')
+        # The tied pair keeps its tie-break order; only the sorted column flips.
+        assert ordered_students(response.get_json()) == [
+            'Ava Nguyen', 'Chloe Tan', 'Anthony Nguyen'
+        ]
+
+    def test_a_name_sorts_a_to_z_first_though_a_count_sorts_largest_first(self, client):
+        # The default direction is a property of the column, not of the endpoint: "first"
+        # means A for a name and most for a count.
+        assert ordered_students(client.get('/api/students?sort=name').get_json()) == [
+            'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
+        assert ordered_students(client.get('/api/students?sort=name&direction=desc')
+                                .get_json()) == [
+            'Chloe Tan', 'Ava Nguyen', 'Anthony Nguyen'
+        ]
+
+    def test_sorts_by_date(self, client):
+        assert ordered_students(client.get('/api/students?sort=last_session').get_json()) == [
+            'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
+
+    def test_pages_a_tied_sort_without_repeating_or_dropping_a_row(self, client):
+        # The reason every order ends in the unique key. Two students tie on sessions, and
+        # an unstable tie can serve one of them on both pages and the other on neither.
+        seen = []
+        for offset in range(3):
+            page = client.get(
+                f'/api/students?sort=sessions&direction=asc&limit=1&offset={offset}'
+            ).get_json()
+            seen += ordered_students(page)
+        assert seen == ['Ava Nguyen', 'Chloe Tan', 'Anthony Nguyen']
+        assert len(set(seen)) == 3
+
+    def test_sorts_within_a_filter_rather_than_instead_of_it(self, client):
+        response = client.get('/api/students?center=Westside&sort=sessions&direction=asc')
+        payload = response.get_json()
+        assert payload['page']['total'] == 2
+        assert ordered_students(payload) == ['Ava Nguyen', 'Anthony Nguyen']
+
+    def test_sorts_a_search_result(self, client):
+        response = client.get('/api/students?query=Nguyen&sort=sessions&direction=asc')
+        assert ordered_students(response.get_json()) == ['Ava Nguyen', 'Anthony Nguyen']
+
+    def test_sorts_one_household(self, client):
+        response = client.get(
+            f'/api/students?account_id={ACCOUNT_NGUYEN}&sort=sessions&direction=asc'
+        )
+        assert ordered_students(response.get_json()) == ['Ava Nguyen', 'Anthony Nguyen']
+
+    def test_the_account_column_does_not_sort(self, client):
+        # Shown, but not orderable: an account id is an opaque 36-character handle
+        # displayed eight characters at a time, so sorting by it arranges households by a
+        # string nobody reads. The question it does answer is ?account_id=.
+        response = client.get('/api/students?sort=account')
+        assert response.status_code == 400
+
+    def test_refuses_a_column_that_does_not_exist(self, client):
+        # Deliberately unlike an unknown center, which correctly returns an empty page:
+        # there is no correct list to serve for a column nobody has.
+        response = client.get('/api/students?sort=bogus')
+        assert response.status_code == 400
+        assert 'sessions' in response.get_json()['error']
+
+    def test_refuses_a_direction_that_is_not_one(self, client):
+        response = client.get('/api/students?sort=sessions&direction=sideways')
+        assert response.status_code == 400
+
+    def test_ignores_a_direction_with_nothing_to_direct(self, client):
+        # ?direction= alone sorts nothing, which is unambiguous rather than wrong.
+        response = client.get('/api/students?direction=desc')
+        assert response.status_code == 200
+        assert ordered_students(response.get_json()) == [
+            'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
+
+    def test_blank_values_are_the_default_order(self, client):
+        # A truncated URL, as `?center=` and `?query=` already handle.
+        response = client.get('/api/students?sort=&direction=')
+        assert response.status_code == 200
+        assert ordered_students(response.get_json()) == [
+            'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
+
+
+class TestRangeFilters:
+    """The `?<column>_min=` family on the three list routes.
+
+    Both ends are inclusive, several columns narrow together, and they narrow *with* the
+    name and center filters rather than replacing them.
+    """
+
+    def test_a_minimum_keeps_the_row_that_equals_it(self, client):
+        # "5 or more" is what a person means by a minimum of 5, so the bound is inclusive.
+        # Anthony has 2 sessions; Ava and Chloe have 1.
+        assert names(client.get('/api/students?sessions_min=2').get_json()) == [
+            'Anthony Nguyen'
+        ]
+        assert names(client.get('/api/students?sessions_max=1').get_json()) == [
+            'Ava Nguyen', 'Chloe Tan'
+        ]
+
+    def test_both_ends_at_once(self, client):
+        payload = client.get('/api/students?sessions_min=1&sessions_max=1').get_json()
+        assert names(payload) == ['Ava Nguyen', 'Chloe Tan']
+        assert payload['page']['total'] == 2
+
+    def test_two_columns_narrow_together(self, client):
+        # Anthony is the only student with 2 sessions, and he has 2 topics finished.
+        assert names(
+            client.get('/api/students?sessions_min=2&finished_min=2').get_json()
+        ) == ['Anthony Nguyen']
+        assert names(
+            client.get('/api/students?sessions_min=2&finished_max=1').get_json()
+        ) == []
+
+    def test_a_date_range_includes_both_days(self, client):
+        # Anthony 3/14, Ava 3/10, Chloe 2/1 -- and the dates are stored at midnight, so
+        # an inclusive end has to cover the day it names rather than stopping before it.
+        assert names(
+            client.get('/api/students?last_session_from=2026-03-10').get_json()
+        ) == ['Anthony Nguyen', 'Ava Nguyen']
+        assert names(
+            client.get('/api/students?last_session_to=2026-03-10').get_json()
+        ) == ['Ava Nguyen', 'Chloe Tan']
+        assert names(
+            client.get(
+                '/api/students?last_session_from=2026-03-10&last_session_to=2026-03-14'
+            ).get_json()
+        ) == ['Anthony Nguyen', 'Ava Nguyen']
+
+    def test_ranges_narrow_with_the_other_filters_rather_than_replacing_them(self, client):
+        payload = client.get(
+            '/api/students?query=Nguyen&center=Westside&sessions_min=2'
+        ).get_json()
+        assert names(payload) == ['Anthony Nguyen']
+
+    def test_ranges_survive_a_sort(self, client):
+        payload = client.get(
+            '/api/students?sessions_max=1&sort=name&direction=desc'
+        ).get_json()
+        assert ordered_students(payload) == ['Chloe Tan', 'Ava Nguyen']
+
+    def test_a_blank_bound_is_no_filter(self, client):
+        # A truncated URL, as `?center=` and `?sort=` already handle.
+        payload = client.get('/api/students?sessions_min=&last_session_from=').get_json()
+        assert payload['page']['total'] == 3
+
+    def test_refuses_a_bound_that_is_not_a_number(self, client):
+        response = client.get('/api/students?sessions_min=lots')
+        assert response.status_code == 400
+        assert 'sessions_min' in response.get_json()['error']
+
+    def test_refuses_a_date_that_is_not_one(self, client):
+        response = client.get('/api/students?last_session_from=last%20June')
+        assert response.status_code == 400
+        assert 'YYYY-MM-DD' in response.get_json()['error']
+
+    def test_refuses_a_range_that_runs_backwards(self, client):
+        # An empty page would also be defensible -- nothing is between 10 and 5 -- but
+        # every way of producing that pair is a mistake.
+        response = client.get('/api/students?sessions_min=10&sessions_max=5')
+        assert response.status_code == 400
+        assert 'must not be greater than' in response.get_json()['error']
+
+    def test_ignores_a_column_it_does_not_filter(self, client):
+        # Unlike ?sort=bogus: a parameter nobody declared is not a wrong answer, it is a
+        # parameter this route does not read -- and pages_min is a real field on the
+        # document that deliberately has no filter.
+        assert client.get('/api/students?pages_min=500').get_json()['page']['total'] == 3
+
+    def test_filters_a_household(self, client):
+        payload = client.get(
+            f'/api/students?account_id={ACCOUNT_NGUYEN}&sessions_min=2'
+        ).get_json()
+        assert names(payload) == ['Anthony Nguyen']
+
+    def test_filters_instructors_by_their_own_columns(self, client):
+        assert instructor_names(
+            client.get('/api/instructors?sessions_min=3').get_json()
+        ) == ['Dana Reyes']
+
+    def test_instructors_do_not_filter_by_a_derived_count(self, client):
+        # Students and Days sort but do not filter: they are $size of arrays, so a range
+        # on them would have to size every document in the collection to match one.
+        assert client.get('/api/instructors?students_min=2').get_json()['page']['total'] == 3
+
+    def test_filters_topics_by_their_own_columns(self, client):
+        # Fractions has 3 sessions and Decimals 2; the other two have 1 each.
+        payload = client.get('/api/topics?sessions_min=2&sessions_max=4').get_json()
+        assert ordered_topics(payload) == ['T-100', 'T-110']
+
+    def test_a_median_bound_drops_the_topics_that_have_no_median(self, client):
+        # T-115 has never been finished, so its median is null and no range can match it.
+        # Right, but worth pinning: it is why the popover has to say so.
+        payload = client.get('/api/topics?median_min=0').get_json()
+        assert 'T-115' not in ordered_topics(payload)
+        assert payload['page']['total'] == 3
 
 
 class TestCenters:
@@ -428,6 +657,38 @@ class TestListInstructors:
         assert body['page']['total'] == 0
 
 
+class TestSortInstructors:
+
+    def test_sorts_by_a_stored_count(self, client):
+        response = client.get('/api/instructors?sort=sessions')
+        assert ordered_instructors(response.get_json()) == [
+            'Dana Reyes', 'Marcus Reyes', 'Sam Ortiz'
+        ]
+
+    def test_sorts_by_a_count_derived_from_an_array_it_does_not_ship(self, client):
+        # Students and Days are $size of arrays the list projection removes, so sorting
+        # by them moves $addFields ahead of $sort. The count still has to arrive, and the
+        # array still has to not.
+        payload = client.get('/api/instructors?sort=students').get_json()
+        assert ordered_instructors(payload) == ['Dana Reyes', 'Marcus Reyes', 'Sam Ortiz']
+        assert payload['instructors'][0]['unique_students'] == 2
+        assert 'students' not in payload['instructors'][0]
+
+    def test_sorts_by_days_taught_in_both_directions(self, client):
+        assert ordered_instructors(
+            client.get('/api/instructors?sort=days&direction=asc').get_json()
+        ) == ['Marcus Reyes', 'Sam Ortiz', 'Dana Reyes']
+
+    def test_sorts_within_a_center_filter(self, client):
+        payload = client.get(
+            '/api/instructors?center=Westside&sort=sessions&direction=asc'
+        ).get_json()
+        assert ordered_instructors(payload) == ['Marcus Reyes', 'Dana Reyes']
+
+    def test_refuses_a_column_that_does_not_exist(self, client):
+        assert client.get('/api/instructors?sort=bogus').status_code == 400
+
+
 class TestSearchInstructors:
 
     def test_search_returns_matches(self, client):
@@ -556,6 +817,59 @@ class TestListTopics:
         body = client.get('/api/topics', query_string={'query': 'nothing'}).get_json()
         assert body['topics'] == []
         assert body['page']['total'] == 0
+
+
+class TestSortTopics:
+    """?sort= on topics, where one sortable column is null on rows that have no value.
+
+    T-115 has never been finished by anyone, so its median is null -- the same shape as
+    the 109 of 771 topics in the real data.
+    """
+
+    def test_sorts_by_a_count(self, client):
+        assert ordered_topics(client.get('/api/topics?sort=students').get_json()) == [
+            'T-100', 'T-110', 'T-115', 'T-200'
+        ]
+
+    def test_breaks_a_name_tie_on_the_id(self, client):
+        # Two topics are called Decimals, as 90 names are in the real data.
+        assert ordered_topics(client.get('/api/topics?sort=name').get_json()) == [
+            'T-200', 'T-110', 'T-115', 'T-100'
+        ]
+
+    def test_keeps_topics_with_no_median_at_the_bottom_either_way(self, client):
+        # Null sorts below every number in Mongo, so an ascending median would otherwise
+        # open the list with the rows that have nothing to say about it.
+        assert ordered_topics(
+            client.get('/api/topics?sort=median&direction=asc').get_json()
+        ) == ['T-200', 'T-100', 'T-110', 'T-115']
+        assert ordered_topics(
+            client.get('/api/topics?sort=median&direction=desc').get_json()
+        ) == ['T-110', 'T-100', 'T-200', 'T-115']
+
+    def test_the_null_sort_still_hides_the_instructor_roster(self, client):
+        # That path builds its own pipeline, so it has its own chance to leak the array
+        # the list projection exists to remove.
+        payload = client.get('/api/topics?sort=median').get_json()
+        assert 'instructors' not in payload['topics'][0]
+        assert '_missing' not in payload['topics'][0]
+
+    def test_pages_the_null_sort_without_repeating_a_row(self, client):
+        seen = []
+        for offset in range(4):
+            seen += ordered_topics(
+                client.get(f'/api/topics?sort=median&limit=1&offset={offset}').get_json()
+            )
+        assert seen == ['T-110', 'T-100', 'T-200', 'T-115']
+
+    def test_sorts_a_search_result(self, client):
+        payload = client.get(
+            '/api/topics?query=Decimals&sort=sessions&direction=asc'
+        ).get_json()
+        assert ordered_topics(payload) == ['T-115', 'T-110']
+
+    def test_refuses_a_column_that_does_not_exist(self, client):
+        assert client.get('/api/topics?sort=bogus').status_code == 400
 
 
 class TestSearchTopics:
