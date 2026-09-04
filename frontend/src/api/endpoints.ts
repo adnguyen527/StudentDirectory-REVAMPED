@@ -3,11 +3,16 @@
 import { request } from './client'
 import type {
   AttendanceResponse,
+  CentersResponse,
   InstructorDetailResponse,
   InstructorsResponse,
   Metrics,
+  ReportDetailResponse,
+  ReportsResponse,
   StudentDetailResponse,
   StudentsResponse,
+  TopicDetailResponse,
+  TopicsResponse,
 } from './types'
 
 /** routes/pagination.py: DEFAULT_LIMIT. Matched so the pager's arithmetic is the API's. */
@@ -25,14 +30,92 @@ export interface ListParams {
   offset?: number
   /** Substring match on the name, case-insensitive. */
   query?: string
+  /**
+   * Centers to keep, as repeated `?center=` params. Several are a union, and they narrow
+   * *with* `query` rather than replacing it. Empty means no center filter at all.
+   */
+  centers?: string[]
+  /**
+   * The column to order by, from the API's own allowlist -- an unknown one is a 400, not
+   * an ignored parameter. Omitted means the list's resting order.
+   */
+  sort?: string
+  direction?: 'asc' | 'desc'
+  /**
+   * Column bounds, already in the API's own spelling -- `sessions_min`,
+   * `last_session_from` and their pairs. Passed through rather than translated, which is
+   * what keeps the URL and the request identical; see features/ranges.ts.
+   */
+  ranges?: Record<string, string>
+}
+
+/** `centers` is sent as repeated `center` keys -- see buildQuery in client.ts. */
+function listQuery({ centers, ranges, ...rest }: ListParams) {
+  return { ...rest, ...ranges, center: centers }
 }
 
 export function listStudents(params: ListParams = {}, signal?: AbortSignal) {
-  return request<StudentsResponse>('/students', { ...params }, signal)
+  return request<StudentsResponse>('/students', listQuery(params), signal)
 }
 
 export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
-  return request<InstructorsResponse>('/instructors', { ...params }, signal)
+  return request<InstructorsResponse>('/instructors', listQuery(params), signal)
+}
+
+/**
+ * The topic list.
+ *
+ * `query` matches the current name, the names it no longer goes by, and the topic id --
+ * models/topic.py, _search_criteria. There is no dedicated searchTopics(): the page's own
+ * filter bar drives this same `?query=`, and /topics/search exists for a typeahead that
+ * does not exist yet.
+ */
+export function listTopics(params: ListParams = {}, signal?: AbortSignal) {
+  return request<TopicsResponse>('/topics', listQuery(params), signal)
+}
+
+/**
+ * The session-report list.
+ *
+ * `query` matches the student the session was for, not the instructor -- this list is read
+ * student-first. The response withholds student_notes; see ReportListItem.
+ */
+export function listReports(params: ListParams = {}, signal?: AbortSignal) {
+  return request<ReportsResponse>('/reports', listQuery(params), signal)
+}
+
+/**
+ * One report, whole.
+ *
+ * _id is the key -- dwp_reports has no natural one -- so the hex travels in the path. A
+ * malformed id answers 404 rather than 500; see find_by_id in models/dwp_report.py.
+ */
+export function getReport(reportId: string, signal?: AbortSignal) {
+  return request<ReportDetailResponse>(
+    `/reports/${encodeURIComponent(reportId)}`,
+    undefined,
+    signal,
+  )
+}
+
+/** The center names the filter offers. Served rather than hard-coded, so a new center
+ *  appears in the checkboxes without a release. */
+export function listCenters(signal?: AbortSignal) {
+  return request<CentersResponse>('/centers', undefined, signal)
+}
+
+/**
+ * One topic, with the instructors who taught it most.
+ *
+ * The id is the key and is URL-safe as stored ('PK-3121-00'), but it is encoded anyway --
+ * nothing guarantees the source keeps it that way.
+ */
+export function getTopic(topicId: string, signal?: AbortSignal) {
+  return request<TopicDetailResponse>(
+    `/topics/${encodeURIComponent(topicId)}`,
+    undefined,
+    signal,
+  )
 }
 
 /**

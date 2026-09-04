@@ -22,3 +22,10 @@
 .pager-back {
   transform: rotate(180deg);
 }
+
+/* Reserved rather than shown: holds the row's height on a card that is meant not to
+   change size, without offering controls that would do nothing. Not display:none, which
+   is the whole point -- see reserveControls in Pager.tsx. */
+.pager-buttons-held {
+  visibility: hidden;
+}

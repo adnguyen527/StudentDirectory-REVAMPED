@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 from datetime import datetime
 from bson import json_util
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import BulkWriteError
 from mongo_url import uri, db_name
 import openpyxl
@@ -468,6 +468,10 @@ class DataImporter:
         if collection_name == 'dwp_reports':
             collection.create_index([('date', ASCENDING)])
             collection.create_index([('account_id', ASCENDING)])
+            # The list route's resting order, so a page of it is an index scan rather
+            # than a blocking sort over 29,382 documents. _id is in the key because the
+            # order has to be total -- see LIST_SORT in models/dwp_report.py.
+            collection.create_index([('date', DESCENDING), ('_id', ASCENDING)])
 
     def import_all(self, directory='anonymized_data'):
         print(f"\n{'='*60}\nIMPORTING FROM {directory}\n{'='*60}")

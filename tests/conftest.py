@@ -47,6 +47,7 @@ from tests.sample_data import (  # noqa: E402
     DWP_REPORTS,
     INSTRUCTORS,
     STUDENTS,
+    TOPICS,
 )
 
 
@@ -113,6 +114,8 @@ def seeded_db(mongo):
     mongo['students'].insert_many(STUDENTS)
     mongo['instructors'].create_index('instructor_name', unique=True)
     mongo['instructors'].insert_many(INSTRUCTORS)
+    mongo['topics'].create_index('topic_id', unique=True)
+    mongo['topics'].insert_many(TOPICS)
     mongo['dwp_reports'].insert_many(DWP_REPORTS)
     mongo['attendance_reports'].insert_many(ATTENDANCE_REPORTS)
     return mongo

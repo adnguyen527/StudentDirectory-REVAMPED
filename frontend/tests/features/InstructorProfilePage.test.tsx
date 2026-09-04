@@ -87,6 +87,46 @@ describe('instructor profile', () => {
     })
   })
 
+  it('shows pages per session, over finalized sessions rather than all of them', async () => {
+    // ⚠️ Anthony is 12 pages over 6 sessions, one of which was never finalized and so has
+    // no pages to divide. 12 / 5 = 2.4. Dividing by `sessions` would read 2.0 and quietly
+    // penalise the instructor for their own paperwork -- the number this test pins.
+    renderApp(PROFILE)
+
+    const row = within(await card(/Roster/)).getByRole('row', { name: /Anthony Nguyen/ })
+    expect(within(row).getByText('2.4')).toBeInTheDocument()
+    expect(within(row).queryByText('2.0')).not.toBeInTheDocument()
+  })
+
+  it('dashes the rate where there are too few sessions to call it a pace', async () => {
+    // Ava has one session. A rate off a single session is noise, not a pace.
+    renderApp(PROFILE)
+
+    const row = within(await card(/Roster/)).getByRole('row', { name: /Ava Nguyen/ })
+    expect(within(row).getByText('—')).toBeInTheDocument()
+  })
+
+  it('dashes the rate on a roster built before the collection carried the denominator', async () => {
+    // ⚠️ The live state until ingestion/build_instructors.py is re-run: Chloe's entry has
+    // no finalized_sessions at all. 27 over 9 sessions would look like a perfectly good
+    // 3.0, which is exactly the wrong thing to show -- there is nothing to divide by.
+    renderApp(PROFILE)
+
+    const row = within(await card(/Roster/)).getByRole('row', { name: /Chloe Tan/ })
+    expect(within(row).getByText('—')).toBeInTheDocument()
+    expect(within(row).queryByText('3.0')).not.toBeInTheDocument()
+  })
+
+  it('does not spend a roster column on the account id', async () => {
+    // The row already links to the student by key, and account_id is a household handle --
+    // it earns no column next to the figures the roster is read for.
+    renderApp(PROFILE)
+
+    const roster = within(await card(/Roster/))
+    expect(roster.queryByRole('columnheader', { name: 'Account' })).not.toBeInTheDocument()
+    expect(roster.getByRole('columnheader', { name: 'Pages / session' })).toBeInTheDocument()
+  })
+
   it('pages a long roster in the browser', async () => {
     // 304 students is the largest in the real data; the whole roster arrives in one
     // response, so paging it costs no request.
@@ -107,11 +147,16 @@ describe('instructor profile', () => {
     const { user } = renderApp(PROFILE)
 
     const roster = await card(/Roster/)
-    expect(await within(roster).findByText('1–25 of 30')).toBeInTheDocument()
+    expect(await within(roster).findByText('1–10 of 30')).toBeInTheDocument()
 
     await user.click(within(roster).getByRole('button', { name: /next/i }))
 
-    expect(await within(roster).findByText('26–30 of 30')).toBeInTheDocument()
+    expect(await within(roster).findByText('11–20 of 30')).toBeInTheDocument()
+    expect(within(roster).getByRole('button', { name: /next/i })).not.toBeDisabled()
+
+    await user.click(within(roster).getByRole('button', { name: /next/i }))
+
+    expect(await within(roster).findByText('21–30 of 30')).toBeInTheDocument()
     expect(within(roster).getByRole('button', { name: /next/i })).toBeDisabled()
   })
 

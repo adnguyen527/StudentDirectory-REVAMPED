@@ -18,6 +18,11 @@ function tableRows() {
   return within(screen.getByRole('table')).getAllByRole('row').slice(1)
 }
 
+/** The first cell of each row, in the order served -- which is what a sort changes. */
+function firstColumn() {
+  return tableRows().map((row) => within(row).getAllByRole('cell')[0].textContent)
+}
+
 describe('instructors page', () => {
   it('shows the figures an instructor list is read for', async () => {
     renderApp('/instructors')
@@ -63,6 +68,87 @@ describe('instructors page', () => {
     expect(screen.getByText(/1 matching/)).toBeInTheDocument()
   })
 
+  it('filters from its own box, in place of the card title', async () => {
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.type(screen.getByRole('searchbox', { name: /search instructors/i }), 'Marcus')
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?query=Marcus'))
+    await waitFor(() => expect(tableRows()).toHaveLength(1))
+    expect(screen.getByRole('row', { name: new RegExp(MARCUS) })).toBeInTheDocument()
+  })
+
+  it('shows the filter it arrived with in the box', async () => {
+    renderApp('/instructors?query=Marcus')
+
+    await screen.findByRole('row', { name: new RegExp(MARCUS) })
+    expect(screen.getByRole('searchbox', { name: /search instructors/i })).toHaveValue('Marcus')
+  })
+
+  it('filters by center from the dropdown, and says so on the trigger', async () => {
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    // Closed, the trigger has to say the list is unfiltered.
+    const trigger = screen.getByRole('button', { name: /all centers/i })
+    await user.click(trigger)
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?center=Eastside'))
+    expect(screen.getByRole('button', { name: /Eastside/ })).toBeInTheDocument()
+  })
+
+  it('returns an instructor at two centers once when both are ticked', async () => {
+    // Dana works at Westside and Eastside, as 11 of the 103 real instructors work at more
+    // than one. The union is not a partition: she must appear once, not twice.
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Westside' }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe('/instructors?center=Westside&center=Eastside'),
+    )
+    // Both ticked, so the trigger counts rather than naming one.
+    expect(screen.getByRole('button', { name: /2 centers/ })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getAllByRole('row', { name: new RegExp(DANA) })).toHaveLength(1),
+    )
+  })
+
+  it('drops the offset when the center selection changes', async () => {
+    const { user } = renderApp('/instructors?offset=50')
+
+    await user.click(await screen.findByRole('button', { name: /all centers/i }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Eastside' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?center=Eastside'))
+  })
+
+  it('closes the panel on Escape and on a click outside it', async () => {
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    expect(await screen.findByRole('checkbox', { name: 'Eastside' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('checkbox', { name: 'Eastside' })).not.toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByRole('button', { name: /all centers/i }))
+    await screen.findByRole('checkbox', { name: 'Eastside' })
+    await user.click(document.body)
+
+    await waitFor(() =>
+      expect(screen.queryByRole('checkbox', { name: 'Eastside' })).not.toBeInTheDocument(),
+    )
+  })
+
   it('clears the filter and the offset together', async () => {
     const { user } = renderApp('/instructors?query=Marcus&offset=0')
     await screen.findByRole('row', { name: new RegExp(MARCUS) })
@@ -71,6 +157,78 @@ describe('instructors page', () => {
 
     await waitFor(() => expect(currentLocation()).toBe('/instructors'))
     expect(await screen.findByRole('row', { name: new RegExp(DANA) })).toBeInTheDocument()
+  })
+
+  it('offers to clear a center filter, not just a search term', async () => {
+    const { user } = renderApp('/instructors?center=Eastside')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: /clear filter/i }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors'))
+    expect(screen.getByRole('button', { name: /all centers/i })).toBeInTheDocument()
+  })
+
+  it('offers nothing to clear when only the page has moved', async () => {
+    renderApp('/instructors?offset=50')
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /clear filter/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('sorts by a column the API derives rather than stores', async () => {
+    // Students is $size of an array the list response does not carry -- the header
+    // cannot tell, and must not have to.
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: 'Students' }))
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe('/instructors?sort=students&direction=desc'),
+    )
+    await waitFor(() => expect(firstColumn()).toEqual([DANA, MARCUS]))
+  })
+
+  it('sorts and filters at once rather than one replacing the other', async () => {
+    const { user } = renderApp('/instructors?center=Westside')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: 'Unfinalized' }))
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(
+        '/instructors?center=Westside&sort=unfinalized&direction=desc',
+      ),
+    )
+    // Both instructors are at Westside, so the filter holds while the order changes.
+    await waitFor(() => expect(firstColumn()).toEqual([DANA, MARCUS]))
+  })
+
+  it('filters instructors by a count range from the header', async () => {
+    // Dana has 4 sessions, Marcus 1.
+    const { user } = renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    await user.click(screen.getByRole('button', { name: /filter by sessions/i }))
+    await user.type(screen.getByRole('spinbutton', { name: /minimum sessions/i }), '2')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/instructors?sessions_min=2'))
+    await waitFor(() => expect(firstColumn()).toEqual([DANA]))
+  })
+
+  it('has no filter on the columns the API cannot bound', async () => {
+    // Students and Days are counted from arrays at query time, so a range on them would
+    // have to size every document in the collection to match one. They sort; they do not
+    // filter, and the header must not offer what the API will not do.
+    renderApp('/instructors')
+    await screen.findByRole('row', { name: new RegExp(DANA) })
+
+    expect(screen.queryByRole('button', { name: /filter by students/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /filter by days/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /filter by sessions/i })).toBeInTheDocument()
   })
 
   it('opens an instructor by name from the list', async () => {

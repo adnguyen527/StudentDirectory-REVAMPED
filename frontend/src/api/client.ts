@@ -7,7 +7,7 @@
  * session auth lands, this file gains `credentials: 'include'` and nothing else changes.
  */
 
-export type QueryValue = string | number | boolean | null | undefined
+export type QueryValue = string | number | boolean | null | undefined | string[]
 
 /**
  * A non-2xx answer from the API, with the body's own words kept.
@@ -46,6 +46,16 @@ function buildQuery(params?: Record<string, QueryValue>): string {
     // Empty strings are dropped too: `?query=` is not the same request as no query at
     // all, and sending it would filter the list on nothing.
     if (value === null || value === undefined || value === '') continue
+    // A multi-select filter repeats its key -- ?center=A&center=B -- which is what
+    // Flask's request.args.getlist reads. `set` would keep only the last one, so the
+    // array case has to append. An empty array is dropped for the same reason as an
+    // empty string: nothing ticked is not a filter on nothing.
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== '') search.append(key, item)
+      }
+      continue
+    }
     search.set(key, String(value))
   }
   const query = search.toString()

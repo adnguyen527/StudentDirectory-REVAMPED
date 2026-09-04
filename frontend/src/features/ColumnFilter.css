@@ -1,0 +1,121 @@
+/*
+ * The range filters that hang off a column header.
+ *
+ * The trigger is a glyph rather than the pill the center filter uses: seven pills across
+ * a header row would read as a toolbar sitting on top of the table, and the column header
+ * is already carrying a sort control. What the filter is set to is said in the accessible
+ * name and shown by the trigger's own state.
+ */
+
+.column-filter-trigger {
+  padding: 2px;
+  border-color: transparent;
+  background: none;
+  color: var(--text-faint);
+  opacity: 0.35;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.table th:hover .column-filter-trigger,
+.column-filter-trigger:focus-visible {
+  opacity: 1;
+}
+
+/* A set filter stays lit whether or not the column is hovered -- it is the only thing on
+   screen saying these rows are a subset. */
+.column-filter-trigger.filter-trigger-on {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.column-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 190px;
+}
+
+.column-filter-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  /* The header row is nowrap; the panel is its own context and must not inherit it. */
+  white-space: normal;
+}
+
+.column-filter-field input {
+  width: 110px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.column-filter-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.column-filter-note {
+  margin: 0;
+  max-width: 220px;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--text-faint);
+  white-space: normal;
+}
+
+.column-filter-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.column-filter-preset {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.column-filter-preset:hover {
+  background: var(--surface-sunken);
+}
+
+.column-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+
+.button-quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.button-quiet:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+}

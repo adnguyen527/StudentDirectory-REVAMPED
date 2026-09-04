@@ -1,0 +1,75 @@
+/*
+ * A list page's filter box, in the card header where the title used to be.
+ *
+ * Deliberately not the .search classes from GlobalSearch.css: that one is a dropdown
+ * anchored to the top bar with absolutely-positioned results under it, and borrowing its
+ * rules would couple this field to a component it has nothing to do with. The styling
+ * below is the same visual language -- same tokens, same focus ring -- at the smaller
+ * size a card header wants.
+ */
+
+.list-filter {
+  position: relative;
+  flex: 1;
+  max-width: 320px;
+}
+
+.list-filter-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--space-2);
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.list-filter-input {
+  width: 100%;
+  /* Right padding leaves room for the clear button -- see .search-clear. */
+  padding: var(--space-2) 30px var(--space-2) 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.list-filter-input::placeholder {
+  color: var(--text-faint);
+}
+
+.list-filter-input:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* The browser's own clear button collides with the rounded field -- as GlobalSearch. */
+.list-filter-input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* Narrow screens: the field takes the header's full width rather than being crushed
+   against the controls beside it. */
+@media (max-width: 640px) {
+  .list-filter {
+    max-width: none;
+  }
+}
+
+/* The card header's left slot, once it holds more than the search box. The search takes
+   the slack and each filter keeps its own width, so more filters can join the row. */
+.list-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .list-controls {
+    flex-wrap: wrap;
+  }
+}

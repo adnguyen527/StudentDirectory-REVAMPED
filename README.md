@@ -115,7 +115,8 @@ Notes: `session_summary_notes`, `student_notes`, `internal_notes`,
 `notes_from_center_director`, `assessment`.
 
 **Indexes**: `date`, `account_id`, `row_hash` (**unique** — this is what enforces import
-idempotency), `finalized`.
+idempotency), `finalized`, and `(date DESC, _id ASC)` — the compound one is `/api/reports`'
+resting order, and without it a page of it was a collection scan and a blocking sort.
 
 ### `students` — 893 documents
 
@@ -123,7 +124,8 @@ Aggregated per-student profiles built from `dwp_reports`. Each document is a ful
 dashboard view. Rebuilt by `ingestion/build_students.py`.
 
 `student_key`, `account_id`, `student_name`, `total_sessions`, `total_pages_completed`,
-`last_session_date`, `last_assessment`, `centers[]`, `instructors[]`, `topics[]`,
+`last_session_date`, `last_assessment`, `centers[]`, `instructors[]` (each
+`{name, sessions, finalized_sessions, pages_completed}`), `topics[]`,
 `total_unique_topics_mastered`, `total_unique_topics_completed`,
 `total_unique_topics_finished`, `total_topic_reassignments`, `total_topics_on_plan`,
 `total_topics_removed`, `dwp_report_ids[]`, `last_modified`.
@@ -161,7 +163,7 @@ Four things to know before reading it:
   14,833 assignments across 13,598 topics; 1,096 topics were assigned more than once, one
   of them five times.
 - **`state` is the honest answer to "what is this student working on".** It reads the
-  **last** assignment only: `finished`, `on_plan`, or `removed`. 2,117 topics are removed
+  **last** assignment only: `finished`, `on_plan`, or `removed`. 2,115 topics are removed
   against 2,534 still on a plan — so treating every unfinished topic as open would
   overstate by nearly half.
 - **The `total_unique_*` counts mean *ever*, not *currently*.** A topic mastered and then
@@ -205,12 +207,24 @@ Aggregated instructor profiles built from `dwp_reports`. Rebuilt by
 `ingestion/build_instructors.py`.
 
 `instructor_name`, `total_sessions_taught`, `co_taught_sessions`, `unfinalized_sessions`,
-`total_pages_completed`, `total_days_taught`, `days_taught[]`, `last_session_date`,
-`unique_students`, `students[]` (roster keyed by `student_key`), `centers[]`,
-`last_modified`.
+`total_pages_completed`, `days_taught[]`, `last_session_date`, `students[]` (roster keyed
+by `student_key`), `topics[]`, `centers[]`, `last_modified`.
 
 **Index**: `instructor_name` (**unique** - Instructors are identified by name alone, because that is all the source data carries.
 Two distinct people sharing a name would merge into one document.).
+
+**`topics[]` ranks what each instructor taught most** — `{topic_id, name, sessions}`, most
+taught first then alphabetical, for the instructor profile page. It holds the same 16,932
+(instructor, topic) pairs as `topics.instructors[]`, read from the other side — exactly the
+way `students[]` here mirrors `students.instructors[]`. Both sides give each instructor on
+a co-taught session full credit, so they agree pair for pair, and
+`test_instructor_topics_and_topic_instructors_are_the_same_pairs` holds them to it. A
+median instructor has 126 distinct topics; the widest, 504.
+
+The display name comes from `build_topics.canonical_name`, so a topic the source spells two
+ways reads the same here as on the topics page. That couples the builds: rebuild `topics`
+after a source rename without rebuilding `instructors` and the old name lingers here until
+this one runs too.
 
 **Co-taught sessions credit each instructor the full page count** — pages are copied, not
 split. 2,563 of 29,382 sessions have more than one instructor, so summing
@@ -233,6 +247,76 @@ One document per student per **day attended**, built from `dwp_reports` by
 **A day is not a session.** 70 student-days carry more than one DWP row (69 with two, one
 with three), so 29,382 sessions collapse to 29,311 days. Counting rows overstates
 attendance by exactly those 71 extra sessions.
+
+### `topics` — 771 documents
+
+One document per topic across the whole program, built from `dwp_reports` by
+`ingestion/build_topics.py`. Backs the Topics tab.
+
+`topic_id`, `name`, `also_known_as[]`, `sessions`, `times_worked_on`, `times_completed`,
+`times_mastered`, `unique_students`, `students_finished`, `students_mastered`,
+`students_on_plan`, `students_removed`, `students_ever_finished`, `total_reassignments`,
+`median_sessions_to_finish`, `instructors[]`, `first_taught`,
+`last_taught`, `last_modified`.
+
+**Indexes**: `topic_id` (**unique**), `(sessions, topic_id)` — the list's default order,
+compound because 670 of the 771 topics share a session count with another and a partial
+order cannot be paged — and `(name, topic_id)`, the same guarantee for a name ordering,
+kept for the column-sort work.
+
+**It reuses the student builder's history.** `build_topics.py` reads `dwp_reports` and
+calls `build_students.build_topic_history()` per student, then rolls the results up by
+id — so what counts as an *assignment*, and therefore `total_reassignments` and the three
+state counts, has one definition shared with `students.topics[]`. Change
+`DISPLACED_TOPICS_THRESHOLD` and both aggregates move together. The two reconcile exactly:
+50,900 topic entries, 13,598 (student, topic) pairs, 1,235 reassignments.
+
+**`students_mastered` is the mastery share of that finished group**, and the topic page
+shows the pair as a fraction — 58/66 on `PK-3125-00`. Every finished student sits at
+Mastered or Completed (8,551 and 398 of 8,949, no remainder), so
+`students_finished - students_mastered` is exactly the students who completed a topic
+without mastering it. 215 topics show a fraction below 1, 445 read *n/n*, and 111 have
+nobody in that row at all — a zero denominator the page renders as a dash.
+
+**It is counted inside the finished group, not off `status` across everybody.** The two
+agree today — every student at Mastered or Completed is finished — but sourcing the
+numerator differently would make the fraction depend on that holding, and the page divides
+by `students_finished`. Note also that this is students, while `times_mastered` beside it
+is sessions.
+
+**Counts are per (student, topic) pair, not per session.** `students_finished` is how many
+students finished the topic; someone who worked it across nine sessions counts once.
+`state` reads a student's last assignment only, so the three state counts partition
+`unique_students` exactly. `students_ever_finished` asks the other question — ever
+completed or mastered, even if the topic was later handed back — so it can exceed
+`students_finished`. `median_sessions_to_finish` is `null` for a topic nobody has
+finished, which is an answer rather than a missing field.
+
+**`instructors[]` ranks who taught the topic most** — `{name, sessions}`, most sessions
+first, then alphabetical so the order is stable between builds. This is what the topic
+page's "taught most by" list reads. It is a detail-view array: 16,932 roster entries
+across 771 topics, a median of 17 per topic and 82 at the widest, so when `models/topic.py`
+lands it should sit in a `LIST_PROJECTION` exclusion the way `topics[]` and `instructors[]`
+already do on students (`models/student.py:11`).
+
+**Co-taught sessions credit each instructor in full here too.** 5,216 of 50,900 topic
+entries have more than one instructor, so the credits summed across a topic exceed that
+topic's own sessions — 56,728 against 50,900 program-wide. Intended, and the same rule the
+`instructors` collection applies to pages: these are per-instructor figures, not a
+breakdown of the topic's sessions. **There is deliberately no page count on these entries**
+— pages are recorded once per session and a session covers several topics, so charging a
+session's pages to each of its topics would multiply the real number. `build_instructors`
+can credit pages in full because its unit *is* the session; here it is not.
+
+**Three ids carry two names, and only one is a rename.** `PK-3121-00` is the real one:
+"Reducing Fractions using GCF" stops on 2024-10-01 and "Simplifying Fractions using GCF"
+runs from 2024-10-05 to 2025-09-17. The other two are not renames at all — on `PK-3099-00`
+and `PK-3081-00` both names start the same day and run side by side for the topic's whole
+life, splitting near 50/50. A rename map would not fix those, so the name is settled by a
+rule: **most recently used, then most sessions, then alphabetical**, with the names not
+chosen kept in `also_known_as` so a search for the old name still finds the topic.
+Last-used is chosen because it stays correct the next time the source renames something;
+on all three collisions today it happens to agree with most-sessions.
 
 ### `users` and `login_sessions` — staff accounts and their logins
 
@@ -257,16 +341,24 @@ code does not keep.
 
 ## Rebuilding the aggregates
 
-All three builders are pure functions of `dwp_reports` — nothing in `students`,
-`instructors` or `attendance_reports` is authored, so they can be rebuilt from scratch at
-any time.
+All four builders are pure functions of `dwp_reports` — nothing in `students`,
+`instructors`, `attendance_reports` or `topics` is authored, so they can be rebuilt from
+scratch at any time.
 
 ```bash
 python ingestion/import_reports.py      # Excel -> dwp_reports
 python ingestion/build_students.py      # dwp_reports -> students
 python ingestion/build_instructors.py   # dwp_reports -> instructors
 python ingestion/build_attendance.py    # dwp_reports -> attendance_reports
+python ingestion/build_topics.py        # dwp_reports -> topics
 ```
+
+The builders share code but not data. `build_topics.py` imports `build_topic_history` from
+`build_students.py` so the two agree on what an assignment is, and `build_instructors.py`
+imports `canonical_name` from `build_topics.py` so the two agree on what a topic is called.
+None of them reads another aggregate's collection, so **the order of the four builds does
+not matter** — but a source rename does mean rebuilding `topics` *and* `instructors`, since
+both embed the topic name.
 
 Each builder `drop()`s and recreates its target collection, and creates indexes **before**
 inserting so a bad build fails ahead of the write.
@@ -308,8 +400,8 @@ identify the session, with the hash demoted to change-detection.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 470 offline tests -- no network, no credentials (~3s)
-pytest --integration    # + 53 read-only checks against the real cluster
+pytest                  # 549 offline tests -- no network, no credentials (~3s)
+pytest --integration    # + 93 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -334,7 +426,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 115 tests, Vitest + Testing Library (~13s)
+npm test                # 205 tests, Vitest + Testing Library (~13s)
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -375,17 +467,36 @@ proving nothing.
 | POST | `/api/auth/logout` | revokes the session server-side and clears the cookie |
 | GET | `/api/auth/me` | the logged-in user, or `401` — how a browser client knows to show the login page |
 | GET | `/api/health` | liveness |
-| GET | `/api/metrics` | collection counts and averages |
-| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings |
+| GET | `/api/metrics` | collection counts and averages, plus `latest_session_date` — the newest session in the data, which the date filter's presets count back from |
+| GET | `/api/centers` | the center names the list filters offer |
+| GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings, `?center=` (repeatable), `?sessions_min=`/`_max`, `?finished_min=`/`_max`, `?on_plan_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
-| GET | `/api/instructors` | a page of instructors; `?query=` to search by name |
+| GET | `/api/instructors` | a page of instructors; `?query=`, `?center=` (repeatable), `?sessions_min=`/`_max`, `?unfinalized_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
 | GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
+| GET | `/api/topics` | a page of topics, most worked first; `?query=` to search name, former names or id, a `_min`/`_max` pair per count column, `?sort=`+`?direction=` |
+| GET | `/api/topics/search?q=` | search, minimum 2 characters — matches `name`, `also_known_as` and `topic_id` |
+| GET | `/api/topics/<topic_id>` | one topic, with its ranked instructors |
+| GET | `/api/reports` | a page of session reports, newest first; `?query=` matches the student, `?center=` (repeatable), `?date_from=`/`_to`, `?sort=date\|student`+`?direction=`. Withholds `student_notes` |
+| GET | `/api/reports/<report_id>` | one report, whole — **including `student_notes`**, which the list withholds. `_id` is the key; a malformed one is a `404`, not a `500` |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
 `attendance_reports`, so both count **days attended**, not sessions.
+
+### List parameters
+
+Three optional groups, each parsed by its own module and combinable with the others and
+with paging: `routes/pagination.py` (`limit`, `offset`), `routes/sorting.py` (`sort`,
+`direction`) and `routes/filtering.py` (the `_min`/`_max` and `_from`/`_to` pairs). Which
+columns each list accepts is declared per model as `SORTABLE` and `FILTERABLE`, so the
+allowlist and the field names live next to the documents they describe.
+
+**Refused with a `400`:** an unknown `sort` column, a `direction` that is not `asc`/`desc`,
+a bound that is not a number or a date, and a range that runs backwards. **Ignored:** a
+blank value, and a `_min` on a column that is not filterable. The line between the two is
+whether a correct answer exists — "no students at Xyz" is one, `sort=bogus` is not.
 
 ### Session authentication
 
@@ -440,7 +551,7 @@ the TODO.
 
 ### Pagination
 
-All four list routes take `?limit=` and `?offset=` and answer in one envelope:
+All five list routes take `?limit=` and `?offset=` and answer in one envelope:
 
 ```json
 { "students": [ ... ],
@@ -471,6 +582,22 @@ pipeline = [
 ---
 
 ## Known Issues
+
+- **The Topics card on a student profile collapses when its search matches nothing.**
+  The card is built to hold one height whatever the filter — ten rows, padded out with
+  blanks when the page is short, and a pager that keeps its controls' space. A search with
+  no matches takes the other branch entirely: no table, no padding, no pager, just a line
+  of text. Measured on a student with 47 topics, the card goes from **907px to 174px** and
+  the attendance panel beside it in the same `CardRow` moves with it.
+
+  The same branch also mislabels the reason. It reads *"No topics in this state"*, which
+  named the chips back when they were the only filter; a search miss is not a statement
+  about the state, and on `All` it contradicts the chip the reader just clicked.
+
+  Fixing it means rendering the empty table — header, ten filler rows and the pager — and
+  putting the message inside it, rather than swapping the table out for a paragraph. The
+  padding machinery for that already exists in `TopicsCard.tsx`; what it does not have is
+  a filler row that can carry a message.
 
 - **A row edited at the source imports as a new document** rather than replacing the
   original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
@@ -519,7 +646,10 @@ pipeline = [
 - **Unbounded arrays.** `dwp_report_ids` runs to 192 entries per student and `topics` to
   100, `days_taught` to 272 per instructor, and instructor rosters to 304. All grow with
   the dataset, and all are far from MongoDB's 16 MB document limit — accepted, not a
-  pending fix.
+  pending fix. The two sides of the instructor/topic relationship behave differently here:
+  `topics.instructors[]` tops out at 82 and is bounded by staff headcount (103 people), so
+  it cannot grow the way the others do, while `instructors.topics[]` runs to 504 and is
+  bounded by the curriculum (771 topics) instead.
 - **Session times are local wall clock at the point of entry, with no zone attached.**
   The source records "3:58 PM" as whoever filled in the report saw it, and `date`,
   `session_start`, `session_end` are stored naive — which Mongo keeps as UTC, so they read
@@ -546,9 +676,25 @@ Items are listed in priority order within each group.
 - [x] `P2` **Add completed topics to `students`.** Done, as part of `topics[]` — one entry
       per topic with per-status counts, reassignments and current standing. Rebuilt:
       13,598 topic entries, 187 students with a reassigned topic.
-- [ ] `P2` **Add most-taught topics to `instructors`.** Ranked topic counts across the
-      sessions each instructor ran; the collection carries no topic data today. For the
-      instructor profile page.
+- [x] `P2` **Add most-taught topics to `instructors`.** Done, as `topics[]` — ranked
+      `{topic_id, name, sessions}` per instructor. The mirror
+      of `topics.instructors[]`: the same 16,932 pairs from the other side, same co-taught
+      full-credit rule, named by the same `canonical_name`, and reconciled pair for pair in
+      the integration tests. 103 instructors, a median of 126 distinct topics each.
+- [ ] `P2` **Three fields the topic detail page needs**, none of which are in `topics`
+      today. Two are cheap: `mean_sessions_to_finish` and `median_days_to_finish` — the
+      `roll_up()` loop in `ingestion/build_topics.py` already holds each student's
+      `sessions`, `first_seen`, `last_seen` and `last_assignment_started`, so both fall out
+      of what it is already iterating.
+
+      The third is the page figure, and it is the one that adds real work: it needs a
+      second pass over `dwp_reports` to build each student's baseline pages-per-session
+      before any topic can be compared against it. **It reads the session's total
+      `pages_completed`, compared to the student's own baseline — not the topic's share of
+      the pages.** Nobody should later "simplify" it into an attribution; a session carries
+      2.17 topics on average, so a per-topic share does not exist to be computed. See the
+      detail-page item under **Frontend** for the ~1.12 neutral point and the co-occurrence
+      caveat.
 - [ ] `P2` **Switch `_upsert()` to the natural key**, so an edited row updates its document
       instead of landing beside it. Hash demoted to change detection. The write endpoints
       need this.
@@ -598,61 +744,80 @@ Items are listed in priority order within each group.
       directly: instructor totals double-count co-taught pages, so they cannot be summed
       into a center figure. *Open:* a built `centers` collection like the other aggregates,
       or computed per request, which is what would make a date range possible.
-- [ ] `P2` **Per-topic stats endpoint**, backing the Topics tab under **Frontend** — the
-      one thing that page is blocked on. Rolls up `students.topics[]` rather than
-      `dwp_reports.topics[]`: the per-topic history is already computed there, so this is
-      a rollup of 13,598 existing entries into 771 topics, not a re-derivation. Per topic:
-      students who worked it, finished, on plan, removed; median sessions to finish;
-      reassignments. *Open:* a built `topics` collection like the other aggregates, or
-      computed per request — the same question the center metrics above carry, and the same
-      trade, since computed is what would allow a date range.
-      *Also open:* the canonical name. `PK-3121-00` appears as both "Reducing Fractions
-      using GCF" and "Simplifying Fractions using GCF" — one topic renamed at the source,
-      the same shape of problem as the centers rename map below, and it has to resolve to
-      one name before topics can be listed.
-- [ ] `P2` **Filter and sort parameters on the two list routes**, backing the column
-      controls under **Frontend**. `/api/students` and `/api/instructors` accept only
-      `query` (plus `account_id` on students). They need one filter per column — `center`,
-      numeric ranges, a last-session date range — plus `sort` and `direction`, each optional
-      and combinable with the existing paging. `sort` is validated against an allowlist of
-      sortable fields and an unrecognised value is a `400`, not a silent fallback to name
-      order, in the same spirit as `pagination.parse` refusing a bad `limit`.
+- [x] `P2` **Per-topic stats endpoint**, backing the Topics tab under **Frontend**. Done —
+      `models/topic.py` and `routes/topics.py`: the paged list, `/api/topics/search?q=`
+      with the same two-character floor as the students route, and `/api/topics/<topic_id>`
+      for the detail page. Search covers `name`, `also_known_as` and `topic_id`, so
+      `?q=Reducing` finds `PK-3121-00` even though it is now called *Simplifying Fractions
+      using GCF*, and `?q=pk-3121` finds it by the handle staff actually use. The id arm
+      matters because the list shows ids to tell same-named topics apart — a list that
+      displays them but cannot search them would be incoherent.
+      `instructors[]` is excluded from the list projection — 16,932 roster entries would
+      otherwise ride along on every page — and the list comes to 27 KB. The list sorts on `(sessions, topic_id)` over a compound
+      index — most worked first, with the id breaking the constant session ties.
+      The three detail-page stats are still open, under **Data integrity**.
+      Both open questions are settled. **Built, not computed per request**, matching the
+      other aggregates; the date range that computing would have allowed is deferred until
+      something asks for it. **The canonical name is a rule, not a map** — most recently
+      used, then most sessions, then alphabetical, alternates kept in `also_known_as`.
+      Worth correcting the old note here: only `PK-3121-00` is a rename. `PK-3099-00` and
+      `PK-3081-00` run both names concurrently for the topic's whole life, so the centers
+      rename map would not have fixed them. See the `topics` section above.
+- [x] `P2` **Filter and sort parameters on the three list routes.** Done — `sort`/
+      `direction` in `routes/sorting.py`, the range pairs in `routes/filtering.py`, and the
+      per-model `SORTABLE`/`FILTERABLE` declarations that say which columns each accepts.
+      See **List parameters** above for the contract.
 
-      ⚠️ **Every sort must append the collection's unique key, or paging breaks.** This is
-      correctness, not tuning. `total_topics_on_plan` has **8 distinct values across 893
+      ⚠️ **Every sort appends the collection's unique key, because otherwise paging breaks.**
+      Correctness, not tuning. `total_topics_on_plan` has **8 distinct values across 893
       students, 280 of them sharing one**; `last_session_date` ties 155 rows and
       `total_unique_topics_finished` 141. A page boundary landing inside a tie makes
-      `skip`/`limit` repeat and drop rows — the exact bug **Pagination** already claims is
-      fixed, so reintroducing it would make the docs wrong as well as the pages. `LIST_SORT`
-      in `models/student.py` and `models/instructor.py` already does this for names
-      (`student_name` then `student_key`); it becomes a function of the requested column
-      rather than a constant.
+      `skip`/`limit` repeat and drop rows — the exact bug **Pagination** claims is fixed.
+      `models/sorting.py` appends `student_key` / `instructor_name` / `topic_id` to every
+      order, and it stays **ascending** whichever way the column runs, so the stored
+      `(sessions DESC, topic_id ASC)` index still serves topics' resting order.
 
-      Indexes are the separate, smaller problem: one compound `(sort_field, unique_key)` per
-      sortable column, and `(centers.name, …)` for the center filter — neither collection
-      indexes `centers.name` today. Indexing every *filter × sort* combination is neither
-      practical nor needed at 893 and 103 documents, where an unindexed sort is merely
-      slower. An untied one is wrong.
-- [ ] `P2` **A list route for `dwp_reports`**, backing the report browser under
-      **Frontend**. The collection has no route of its own — it is reachable only through
-      `/api/students/<key>`, one student at a time. `/api/reports` in the shared paged
-      envelope, filtered by date range, center, instructor, student and `finalized`.
-      `models/dwp_report.py`'s `PRIVATE_FIELDS` already withholds the set that never leaves
-      the server, so the projection is in place.
+      Two collections needed more than a swapped sort key:
 
-      ⚠️ **Date alone is not a stable sort here**, and newest-first is the obvious default.
-      The 29,382 reports fall on 309 days — a **median of 85 a day and 192 on the busiest**
-      — so nearly every page boundary lands inside a single day's tie, and `skip`/`limit`
-      over it repeats and drops rows. Sort `(date, _id)`; `_id` is the only field on this
-      collection guaranteed unique. Same requirement as the list-route sorting above, just
-      unavoidable rather than opt-in.
+      - **Instructors' Students and Days are `$size` of arrays**, so sorting by them moves
+        `$addFields` ahead of `$sort` and sizes every matched document rather than one
+        page's. Free at 103 documents, but it is why those two columns *sort and do not
+        filter*: a bound on them would have to size the whole collection to match one row.
+      - **Topics' median is null on 109 of 771 rows.** Mongo sorts null lowest, so an
+        ascending Median would have opened with the 109 topics that have no median at all.
+        That column sorts through an aggregation that adds a 0/1 missing flag as the
+        leading key; every other order stays a plain indexed `find`.
 
-      Indexes: `date` and `finalized` already exist, `account_id` covers the student filter.
-      A compound `(date, _id)` matches the default order, and an `instructors` index is
-      what the instructor filter would want — without it that filter scans all 29,382,
-      which is survivable but is the one filter that does not ride an existing index.
-- [ ] `P2` **Decide who sees `student_notes`** (3,594 rows). Fine for instructors,
-      questionable parent-facing. Needed before anything reaches a parent.
+      Indexes remain the separate, smaller problem: no collection indexes `centers.name` or
+      any count column, so a filtered or non-default sort is a collection scan with a
+      blocking sort. At 893 / 103 / 771 documents that is measured in single-digit
+      milliseconds, and an unindexed sort is merely slower where an untied one is wrong.
+      Worth revisiting if a collection grows an order of magnitude.
+- [x] `P2` **A list route for `dwp_reports`** — `GET /api/reports`, in the shared paged
+      envelope, filtered by student name (`?query=`), center and date range. Sorted
+      `(date, _id)` descending by default: the 29,382 reports fall on 309 days, a median of
+      85 a day and 192 on the busiest, so nearly every page boundary lands inside a single
+      day's tie and `skip`/`limit` over `date` alone repeats and drops rows. `_id` is the
+      only field on this collection guaranteed unique. The compound `(date, _id)` index is
+      created by `ingestion/import_reports.py` and exists on the cluster; without it the
+      resting order was a collection scan and a blocking sort.
+
+      Each row carries a derived `student_key` (`util.make_student_key`) so the list can
+      link to a profile — `dwp_reports` is raw source data and stores only `account_id`
+      and `student_name`.
+- [ ] `P3` **The two filters the reports list does not have yet: instructor and
+      `finalized`.** `finalized: false` is 1,068 reports and is the follow-up list the
+      instructor profile can only give as a count; filtering it by instructor is that
+      question answered properly. `finalized` is indexed; `instructors` is not, so that
+      filter scans all 29,382 — survivable, and the one filter that rides no index.
+
+- [x] `P2` **Decided who sees `student_notes`** (3,594 rows, 12.2%): the student's own
+      profile does, so does `/api/reports/<id>`, and the **list** does not. The line is the
+      act rather than the reader — opening one report on purpose is what a profile already
+      allows; paging through 3,594 of them behind a date filter is not. Enforced by two
+      projections in `models/dwp_report.py` whose only difference is this field:
+      `LIST_PROJECTION` drops it, `DETAIL_PROJECTION` keeps it. Still open for anything
+      **parent-facing**, which none of these is.
 - [ ] `P3` **Prompt-driven agent for niche stats.** Hard requirement: it reads only what the
       asking user may see, through a pre-projected, permission-scoped surface — never the
       raw database. Blocked on permissions. Must encode the traps that make it answer
@@ -710,7 +875,24 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       predicted: `/api/students/<key>` serves it in one response. The topics card filters on
       `state` and opens on **On plan**, since `total_unique_*` means *ever*; the session
       history pages 25 at a time **in the browser** over the array already in memory, and
-      rows expand to the notes and that session's topics.
+      rows expand to the notes and that session's topics. The instructors card pages the
+      same way at 10, matching the instructor roster and the topic page's instructor
+      ranking — every one of those lists arrives whole in its detail response, so paging
+      costs no request.
+
+      **The instructors card sorts and filters from its own headers**, using the same
+      `ColumnHeader` and `NumberRangeFilter` as the list pages but backed by local state
+      rather than the URL — `useCardSort` / `useCardRange`. Three tables share this page,
+      so one `?sort=` between them would belong to whichever card was clicked last, and
+      since the card pages in local state a linked URL would restore an order but not the
+      page it was on. It narrows, then orders, then pages, in that order, and the pager
+      counts the filtered rows rather than the whole roster.
+
+      ⚠️ **Pages / session is null, not zero, under five sessions with that instructor.**
+      One function serves the cell, the sort and the filter, so a row cannot show one
+      figure and be ordered by another — and a missing rate sorts to the bottom whichever
+      way the column runs and is matched by no range, exactly as topics' median does. The
+      filter's panel says so.
 - [x] `P1` **Session count panel on the student record.** Date range in the card's header
       controls, showing sessions against days and a per-month breakdown. Defaults to the
       three months ending at that student's **last session, not today** — the route refuses
@@ -746,7 +928,7 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       instructors did, `/students?query=` otherwise. Four rows per group, not five: at five
       the students filled the dropdown and the Instructors heading fell below the fold,
       hiding the thing the grouping exists to show.
-- [ ] `P2` **Months attended, on the student's *Sessions in a period* card.** The card
+- [x] `P2` **Months attended, on the student's *Sessions in a period* card.** The card
       reports sessions and days attended, then a per-month table underneath — so "how many
       months did they actually turn up in" can only be answered by counting rows by eye.
       **Frontend-only:** `by_month` is already in the `/api/students/<key>/attendance`
@@ -771,12 +953,24 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       when reading the table by eye stops being practical. And it extends the distinction
       the card already trades on — sessions, days and months are three granularities of the
       same attendance, coarsest last, so a month with twelve sessions counts once here.
-- [ ] `P2` **Pages per session on the instructor roster.** The roster shows sessions and
-      pages completed as raw totals, which makes its rows incomparable: a student seen 24
-      times will out-total one seen twice no matter how either session went. The rate is
-      what says how a session with that student actually goes, and both halves are already
-      on the roster entry — `sessions` and `pages_completed` — so this is **frontend-only**,
-      the cheapest item in this section.
+
+      Done, and it lands in **two places, scoped differently** — deliberately, so the same
+      words showing different numbers is not a bug:
+
+      - **The Sessions tile**, all-time: `149 Sessions · 12 months · last Jul 30, 2025`.
+        Counted from distinct months across `dwp_reports`, not from `by_month`, because the
+        tile row is all-time while `by_month` only covers the panel's range. The
+        last-session date stays on the line — it appears nowhere else on the page.
+      - **The attendance card**, period-scoped, beside sessions and days.
+
+      Verified against real data: for one student the tile reads 12 months while the panel,
+      on its default Apr–Jul range, reads 3. Widened to Sep 2024 – Sep 2025 the panel reads
+      **136 sessions, 136 days, 11 months** over a range covering **13** — August and
+      September 2025 are absent from `by_month`, so they do not count.
+- [x] `P2` **Pages per session on the instructor roster.** Done — the roster showed sessions
+      and pages completed as raw totals, which made its rows incomparable: a student seen 24
+      times out-totals one seen twice no matter how either session went. The Account column
+      came out to make room; the row already links to the student by `student_key`.
 
       It discriminates: across 8,475 roster entries the median is **4.6 pages a session**,
       the tenth percentile 1.0 and the ninetieth 10.0, with a maximum of 34. And it matters
@@ -784,11 +978,21 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       where "pages completed" *is* the per-session figure but reads as a total next to a
       24-session row.
 
-      Two things to get right: **580 entries genuinely sit at 0.0** and must render as zero,
-      not as a dash for missing; and while no roster entry currently has `sessions: 0`,
-      guard the division anyway, the way the profile's sessions-per-day tile already does.
-      The same column belongs on the student profile's Instructors card, which carries the
-      identical two totals and the identical problem.
+      ⚠️ **This item used to claim it was frontend-only, off `sessions` and
+      `pages_completed`. That was wrong, and the wrong number is a plausible-looking one.**
+      The denominator is **finalized** sessions: an unfinalized report carries no page count
+      at all, so dividing by every session makes an instructor whose paperwork is behind
+      read as one whose student did nothing. `InstructorRosterEntry` had no such field, so
+      it took `finalized_sessions` added to the roster entry in
+      `ingestion/build_instructors.py` and a rebuild of the `instructors` collection —
+      not a frontend change. Martha Cruz with Sandra Roberts reads **7.5** (157 pages over
+      21 finalized), where dividing by all 24 would have shown 6.5.
+
+      The rule lives in `features/profile/pagesPerSession.ts` so the roster and the student
+      profile's Instructors card compute it once. They show the same pair from opposite
+      sides and must agree; an integration check in `tests/test_live_database.py` holds the
+      two collections to identical figures for every shared pair. A roster document built
+      before the rebuild has no denominator and dashes rather than guessing.
 - [ ] `P2` **Average days worked per week, on the instructor profile.** A card beside
       *Days taught by month*, answering how often someone actually works rather than how
       much they have worked in total. **Frontend-only** — `days_taught[]` is already on the
@@ -816,15 +1020,31 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       — show the raw days instead. And group by **ISO week in UTC**, for the same reason the
       months grouping does: these are naive wall-clock dates, so a local read can push a
       Sunday or Monday across a week boundary.
-- [ ] `P2` **Topics tab in the sidebar** — per-topic stats across the whole program, which
-      is the one question shape the app cannot answer today. 771 distinct topics over
-      13,598 (student, topic) pairs: for each, how many students worked it, how many
-      finished, how many are on plan or removed, median sessions to finish, and how often
-      it was reassigned. Sortable, so "most reassigned" and "lowest finish rate" are
-      reachable. *Half of Odd Numbers* is the shape — 176 students, 117 finished, 40 on
-      plan, 23 removed, median 4 sessions, 18 reassignments. **Not frontend-only**, unlike
-      the student profile: blocked on the topics endpoint under **API**. The per-student
-      view of the same data is the profile's topics card.
+- [x] `P2` **Topics tab in the sidebar.** Done — `TopicsPage` / `TopicsTable`, 771 topics
+      paged off the shared envelope with the filter and offset in the URL. Per row: students
+      who worked it, finished, on plan, removed, median sessions to finish and
+      reassignments, every one of them sortable and filterable from its header.
+
+      **The list carries its own search bar, topics only** — not the global dropdown, which
+      answers students and instructors and would bury 771 topics in it. It debounces into
+      `?query=` on the list route, which matches `name`, `also_known_as` and `topic_id`,
+      so an old name or a bare `pk-3121` both land.
+
+      **Counts, not rates**, because of the type warning below: a finish-rate column would
+      rank `GF` and `WCH` items to the bottom and read as "hardest topics". The visible id
+      prefix is what makes the difference legible instead.
+
+      ⚠️ **Show the `topic_id`, or the rows read as duplicates.** A name is not unique:
+      90 names are carried by more than one topic and four topics are called *Patterns –
+      Number Patterns*, so a name-ordered list shows four identical-looking rows. The id is
+      the only thing that tells them apart. It is also the sort's tiebreak: the list
+      leads with the most worked topics, and 670 of the 771 share a session count with
+      another, so sessions alone is not a total order and paging over a partial one
+      repeats and drops rows.
+
+      The same applies to search results: `?q=Reducing Fractions using GCF` legitimately
+      returns two topics, `PK-3233-00`, which is called that, and `PK-3121-00`, which used
+      to be.
 
       ⚠️ **Group or filter by topic type, or the finish-rate column lies.** The id prefix
       predicts it almost entirely: `PK` — the curriculum, 663 topics and 13,268 pairs —
@@ -832,80 +1052,166 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       topic 0.0% across 20 students. Those are a different kind of item and do not carry a
       completion status the same way, so a flat ranking by finish rate fills the bottom
       with them and reads as "hardest topics".
-- [ ] `P2` **Filter and sort each list by its own columns.** Both lists take only a name
-      substring today and are stuck in name order, so a column can be read but not asked
-      about — there is no way to say "Southlake only", "fewer than 5 sessions", "nothing
-      since June", or "most sessions first". Every column gets a filter, and its **type
-      follows the column**, so the whole thing is one pattern applied seven times rather
-      than seven separate features:
+- [ ] `P3` **Reassess the topics list's columns and layout.** Nine columns now, and the
+      table gives them near-equal widths rather than spending them where they are read. At
+      a 1440px window: `130 / 123 / 125 / 122 / 120 / 128 / 169 / 139 / 123` across 1178px,
+      so **the Topic column gets the same space as a number** and names wrap to **5–8
+      lines**. At 1744px it is fine — Topic 371px, 3–4 lines — so this only bites below
+      roughly 1500.
 
-      | column | students | instructors | filter |
-      |---|---|---|---|
-      | name | ✓ | ✓ | text — **exists** as `?query=` |
-      | account | ✓ | — | exact — **exists** as `?account_id=` |
-      | center | ✓ | ✓ | select |
-      | sessions | ✓ | ✓ | numeric range |
-      | topics finished / students taught | ✓ | ✓ | numeric range |
-      | on plan / days taught | ✓ | ✓ | numeric range |
-      | unfinalized | — | ✓ | numeric range |
-      | last session | ✓ | ✓ | date range |
+      The Answer key column is a contributor, not the cause. Hiding it and re-measuring at
+      the same width gives the Topic column **190px and a 6-line worst case**, against
+      **130px and 8 lines** with it: it takes 123px out of the one column that needed them,
+      but the cramping was already there.
 
-      **The numeric and date columns also sort**, from the same header: clicking one
-      toggles **descending → ascending → descending**. Descending first because that is the
-      end anyone asks for — most sessions, most unfinalized, most recent. One sort at a
-      time; clicking another column starts that column at its own default, and the name
-      column keeps today's ascending-by-name as the list's resting order.
+      ⚠️ **One column is strictly derivable.** Across the live collection, **all 771 topics**
+      satisfy `unique_students == students_finished + students_on_plan + students_removed`,
+      with no exceptions — the three states are mutually exclusive and exhaustive, as the
+      detail page already says. Students, Finished, On plan and Removed are therefore four
+      columns carrying three columns' worth of information.
 
-      The controls belong in each `Card`'s header slot, hung off the column headers so the
-      filter sits where the value it filters is read, and `sort` and `direction` join
-      `query`, `offset` and the filters in the URL, so a filtered *and* sorted view is
-      linkable and Back steps through it. Changing the sort has to reset the offset, and so
-      does clearing a filter — page 3 of one ordering is not page 3 of another, which the
-      existing "clear filter" button already handles for `query`.
-      Blocked on the query parameters under **API**.
+      Two directions, neither decided. Declare a width for the Topic column so auto-layout
+      stops treating it as numeric — `TopicsCard` already does exactly this via `.topic-col`,
+      for the same reason. Or drop a column, for which the identity above names the
+      candidates.
 
-      Four things the data says before any of it is built:
+      ⚠️ **A cut has to answer the reasoning already in `TopicsTable.tsx`**, not just free up
+      pixels: counts rather than rates (a finish-rate column ranks `GF` and `WCH` items to
+      the bottom and reads as "hardest topics"), and the visible `topic_id` without which 90
+      shared names make rows look like duplicates. Both are load-bearing.
+- [ ] `P2` **Topic detail page** — *built, on the fields that exist*. `TopicProfilePage`
+      is reachable from any list row and shows the header with `also_known_as`, the state
+      breakdown, the status ladder and the ranked instructors, each linking onward. What
+      remains is the first section below: the two time figures and the page comparison are
+      not in `topics` yet, and the page carries a placeholder card naming them rather than
+      faking a number. Finish this item by adding those three fields (see **Data
+      integrity**) and filling that card in.
 
-      - **An instructor center filter means anywhere they have taught**, not their primary
-        center — so one instructor can appear under two centers, deliberately. 395 North
-        Dallas / 234 Southlake / 134 Forney / 130 Tyler. It needs saying because the two
-        readings disagree for a tenth of the roster: **11 of 103 instructors teach at
-        several**, while **no student attends more than one** (0 of 893), which makes the
-        same filter unambiguous on the other list.
-      - ⚠️ **Anchor the last-session range on the latest session in the data, not today.**
-        Same trap as the attendance panel: the data ends 2025-09-17, so a "last 30 days"
-        filter run now matches nobody. For scale, 313 students had no session in the data's
-        final month, 226 in three months, 87 in six.
-      - **A range beats a checkbox on the count columns.** "Has unfinalized reports" would
-        match 70 of 103 instructors and "has topics on plan" 822 of 893 students — neither
-        narrows anything. A minimum is what separates a straggler from a problem.
-      - **Delivery method is not a column and cannot become one yet.** `@Home` / `In-Center`
-        lives on `dwp_reports` and no aggregate carries it, so it needs `build_students.py`
-        to roll it up before it could be shown, let alone filtered.
-- [ ] `P2` **Report browser** — a page for reading `dwp_reports` across students. Today a
-      report is reachable only one student at a time, through the session history on their
-      profile, so questions that span students cannot be asked at all: what came in
-      yesterday, everything Dana Reyes taught last week, every report still unfinalized.
-      29,382 reports over 309 days. Blocked on the list route under **API**.
+      Three things beyond what the list row already shows:
 
-      Two views, and they earn their place differently:
+      **How long it takes.** Sessions to finish (the median is already stored; the mean is
+      worth showing beside it) and elapsed days to finish, which is not the same question —
+      a topic can take four sessions spread over two months. Computable now: 9,189 finished
+      (student, topic) pairs, every one with usable dates. Median 13 days from first sight,
+      9 from the finishing assignment's start. **Lead with the median on both** — the mean
+      is 26.7 days against a median of 13, with a 393-day tail and 7.7% finishing the same
+      day, so a mean on its own describes almost nobody.
 
-      - **The list**, filtered on the same column pattern as the other two lists: date
-        range, center, instructor, student, and finalized. `finalized: false` is the one
-        that pays for the page on its own — **1,068 unfinalized reports**, and it is the
-        *follow-up list* the instructor profile still cannot give, since
-        `/api/instructors/<name>` serves only a count. Filtering that list by instructor is
-        the same question answered properly.
-      - **A single report**, showing the **whole** record. The profile's session history
-        deliberately drops `card_level`, `stars_*`, `student_goal*` and `schoolwork_*`
-        because they are populated on under a fifth of rows and would be dead columns on
-        almost every student — but on the one report that has them they are the point.
-        Render what is present, omit what is not, as the notes expander already does.
+      **What it does to a session's page count.** Not the topic's share of the pages — the
+      *whole session's* `pages_completed`, and whether having this topic on the plan moves
+      that total. So it is a comparison against the student's own baseline, never an
+      attribution; page pace varies far more between students than between topics, which is
+      why the student is their own control. Real signal, and face-valid: across 283 topics
+      with 50+ finalized sessions it runs 0.69× to 2.11×, the drag end being long division
+      (*Division – 5-digit by 2-digit* 0.69×) and the fast end shape recognition
+      (*Transversals* 2.11×).
 
-      ⚠️ **Settle `student_notes` before this ships**, not after. 3,594 reports carry them,
-      and the existing `P2` question about who may read them is sharper here than on a
-      profile: this page makes staff commentary about named children browsable in bulk,
-      filtered by center and instructor, by anyone who can reach the API.
+      ⚠️ **Its neutral point is ~1.12, not 1.0.** Sessions carry 2.17 topics on average and
+      only 29.6% carry one, and a session's pages count once for every topic on it — which
+      biases every ratio upward. Centred on 1.0 the page claims almost every topic speeds
+      students up. Read it against the program median, label it "sessions including this
+      topic", and do not imply the topic caused it: a topic usually worked alongside fast
+      ones inherits their pace. Separating co-occurring topics needs a marginal effect
+      rather than a mean — a later refinement, not a blocker.
+
+      **Who teaches it most.** Already built — `topics.instructors[]` is ranked and holds
+      the same pairs as `instructors.topics[]`.
+
+      The `PK` / `GF` / `WCH` / `FO` / `WOB` warning on the list item applies here too:
+      every rate on this page means something different for a non-`PK` item.
+- [x] `P2` **Filter the two lists by center.** Done — a multi-select dropdown beside each
+      list's search bar, in the `Card` header's `lead` slot. Several centers can be ticked,
+      no ticks means all of them, and the selection rides in the URL as repeated `?center=`
+      so a filtered view is linkable; changing it drops the offset. `FilterDropdown` in
+      `src/shell/` is the reusable half — trigger, checkbox panel, outside-click and Escape
+      dismissal — so the filters under the item below can join the same row.
+
+      The options come from `GET /api/centers`, the union of distinct `centers.name` across
+      both collections, rather than four names written into a component that would be
+      silently wrong the day a fifth center opens.
+
+      ⚠️ **The same filter is a partition on one page and a union on the other.** Students
+      belong to exactly one center, so ticking North Dallas and Southlake returns
+      395 + 234 = **629**. Instructors do not — 11 of 103 work at two or more — so the same
+      two ticks return **62, not 67**: five instructors answer both boxes without being ten
+      people. Do not put a per-option count beside an instructor checkbox without saying
+      that, and never present the instructor total as a sum of its ticked parts.
+
+      An unrecognised center name returns an empty page rather than a `400`. That looks
+      like the `sort` allowlist under **API**, but it is the opposite case: "no students at
+      Xyz" is a correct answer to a filter, while `sort=bogus` has no correct answer.
+- [x] `P2` **Show "Clear filters" whenever anything is filtered, not just a name.** Done —
+      `ClearFilters` in `frontend/src/features/`, in all three list card headers. Each page
+      used to gate its own button on `query`, so ticking a center filtered the list with
+      nothing on screen offering to undo it.
+
+      The test is **"the URL carries any parameter other than `offset`"**, not a list of
+      filter names. The inversion is the whole point: a filter added later shows up in the
+      button on the day it lands, while a new *view* control is one word added to
+      `VIEW_PARAMS`. `offset` is that one exclusion — paging is not filtering, so page 2 of
+      an unfiltered list offers nothing to clear, though clearing does reset it, since
+      page 3 of a filtered list is not page 3 of the whole.
+
+      A blank value does not count: `?query=` and `?center=` are both ignored by the list
+      routes, so a truncated URL must not light the button up either. The label is singular
+      while exactly one filter is on — "Clear filters" beside a lone search term reads like
+      something else is set that you cannot see.
+- [x] `P2` **Filter and sort each list by its own columns.** Done — `SortHeader` /
+      `ColumnHeader`, `NumberRangeFilter`, `DateRangeFilter` and the `useSort` / `ranges`
+      hooks, on all three lists. Every column that can be read can now be asked about.
+
+      **Sorting** is the header itself: clicking cycles **descending → ascending → off**,
+      and the third click drops both parameters so the list returns to its resting order.
+      That third state is not a nicety — the resting order is name on two lists and
+      most-worked on topics, so "click Name to get back" would not be an answer. Counts and
+      dates open largest-first, names A-Z, matching what the API defaults per column.
+
+      **Filtering** is a funnel in the same cell, opening a range popover: `_min`/`_max` on
+      the counts, `_from`/`_to` on Last session. Both bounds apply on submit rather than
+      per keystroke — a range is one question, and firing at "1" on the way to "12" asks
+      one nobody asked. Ranges beat checkboxes on these columns: "has topics on plan"
+      matches 822 of 893 students and "has unfinalized reports" 70 of 103 instructors,
+      neither of which narrows anything.
+
+      ⚠️ **The date presets count back from the newest session in the data**, not from
+      today, and each is labelled with the date it resolves to. The data ends **2025-09-17**
+      while the clock says 2026, so "last 30 days" off the calendar would match nobody and
+      read as a broken filter. `/api/metrics` serves the anchor as `latest_session_date`;
+      until it loads, the panel offers the two date boxes alone rather than a window it
+      cannot honestly name.
+
+      `sort` and `direction` are **view** parameters, not filters: they sit in
+      `ClearFilters`' `VIEW_PARAMS` beside `offset`, so an order never lights up "Clear
+      filters" and clearing the filters keeps the order. Changing either the order or any
+      filter drops the offset, since page 3 of one list is not page 3 of another.
+
+      Two smaller things worth keeping straight:
+
+      - **`sortable` is opt-in per usage, not per table.** The home page renders the same
+        `StudentsTable` as a fixed top-five preview, where a header that reordered five rows
+        — and wrote `?sort=` into the home page's URL — would mean nothing.
+      - **The line under the page title states the real order.** It used to say "sorted by
+        name" whatever the order was, which sorting turned into a wrong statement about the
+        rows underneath it; `orderPhrase.ts` gives each column its own wording both ways
+        round.
+
+      Two columns carry no control at all, deliberately. **Center has no sort** — a row
+      holds an array of centers, so there is no single value to order by. **Account has
+      neither**: it is an opaque 36-character handle displayed eight characters at a time,
+      so an order over it arranges households by a string nobody reads, and the one real
+      question about it — who else is on this account — is `?account_id=`, which the
+      sibling lookup already serves.
+- [x] `P2` **Report browser, the list** — `/reports`, `features/ReportsPage.tsx` and
+      `ReportsTable.tsx`. Every session across every student, newest first: the columns of
+      the profile's session history plus the student, and rows that expand in place to the
+      session's topics, summary and assessment.
+      `student_notes` are **not** shown here and not sent — see the `student_notes` item
+      under **API**.
+- [x] `P2` **A single report** — `/reports/:reportId`,
+      `features/profile/ReportDetailPage.tsx`, reached from an **Open** button on every row
+      of both the reports list and a student profile's session history. The button is
+      unconditional on purpose: **2,063 reports (7.0%) have no topics, no summary and no
+      assessment**, so their row has nothing to expand and was unreachable before this.
 - [ ] `P2` **Report entry page** — fields filled in on the page, saved unfinished,
       finalized into `dwp_reports` as a normal document. Needs a list of what is still
       open. *Blocked on the write endpoints.*
@@ -918,9 +1224,3 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       storage, which needs no endpoint and no schema.
 - [ ] `P3` **Spreadsheet upload page**, separately, for reports that arrive as `.xlsx`.
       The command-line import already works.
-- [x] `P2` **Frontend test coverage.** 115 tests in `frontend/tests/` — 97.8% of
-      statements, 92.6% of branches, 98.9% of lines. Every page, both list/profile pairs,
-      `useApi`'s abort-on-unmount and `AsyncBoundary`'s state precedence are covered.
-      What is left uncovered is defensive: `?? 'No center'`-style fallbacks and a handful
-      of guards for shapes the API does not currently produce. Chasing the last few percent
-      would mean asserting on branches that cannot be reached, so it stops here.

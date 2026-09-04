@@ -1,0 +1,15 @@
+/*
+ * Cards side by side. See CardRow.tsx for why the column count is not a parameter.
+ *
+ * The gap matches .page's own, so a row does not read as more tightly bound to itself than
+ * to the cards above and below it -- it is a layout, not a group.
+ */
+.card-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--card-row-min, 360px), 1fr));
+  gap: var(--space-5);
+  /* Grid items stretch by default. An empty card -- "No topics recorded on this session",
+     true of a fifth of reports -- stretched to match a long one beside it is a tall empty
+     box, so each card keeps its own height instead. */
+  align-items: start;
+}

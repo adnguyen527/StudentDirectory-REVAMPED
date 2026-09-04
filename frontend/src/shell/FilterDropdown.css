@@ -1,0 +1,90 @@
+/*
+ * A filter behind one button, for the list cards' headers.
+ *
+ * Sized to sit beside .list-filter without stretching: the search box takes the slack
+ * (flex: 1) and each filter stays its own width, so a header can hold several.
+ */
+
+.filter-dropdown {
+  position: relative;
+  flex: none;
+}
+
+.filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.filter-trigger:hover {
+  border-color: var(--border-strong);
+}
+
+.filter-trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* An active filter has to look different with the panel shut, or the list looks
+   unfiltered. The same wash the selected nav item and the open session row use. */
+.filter-trigger-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.filter-trigger-caret {
+  color: var(--text-faint);
+}
+
+.filter-trigger-on .filter-trigger-caret {
+  color: var(--accent);
+}
+
+.filter-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  min-width: 190px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-option:hover {
+  background: var(--surface-hover);
+}
+
+.filter-option input {
+  accent-color: var(--accent);
+}
+
+.filter-empty {
+  margin: 0;
+  padding: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}

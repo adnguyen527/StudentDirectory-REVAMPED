@@ -2,9 +2,13 @@ import { Link } from 'react-router-dom'
 
 import { formatDate, formatNumber } from '../api/bson'
 import type { InstructorListItem } from '../api/types'
+import { DateRangeFilter } from './DateRangeFilter'
+import { NumberRangeFilter } from './NumberRangeFilter'
+import { ColumnHeader } from './SortHeader'
 
 interface InstructorsTableProps {
   instructors: InstructorListItem[]
+  sortable?: boolean
 }
 
 /**
@@ -13,19 +17,48 @@ interface InstructorsTableProps {
  * Every figure is all-time: the aggregates are batch-built by
  * ingestion/build_instructors.py and carry no period.
  */
-export function InstructorsTable({ instructors }: InstructorsTableProps) {
+export function InstructorsTable({ instructors, sortable }: InstructorsTableProps) {
   return (
     <div className="table-scroll">
       <table className="table">
         <thead>
+          {/* Students and Days sort from arrays counted at query time rather than
+              stored fields -- Instructor._page. They behave like any other column here;
+              the difference is only that they cannot ride an index. */}
           <tr>
-            <th>Instructor</th>
-            <th>Center</th>
-            <th className="numeric">Sessions</th>
-            <th className="numeric">Students</th>
-            <th className="numeric">Days</th>
-            <th className="numeric">Unfinalized</th>
-            <th>Last session</th>
+            <ColumnHeader sortable={sortable} column="name" first="asc">
+              Instructor
+            </ColumnHeader>
+            <ColumnHeader sortable={sortable}>Center</ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="sessions"
+              className="numeric"
+              filter={<NumberRangeFilter column="sessions" label="sessions" />}
+            >
+              Sessions
+            </ColumnHeader>
+            <ColumnHeader sortable={sortable} column="students" className="numeric">
+              Students
+            </ColumnHeader>
+            <ColumnHeader sortable={sortable} column="days" className="numeric">
+              Days
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="unfinalized"
+              className="numeric"
+              filter={<NumberRangeFilter column="unfinalized" label="unfinalized" />}
+            >
+              Unfinalized
+            </ColumnHeader>
+            <ColumnHeader
+              sortable={sortable}
+              column="last_session"
+              filter={<DateRangeFilter column="last_session" label="last session" />}
+            >
+              Last session
+            </ColumnHeader>
           </tr>
         </thead>
         <tbody>

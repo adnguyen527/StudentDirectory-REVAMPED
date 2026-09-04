@@ -102,6 +102,13 @@ export interface Topic {
 export interface StudentInstructor {
   name: string
   sessions: number
+  /**
+   * Sessions with a recorded page count, which is exactly the finalized ones -- the two
+   * are the same thing in this data. It is the denominator for pages per session:
+   * dividing by `sessions` folds in reports nobody ever completed and understates the
+   * rate on 23.7% of the rows the profile shows it for.
+   */
+  finalized_sessions: number
   pages_completed: number
 }
 
@@ -156,9 +163,10 @@ export interface StudentDetailResponse {
 /**
  * The instructor fields both routes return.
  *
- * models/instructor.py's LIST_PROJECTION drops days_taught and students -- the two arrays
- * that grow with the dataset. total_days_taught and unique_students say the same thing in
- * one number each, which is why the list can do without them.
+ * models/instructor.py ships neither days_taught nor students in a list -- with them a
+ * page of 50 is 942 KB against 21 KB. Nothing stores a count of them either: the list
+ * derives both with $size at query time, which is why they sit on the list item below
+ * rather than here, and why the detail counts the arrays it already has.
  *
  * Keyed on instructor_name, because a name is all the source data carries. Two people
  * sharing a name merge into one document and nothing here can tell them apart.
@@ -176,15 +184,19 @@ export interface InstructorBase {
    * of them. Summing this across instructors exceeds the true total -- do not.
    */
   total_pages_completed: number
-  total_days_taught: number
   last_session_date: ExtDate | null
-  unique_students: number
   centers: CenterCount[]
   last_modified: ExtDate
 }
 
-/** An instructor as the list routes return them -- the projected arrays are absent. */
-export type InstructorListItem = InstructorBase
+/**
+ * An instructor as the list routes return them: the arrays are absent, and in their place
+ * two counts the server derived from them. The detail shape has it the other way round.
+ */
+export type InstructorListItem = InstructorBase & {
+  unique_students: number
+  total_days_taught: number
+}
 
 /**
  * One student on an instructor's roster.
@@ -197,6 +209,17 @@ export interface InstructorRosterEntry {
   student_name: string
   account_id: string
   sessions: number
+  /**
+   * Sessions with a recorded page count, which is exactly the finalized ones -- the two
+   * are the same thing in this data. It is the denominator for pages per session:
+   * dividing by `sessions` folds in reports nobody ever completed and understates the
+   * rate. Same field, same reason, as StudentInstructor.
+   *
+   * Optional because the `instructors` collection only grew it when the roster started
+   * showing that column; a document built before that rebuild has none, and
+   * pagesPerSession answers such a row with the same dash it gives an under-five pair.
+   */
+  finalized_sessions?: number
   pages_completed: number
 }
 
@@ -215,6 +238,13 @@ export interface InstructorDetailResponse {
 
 /** routes/metrics.py -- all-time counts across the collections. */
 export interface Metrics {
+  /**
+   * The newest session anywhere in the data, which is what the date filter's presets
+   * count back from -- "the last 30 days" has to mean the last 30 days of the data. The
+   * imported data ends well before today, so a window off the calendar matches nobody.
+   * Null on an empty database.
+   */
+  latest_session_date: ExtDate | null
   total_students: number
   total_instructors: number
   total_dwp_reports: number
@@ -267,5 +297,156 @@ export interface AttendanceResponse {
   visits: AttendanceVisit[]
 }
 
+/**
+ * The program-wide topic rollup -- ingestion/build_topics.py.
+ *
+ * Not to be confused with `Topic` above, which is one topic's history for one *student*.
+ * These are the same curriculum items counted across everybody, and the two shapes share
+ * no fields: this one is keyed on `topic_id` and counts students, that one is keyed on
+ * `id` and counts sessions.
+ *
+ * models/topic.py's LIST_PROJECTION drops `instructors` -- 82 on the widest topic. The
+ * list shows no instructor column, so nothing stands in for it there; the detail view
+ * counts the array when it needs a total.
+ */
+export interface TopicRollupBase {
+  _id: ExtOid
+  topic_id: string
+  /** Settled by a rule when the source spells one topic more than one way: most recently
+   *  used, then most sessions, then alphabetical. */
+  name: string
+  /** The names not chosen. Searchable, so an old name still finds the topic. */
+  also_known_as: string[]
+  /** Times worked through, across every student. */
+  sessions: number
+  times_worked_on: number
+  times_completed: number
+  times_mastered: number
+  unique_students: number
+  /** Per (student, topic) pair and mutually exclusive -- these three sum to
+   *  unique_students, because `state` reads a student's last assignment only. */
+  students_finished: number
+  students_on_plan: number
+  students_removed: number
+  /**
+   * Of the students in `students_finished`, how many now sit at Mastered rather than
+   * stopping at Completed. Always <= students_finished, because it is counted inside that
+   * group rather than off the status across everybody. The difference between the two is
+   * exactly the students who completed a topic without mastering it.
+   *
+   * Not `times_mastered`, which counts sessions rather than students.
+   */
+  students_mastered: number
+  /** Ever completed or mastered, even if the topic was later handed back. Can exceed
+   *  students_finished, which is a "now" question. */
+  students_ever_finished: number
+  total_reassignments: number
+  /** Null when nobody has finished it -- an answer, not a missing field. */
+  median_sessions_to_finish: number | null
+  first_taught: ExtDate | null
+  last_taught: ExtDate | null
+  last_modified: ExtDate
+}
+
+/** A topic as the list route returns it -- the projected array is absent. */
+export type TopicListItem = TopicRollupBase
+
+/**
+ * One instructor's share of a topic, ranked most-taught first.
+ *
+ * A co-taught session credits each instructor the whole entry, so summing `sessions`
+ * across this list exceeds the topic's own `sessions`. Read each row on its own.
+ */
+export interface TopicInstructor {
+  name: string
+  sessions: number
+}
+
+/** The detail document: the base plus the array the list projection drops. */
+export interface TopicDetail extends TopicRollupBase {
+  instructors: TopicInstructor[]
+}
+
+export interface TopicDetailResponse {
+  topic: TopicDetail
+}
+
+/** The center names the two list routes can be filtered by -- routes/metrics.py. */
+export interface CentersResponse {
+  centers: string[]
+}
+
+/**
+ * A report as the list route returns it.
+ *
+ * The profile's shape minus student_notes, which /api/reports does not send -- reading one
+ * child's notes on their own profile and paging through 3,594 of them are different acts,
+ * and models/dwp_report.py's LIST_PROJECTION is where that is decided. `Omit` rather than a
+ * hand-written twin so a field added to DwpReport arrives here too.
+ *
+ * student_key is derived by the route rather than stored: dwp_reports is raw source data
+ * and carries account_id and student_name alone -- routes/reports.py, _with_student_key.
+ */
+export type ReportListItem = Omit<DwpReport, 'student_notes'> & {
+  student_name: string
+  account_id: string
+  student_key: string
+}
+
+/**
+ * One report, whole -- everything /api/reports/<id> returns.
+ *
+ * The list's row plus student_notes and the fields nothing else renders. The percentages
+ * are measured over all 29,382 reports and are the point of writing them down: this page
+ * shows every field whether or not it has a value, so a row that is always empty is the
+ * data saying so rather than a bug. Two of them are empty in *every* report today.
+ */
+export interface ReportDetail extends ReportListItem {
+  /** Staff commentary about a named child. 12.2%. Served here, withheld by the list. */
+  student_notes: string | null
+
+  /** On 100% of reports, and shown nowhere else in the app. */
+  sessions_this_month: number | null
+  last_punch_of_day: boolean | null
+  needs_primary_deck_update: boolean | null
+  needs_secondary_deck_update: boolean | null
+
+  /** 94.7% and 95.1%. */
+  finalized_date: ExtDate | null
+  center_orgs: string[]
+
+  /** The digital reward system: 9.0% carry a card, 3.3% a star count, 1.0% a session's. */
+  card_level: string | null
+  stars_current: number | null
+  stars_max: number | null
+  session_stars_added: number | null
+
+  /** 1.0%. ⚠️ secondary_deck_next_page is null in all 29,382 -- kept so it appears if the
+   *  source ever starts writing it, but nothing is designed around it. */
+  primary_deck_next_page: string | null
+  secondary_deck_next_page: string | null
+
+  /** ⚠️ Null in all 29,382 reports. As secondary_deck_next_page. */
+  internet_rating: string | null
+
+  /** 17.4% carry the two flags, 13.0% a description, and under 1.5% either time figure. */
+  schoolwork_completed: boolean | null
+  schoolwork_checked: boolean | null
+  schoolwork_description: string | null
+  schoolwork_start_time: string | null
+  schoolwork_duration_min: number | null
+
+  /** 161 reports, 0.5% -- the rarest fields in the collection. */
+  student_goal1: string | null
+  student_goal2: string | null
+  student_goal3: string | null
+}
+
+export interface ReportDetailResponse {
+  report: ReportDetail
+}
+
 export type StudentsResponse = Paged<'students', StudentListItem>
 export type InstructorsResponse = Paged<'instructors', InstructorListItem>
+export type TopicsResponse = Paged<'topics', TopicListItem>
+export type ReportsResponse = Paged<'reports', ReportListItem>

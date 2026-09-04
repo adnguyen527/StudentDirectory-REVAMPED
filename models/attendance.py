@@ -21,7 +21,7 @@ class Attendance:
     def find_by_student(student_key, limit=None):
         """Days attended by one student, newest first."""
         cursor = (Attendance._collection()
-                  .find({'student_key': student_key}, LIST_PROJECTION)
+                  .find({'student_key': student_key}, dict(LIST_PROJECTION))
                   .sort('date', -1))
         return list(cursor.limit(limit) if limit else cursor)
 
@@ -29,7 +29,7 @@ class Attendance:
     def find_by_account(account_id):
         """Days attended by everyone on one household account, newest first."""
         return list(Attendance._collection()
-                    .find({'account_id': account_id}, LIST_PROJECTION)
+                    .find({'account_id': account_id}, dict(LIST_PROJECTION))
                     .sort('date', -1))
 
     @staticmethod
@@ -42,7 +42,7 @@ class Attendance:
         if student_key:
             query['student_key'] = student_key
         return list(Attendance._collection()
-                    .find(query, LIST_PROJECTION)
+                    .find(query, dict(LIST_PROJECTION))
                     .sort('date', -1))
 
     @staticmethod

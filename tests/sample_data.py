@@ -47,8 +47,13 @@ STUDENTS = [
         'last_assessment': 'Algebra I',
         'total_pages_completed': 12,
         'instructors': [
-            {'name': 'Dana Reyes', 'sessions': 2, 'pages_completed': 12},
-            {'name': 'Marcus Reyes', 'sessions': 1, 'pages_completed': 7},
+            # Six sessions, one of them never finalized: above the display threshold,
+            # and the 60/5 average differs from the 60/6 a naive divide would give.
+            {'name': 'Dana Reyes', 'sessions': 6, 'finalized_sessions': 5,
+             'pages_completed': 60},
+            # Below the threshold, so no rate is shown for them.
+            {'name': 'Marcus Reyes', 'sessions': 1, 'finalized_sessions': 1,
+             'pages_completed': 7},
         ],
         # Two topics over two sessions: Fractions climbs the ladder, Decimals was
         # mastered on 3/7 and handed straight back on 3/14 -- assigned a second time.
@@ -86,7 +91,10 @@ STUDENTS = [
         'last_session_date': _day(2026, 3, 10),
         'last_assessment': 'Pre-Algebra',
         'total_pages_completed': 4,
-        'instructors': [{'name': 'Dana Reyes', 'sessions': 1, 'pages_completed': 4}],
+        'instructors': [
+            {'name': 'Dana Reyes', 'sessions': 1, 'finalized_sessions': 1,
+             'pages_completed': 4},
+        ],
         # Her one topic carries a status outside the ladder, so nothing is rolled up.
         'topics': [],
         'total_unique_topics_mastered': 0,
@@ -107,7 +115,10 @@ STUDENTS = [
         'last_session_date': _day(2026, 2, 1),
         'last_assessment': 'Geometry',
         'total_pages_completed': 7,
-        'instructors': [{'name': 'Sam Ortiz', 'sessions': 1, 'pages_completed': 7}],
+        'instructors': [
+            {'name': 'Sam Ortiz', 'sessions': 1, 'finalized_sessions': 1,
+             'pages_completed': 7},
+        ],
         # Completed but not mastered -- the rarest of the three states, 398 pairs live.
         'topics': [
             {'id': 'T-200', 'name': 'Angles', 'sessions': 1,
@@ -180,6 +191,9 @@ DWP_REPORTS = [
         'internal_notes': 'parent behind on payment',
         'notes_from_center_director': 'move to the 4pm slot',
         'notes_for_center_director': 'older spelling, still populated on 3,655 rows',
+        # Not private -- her own profile serves this. The report list does not, which is
+        # the one difference between the two projections.
+        'student_notes': 'gets discouraged when a page runs long',
         'session_summary_notes': 'worked through angle pairs',
         'student_name': 'Chloe Tan',
         'date': _day(2026, 2, 1),
@@ -201,17 +215,21 @@ INSTRUCTORS = [
         'co_taught_sessions': 1,
         'unfinalized_sessions': 0,
         'total_pages_completed': 16,
-        'total_days_taught': 3,
         'days_taught': [_day(2026, 3, 7), _day(2026, 3, 10), _day(2026, 3, 14)],
         'last_session_date': _day(2026, 3, 14),
-        'unique_students': 2,
         'students': [
             {'student_key': ANTHONY_KEY, 'student_name': 'Anthony Nguyen',
              'sessions': 2, 'pages_completed': 12},
             {'student_key': AVA_KEY, 'student_name': 'Ava Nguyen',
              'sessions': 1, 'pages_completed': 4},
         ],
-        'centers': [{'name': 'Westside', 'sessions': 3}],
+        'topics': [
+            {'topic_id': 'T-110', 'name': 'Decimals', 'sessions': 2},
+            {'topic_id': 'T-100', 'name': 'Fractions', 'sessions': 2},
+        ],
+        # Two centers, mirroring the 11 of 103 real instructors who work at more than
+        # one: ticking both must return her once, not twice.
+        'centers': [{'name': 'Westside', 'sessions': 2}, {'name': 'Eastside', 'sessions': 1}],
         'last_modified': _day(2026, 3, 15),
     },
     {
@@ -220,14 +238,13 @@ INSTRUCTORS = [
         'co_taught_sessions': 1,
         'unfinalized_sessions': 0,
         'total_pages_completed': 7,
-        'total_days_taught': 1,
         'days_taught': [_day(2026, 3, 14)],
         'last_session_date': _day(2026, 3, 14),
-        'unique_students': 1,
         'students': [
             {'student_key': ANTHONY_KEY, 'student_name': 'Anthony Nguyen',
              'sessions': 1, 'pages_completed': 7},
         ],
+        'topics': [{'topic_id': 'T-100', 'name': 'Fractions', 'sessions': 1}],
         'centers': [{'name': 'Westside', 'sessions': 1}],
         'last_modified': _day(2026, 3, 15),
     },
@@ -237,15 +254,110 @@ INSTRUCTORS = [
         'co_taught_sessions': 0,
         'unfinalized_sessions': 0,
         'total_pages_completed': 7,
-        'total_days_taught': 1,
         'days_taught': [_day(2026, 2, 1)],
         'last_session_date': _day(2026, 2, 1),
-        'unique_students': 1,
         'students': [
             {'student_key': CHLOE_KEY, 'student_name': 'Chloe Tan',
              'sessions': 1, 'pages_completed': 7},
         ],
+        'topics': [{'topic_id': 'T-200', 'name': 'Angles', 'sessions': 1}],
         'centers': [{'name': 'Eastside', 'sessions': 1}],
+        'last_modified': _day(2026, 3, 15),
+    },
+]
+
+
+# The program-wide rollup, carrying the two traps the real collection has. `T-115` shares
+# its name with `T-110`: 90 names are held by more than one topic id on the cluster, which
+# is why the list sorts on (name, topic_id) rather than name alone. `T-100` carries an
+# also_known_as, the renamed case -- searching "Halves" has to find a topic now called
+# "Fractions", or keeping the names not chosen buys nothing.
+TOPICS = [
+    {
+        'topic_id': 'T-100',
+        'name': 'Fractions',
+        'also_known_as': ['Halves and Quarters'],
+        'sessions': 3,
+        'times_worked_on': 1,
+        'times_completed': 0,
+        'times_mastered': 2,
+        'unique_students': 2,
+        'students_finished': 2,
+        'students_mastered': 1,
+        'students_on_plan': 0,
+        'students_removed': 0,
+        'students_ever_finished': 2,
+        'total_reassignments': 0,
+        'median_sessions_to_finish': 1.5,
+        'instructors': [
+            {'name': 'Dana Reyes', 'sessions': 2},
+            {'name': 'Marcus Reyes', 'sessions': 1},
+        ],
+        'first_taught': _day(2026, 3, 7),
+        'last_taught': _day(2026, 3, 14),
+        'last_modified': _day(2026, 3, 15),
+    },
+    {
+        'topic_id': 'T-110',
+        'name': 'Decimals',
+        'also_known_as': [],
+        'sessions': 2,
+        'times_worked_on': 1,
+        'times_completed': 0,
+        'times_mastered': 1,
+        'unique_students': 1,
+        'students_finished': 1,
+        'students_mastered': 1,
+        'students_on_plan': 0,
+        'students_removed': 0,
+        'students_ever_finished': 1,
+        'total_reassignments': 1,
+        'median_sessions_to_finish': 2,
+        'instructors': [{'name': 'Dana Reyes', 'sessions': 2}],
+        'first_taught': _day(2026, 3, 7),
+        'last_taught': _day(2026, 3, 14),
+        'last_modified': _day(2026, 3, 15),
+    },
+    {
+        'topic_id': 'T-115',
+        'name': 'Decimals',
+        'also_known_as': [],
+        'sessions': 1,
+        'times_worked_on': 1,
+        'times_completed': 0,
+        'times_mastered': 0,
+        'unique_students': 1,
+        'students_finished': 0,
+        'students_mastered': 0,
+        'students_on_plan': 1,
+        'students_removed': 0,
+        'students_ever_finished': 0,
+        'total_reassignments': 0,
+        'median_sessions_to_finish': None,
+        'instructors': [],
+        'first_taught': _day(2026, 2, 1),
+        'last_taught': _day(2026, 2, 1),
+        'last_modified': _day(2026, 3, 15),
+    },
+    {
+        'topic_id': 'T-200',
+        'name': 'Angles',
+        'also_known_as': [],
+        'sessions': 1,
+        'times_worked_on': 0,
+        'times_completed': 1,
+        'times_mastered': 0,
+        'unique_students': 1,
+        'students_finished': 1,
+        'students_mastered': 0,
+        'students_on_plan': 0,
+        'students_removed': 0,
+        'students_ever_finished': 1,
+        'total_reassignments': 0,
+        'median_sessions_to_finish': 1,
+        'instructors': [{'name': 'Sam Ortiz', 'sessions': 1}],
+        'first_taught': _day(2026, 2, 1),
+        'last_taught': _day(2026, 2, 1),
         'last_modified': _day(2026, 3, 15),
     },
 ]

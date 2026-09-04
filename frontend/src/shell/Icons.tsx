@@ -1,7 +1,7 @@
 /**
  * The handful of glyphs the shell needs, inline.
  *
- * Six icons is not worth an icon package. All of them stroke in currentColor and size
+ * A handful of icons is not worth an icon package. All of them stroke in currentColor and size
  * from the `size` prop, so a nav item colouring itself colours its icon too.
  */
 
@@ -67,6 +67,29 @@ export function InstructorsIcon({ size = 19, className }: IconProps) {
   )
 }
 
+/** A stack of worksheets: the curriculum items a lesson plan is built from. */
+export function TopicsIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v13.5H5.5A1.5 1.5 0 0 0 4 19V5.5Z" />
+      <path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v13.5h5.5A1.5 1.5 0 0 1 20 19V5.5Z" />
+      <path d="M4 19a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19" />
+    </svg>
+  )
+}
+
+/** A single sheet with lines on it: one session's report, not a folder of them. */
+export function ReportsIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M6 3.5h7.5L19 9v11.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" />
+      <path d="M13.5 3.5V9H19" />
+      <path d="M8.5 13h7" />
+      <path d="M8.5 16.5h4.5" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ size = 19, className }: IconProps) {
   return (
     <svg {...base(size, className)}>
@@ -84,6 +107,15 @@ export function PlusIcon({ size = 17, className }: IconProps) {
   )
 }
 
+/** The clear button on a search field. */
+export function CloseIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="m6 6 12 12M18 6 6 18" />
+    </svg>
+  )
+}
+
 export function ChevronIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...base(size, className)}>
@@ -97,6 +129,48 @@ export function MoreIcon({ size = 18, className }: IconProps) {
   return (
     <svg {...base(size, className)} strokeWidth={2.4}>
       <path d="M5 12h.01M12 12h.01M19 12h.01" />
+    </svg>
+  )
+}
+
+/**
+ * The arrow on a sortable column header.
+ *
+ * Three states, because "unsorted" has to look different from both sorted ones without
+ * looking broken: a pair of faint chevrons says the column can be sorted, and one solid
+ * chevron says which way it is. The pair is dimmed in CSS rather than here, so a header
+ * can brighten it on hover.
+ */
+export function SortIcon({
+  size = 14,
+  className,
+  direction,
+}: IconProps & { direction?: 'asc' | 'desc' }) {
+  if (!direction) {
+    return (
+      <svg {...base(size, className)}>
+        <path d="m7 10 5-5 5 5" />
+        <path d="m7 14 5 5 5-5" />
+      </svg>
+    )
+  }
+  return (
+    <svg {...base(size, className)}>
+      <path d={direction === 'asc' ? 'm6 14 6-6 6 6' : 'm6 10 6 6 6-6'} />
+    </svg>
+  )
+}
+
+/**
+ * The filter control in a column header.
+ *
+ * A funnel rather than a caret: the header already has a caret for sorting, and the two
+ * controls sit side by side in the same cell, so they cannot share a glyph.
+ */
+export function FunnelIcon({ size = 13, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M3 5h18l-7 8v6l-4 2v-8Z" />
     </svg>
   )
 }

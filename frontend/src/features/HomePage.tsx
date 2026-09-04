@@ -6,6 +6,7 @@ import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { DashboardIcon, InstructorsIcon, StudentsIcon } from '../shell/Icons'
 import { StatTile } from '../shell/StatTile'
+import { useDocumentTitle } from '../shell/useDocumentTitle'
 import { StudentsTable } from './StudentsTable'
 
 const PREVIEW_ROWS = 8
@@ -18,6 +19,7 @@ const PREVIEW_ROWS = 8
  * Card's controls slot are the parts that will survive it.
  */
 export function HomePage() {
+  useDocumentTitle('Home')
   const metrics = useApi<Metrics>((signal) => getMetrics(signal), [])
   const students = useApi<StudentsResponse>(
     (signal) => listStudents({ limit: PREVIEW_ROWS }, signal),

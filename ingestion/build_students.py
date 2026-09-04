@@ -124,6 +124,13 @@ def build_topic_history(days):
                     )
                 if date is not None:
                     entry['last_seen'] = date
+            else:
+                # The topic's first day. _new_entry seeded _assignment_best from the first
+                # entry read, which is not the day's best when the topic was worked more
+                # than once that day -- so a topic worked and then mastered in two sessions
+                # of one day read as Mastered while its state said the assignment never
+                # got past Worked On.
+                entry['_assignment_best'] = STATUS_RANK[status]
 
             entry['status'] = status
             entry['_last_day'] = index
@@ -248,13 +255,26 @@ def build_students():
 
         # Instructors
         pages = doc.get('pages_completed') or 0
+        # An unfinalized report has no page count at all -- `finalized` and a recorded
+        # page count are the same thing in this data, with no exceptions either way. So
+        # those sessions count as sessions but must stay out of any pages-per-session
+        # denominator, or an instructor whose paperwork is behind reads as one whose
+        # student did nothing. Counted separately for the same reason attendance_reports
+        # keeps sessions_timed apart from sessions.
+        finalized = 1 if doc.get('finalized') else 0
         for name in doc.get('instructors', []):
             name = name.strip()
             if name:
                 if name not in s['instructors']:
-                    s['instructors'][name] = {'name': name, 'sessions': 0, 'pages_completed': 0}
-                s['instructors'][name]['sessions']        += 1
-                s['instructors'][name]['pages_completed'] += pages
+                    s['instructors'][name] = {
+                        'name': name,
+                        'sessions': 0,
+                        'finalized_sessions': 0,
+                        'pages_completed': 0,
+                    }
+                s['instructors'][name]['sessions']           += 1
+                s['instructors'][name]['finalized_sessions'] += finalized
+                s['instructors'][name]['pages_completed']    += pages
 
         # Topics, held by day until the whole student has been read
         day = s['days'].setdefault(dt, [])
