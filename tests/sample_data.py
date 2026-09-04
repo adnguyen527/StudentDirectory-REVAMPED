@@ -191,6 +191,9 @@ DWP_REPORTS = [
         'internal_notes': 'parent behind on payment',
         'notes_from_center_director': 'move to the 4pm slot',
         'notes_for_center_director': 'older spelling, still populated on 3,655 rows',
+        # Not private -- her own profile serves this. The report list does not, which is
+        # the one difference between the two projections.
+        'student_notes': 'gets discouraged when a page runs long',
         'session_summary_notes': 'worked through angle pairs',
         'student_name': 'Chloe Tan',
         'date': _day(2026, 2, 1),

@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
+import { useDocumentTitle } from '../shell/useDocumentTitle'
 import { CenterFilter } from './CenterFilter'
 import { ClearFilters } from './ClearFilters'
 import { ListFilter } from './ListFilter'
@@ -48,6 +49,7 @@ const ORDER: Record<string, OrderPhrase> = {
  * browser's Back button steps through pages instead of leaving the app.
  */
 export function StudentsPage() {
+  useDocumentTitle('Students')
   const [params, setParams] = useSearchParams()
   const query = params.get('query') ?? ''
   const offset = Math.max(0, Number(params.get('offset') ?? 0) || 0)

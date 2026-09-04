@@ -197,6 +197,64 @@ def test_finalized_sessions_reconcile_to_dwp_reports(live_db, students):
     assert not drifted, f'{len(drifted)} count(s) out of sync, e.g. {drifted[:5]}'
 
 
+def test_every_roster_entry_carries_a_denominator(instructors):
+    """The instructor roster shows pages per session too, so every entry needs the count
+    it divides by.
+
+    A roster built before build_instructors.py grew finalized_sessions has none, and the
+    page dashes rather than guessing -- correct, but it means the whole column reads empty
+    until the collection is rebuilt. This is what says whether that has happened.
+    """
+    missing = [
+        (i['instructor_name'], s['student_key'])
+        for i in instructors for s in i.get('students') or []
+        if 'finalized_sessions' not in s
+    ]
+    assert not missing, (
+        f'{len(missing)} roster entr(ies) predate finalized_sessions, e.g. {missing[:5]} '
+        '-- re-run ingestion/build_instructors.py'
+    )
+
+
+def test_a_roster_entry_never_finalizes_more_than_it_taught(instructors):
+    stranded = [
+        (i['instructor_name'], s['student_key'], s['sessions'], s.get('finalized_sessions'))
+        for i in instructors for s in i.get('students') or []
+        if (s.get('finalized_sessions') or 0) > s['sessions']
+    ]
+    assert not stranded, f'{len(stranded)} impossible count(s), e.g. {stranded[:5]}'
+
+
+def test_the_two_sides_of_a_pair_agree(students, instructors):
+    """⚠️ The property both profile pages depend on.
+
+    The same (student, instructor) pair appears on the student's profile and on the
+    instructor's roster, and both divide pages by finalized sessions to show a rate. Built
+    by two different scripts from the same reports, so nothing but this holds them
+    together -- and a disagreement means one page quotes a pace the other contradicts.
+    """
+    from_student = {
+        (s['student_key'], i['name']): (i['finalized_sessions'], i['pages_completed'])
+        for s in students for i in s.get('instructors') or []
+    }
+
+    drifted = []
+    for instructor in instructors:
+        name = instructor['instructor_name']
+        for entry in instructor.get('students') or []:
+            theirs = from_student.get((entry['student_key'], name))
+            if theirs is None:
+                continue  # covered by the orphan checks above
+            ours = (entry.get('finalized_sessions'), entry['pages_completed'])
+            if ours != theirs:
+                drifted.append((name, entry['student_key'], ours, theirs))
+
+    assert not drifted, (
+        f'{len(drifted)} pair(s) disagree between students and instructors, '
+        f'e.g. {drifted[:5]}'
+    )
+
+
 def test_a_pages_rate_is_only_shown_where_it_has_a_denominator(students):
     """The profile shows the rate from five sessions up. No row that clears that bar may
     have zero finalized sessions, or the page would be dividing by nothing.

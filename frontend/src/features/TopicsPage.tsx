@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
+import { useDocumentTitle } from '../shell/useDocumentTitle'
 import { ClearFilters } from './ClearFilters'
 import { ListFilter } from './ListFilter'
 import { orderPhrase, type OrderPhrase } from './orderPhrase'
@@ -55,6 +56,7 @@ const ORDER: Record<string, OrderPhrase> = {
  * to /topics/search, which serves a typeahead this page does not use.
  */
 export function TopicsPage() {
+  useDocumentTitle('Topics')
   const [params, setParams] = useSearchParams()
   const query = params.get('query') ?? ''
   const offset = Math.max(0, Number(params.get('offset') ?? 0) || 0)

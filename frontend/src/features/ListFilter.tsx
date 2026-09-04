@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { SearchIcon } from '../shell/Icons'
+import { CloseIcon, SearchIcon } from '../shell/Icons'
 import './ListFilter.css'
 
 /** As GlobalSearch: long enough that typing does not fire a request per keystroke. */
@@ -30,6 +30,7 @@ export function ListFilter({ placeholder }: ListFilterProps) {
   // What is typed, before it becomes the URL's query. Seeded from the URL so arriving at
   // /topics?query=fractions shows the box already filled in.
   const [input, setInput] = useState(query)
+  const box = useRef<HTMLInputElement>(null)
 
   // The URL is the source of truth, so a Clear button or the back button has to be able
   // to overwrite what is in the box.
@@ -53,10 +54,23 @@ export function ListFilter({ placeholder }: ListFilterProps) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [input, query])
 
+  // Clearing skips the debounce and drops the term now: the wait exists so typing does not
+  // fire a request per keystroke, and a click is not typing. The effect above then sees
+  // term === query and does nothing.
+  function clear() {
+    setInput('')
+    const updated = new URLSearchParams(params)
+    updated.delete('query')
+    updated.delete('offset')
+    setParams(updated)
+    box.current?.focus()
+  }
+
   return (
     <div className="list-filter">
       <SearchIcon className="list-filter-icon" />
       <input
+        ref={box}
         type="search"
         className="list-filter-input"
         placeholder={placeholder}
@@ -64,6 +78,19 @@ export function ListFilter({ placeholder }: ListFilterProps) {
         value={input}
         onChange={(event) => setInput(event.target.value)}
       />
+      {/* Only while there is something to clear -- an always-present X on an empty field
+          is a control that does nothing. Focus returns to the box, which is the element
+          this button is about to remove itself from. */}
+      {input && (
+        <button
+          type="button"
+          className="search-clear"
+          aria-label="Clear search"
+          onClick={clear}
+        >
+          <CloseIcon />
+        </button>
+      )}
     </div>
   )
 }

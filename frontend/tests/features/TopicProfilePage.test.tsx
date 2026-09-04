@@ -32,6 +32,16 @@ describe('topic profile page', () => {
     expect(screen.getByText(/Halves and Quarters/)).toBeInTheDocument()
   })
 
+  it('names the browser tab id first, since names are not unique', async () => {
+    // ⚠️ 90 names are carried by more than one topic and four are called "Patterns -
+    // Number Patterns", so a tab titled by name alone can name two different topics the
+    // same thing. The id leads because the front of the string is what a narrow tab keeps.
+    renderApp(`/topics/${FRACTIONS_ID}`)
+
+    await screen.findByRole('heading', { name: 'Fractions', level: 1 })
+    await waitFor(() => expect(document.title).toBe(`${FRACTIONS_ID} Fractions · Sigma`))
+  })
+
   it('separates finishing it now from ever having finished it', async () => {
     // A topic finished and later handed back counts in students_ever_finished while
     // sitting on someone's plan. The two disagreeing is expected, so it is spelled out.

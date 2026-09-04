@@ -114,6 +114,54 @@ button:disabled {
   color: var(--text-muted);
 }
 
+/*
+ * The clear button on a search field, shared by all three of them -- the top bar, the list
+ * pages' filter, and the profile cards'. Their wrappers differ but are all
+ * position:relative, so one rule serves each.
+ *
+ * The browsers' own clear button is turned off in GlobalSearch.css and ListFilter.css
+ * because it collides with the rounded field. This is what replaces it: same job, styled
+ * to sit inside the field, and rendered only when there is something to clear.
+ */
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  display: flex;
+  padding: var(--space-1);
+  transform: translateY(-50%);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+}
+
+.search-clear:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.search-clear:focus-visible {
+  outline: none;
+  color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+/* Present for a screen reader, gone for everyone else. Used where a card's visible title
+   has been given up to a control but the section still needs a name -- an unnamed
+   <section> is not exposed as a landmark at all. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .tag {
   display: inline-block;
   padding: 2px var(--space-2);
@@ -152,6 +200,16 @@ button:disabled {
 .button:disabled {
   color: var(--text-faint);
   background: var(--surface-sunken);
+}
+
+/* The same button at row scale. A table holds fifty of these, so the default padding would
+   set the row height rather than the content doing it. */
+.button-row {
+  padding: 2px var(--space-2);
+  font-size: var(--font-size-sm);
+  /* One line: a two-word label in a narrow column otherwise stacks itself and makes every
+     row in the table taller than its content needs. */
+  white-space: nowrap;
 }
 
 /*

@@ -7,6 +7,15 @@ interface PagerProps {
   page: Page
   /** Called with the new offset. The caller decides where that is stored. */
   onChange: (offset: number) => void
+  /**
+   * Keep the controls' space when there is nowhere to go, instead of collapsing.
+   *
+   * Off by default, because the collapse is right for most cards -- see hasPages below.
+   * It is wrong for a card whose height is meant to be fixed, where the pager shrinking
+   * on the one filter that fits a single page moves the card by as much as the padding
+   * inside it was arranged to prevent.
+   */
+  reserveControls?: boolean
 }
 
 /**
@@ -17,7 +26,7 @@ interface PagerProps {
  * rather than this page, which is what makes the last-page check possible without
  * walking to the end.
  */
-export function Pager({ page, onChange }: PagerProps) {
+export function Pager({ page, onChange, reserveControls }: PagerProps) {
   const { limit, offset, total, returned } = page
 
   const first = total === 0 ? 0 : offset + 1
@@ -39,8 +48,14 @@ export function Pager({ page, onChange }: PagerProps) {
           : `${formatNumber(first)}–${formatNumber(last)} of ${formatNumber(total)}`}
       </span>
 
-      {hasPages && (
-        <div className="pager-buttons">
+      {/* The same buttons either way when the space is reserved: they are already disabled
+          in that state, so hiding them is a matter of visibility rather than of building a
+          second, emptier thing that has to be kept the same height by hand. */}
+      {(hasPages || reserveControls) && (
+        <div
+          className={hasPages ? 'pager-buttons' : 'pager-buttons pager-buttons-held'}
+          aria-hidden={hasPages ? undefined : true}
+        >
           <button
             type="button"
             className="button"

@@ -5,7 +5,7 @@ import { formatNumber } from '../api/bson'
 import { MIN_SEARCH_LENGTH, searchInstructors, searchStudents } from '../api/endpoints'
 import type { InstructorsResponse, StudentsResponse } from '../api/types'
 import { useApi } from '../hooks/useApi'
-import { SearchIcon } from '../shell/Icons'
+import { CloseIcon, SearchIcon } from '../shell/Icons'
 import './GlobalSearch.css'
 
 const DEBOUNCE_MS = 250
@@ -36,6 +36,7 @@ export function GlobalSearch() {
   const [term, setTerm] = useState('')
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
   // Debounced: one request per pause in typing, not one per keystroke.
@@ -112,6 +113,7 @@ export function GlobalSearch() {
     <div className="search" ref={containerRef}>
       <SearchIcon className="search-icon" />
       <input
+        ref={box}
         className="search-input"
         type="search"
         value={input}
@@ -129,6 +131,23 @@ export function GlobalSearch() {
           }
         }}
       />
+      {/* Clears the term and puts the dropdown away with it -- results for a query that
+          is no longer in the box would outlive their question. Focus goes back to the
+          field, which this button is about to disappear from. */}
+      {input && (
+        <button
+          type="button"
+          className="search-clear"
+          aria-label="Clear search"
+          onClick={() => {
+            setInput('')
+            setOpen(false)
+            box.current?.focus()
+          }}
+        >
+          <CloseIcon />
+        </button>
+      )}
 
       {open && input.trim().length > 0 && (
         <div className="search-results">

@@ -4,7 +4,14 @@ import auth
 from config import config
 from database import db
 from models import LoginSession, User
-from routes import auth_bp, students_bp, instructors_bp, topics_bp, metrics_bp
+from routes import (
+    auth_bp,
+    students_bp,
+    instructors_bp,
+    topics_bp,
+    reports_bp,
+    metrics_bp,
+)
 
 
 def _check_origins():
@@ -68,6 +75,7 @@ def create_app():
     app.register_blueprint(students_bp)
     app.register_blueprint(instructors_bp)
     app.register_blueprint(topics_bp)
+    app.register_blueprint(reports_bp)
     app.register_blueprint(metrics_bp)
 
     # After the blueprints: the guard resolves request.endpoint, which needs the routes

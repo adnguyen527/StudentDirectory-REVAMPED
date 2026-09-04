@@ -82,6 +82,10 @@
  */
 .status {
   font-size: var(--font-size-sm);
+  /* One line, always. The status column sits within a pixel or two of the width of
+     "Worked On", so leaving it wrappable put some rows on two lines and some on one --
+     the same accidental-wrapping problem the tag below had, from the other direction. */
+  white-space: nowrap;
 }
 
 .status-worked-on {
@@ -97,9 +101,83 @@
   font-weight: 600;
 }
 
-/* Topics carry the tag inline after the status, so it needs separating. */
-.status + .tag-warn {
-  margin-left: var(--space-2);
+/*
+ * The reassigned tag, on its own line and on every row.
+ *
+ * It used to sit inline after the status and reach a second line by *wrapping*, which was
+ * accidental -- it only stacked because the column is 93px. Rows that had a tag were
+ * therefore taller than rows that did not, and the card changed height as the filter
+ * changed. Widening the column would have silently pulled it back onto one line and
+ * reopened the gap, so the line is now reserved deliberately rather than won by wrapping.
+ */
+/* ⚠️ .tag.topic-flag, not .topic-flag: `.tag` sets display:inline-block and lives in
+   index.css, which loads after this file, so a single class ties on specificity and loses
+   on order. With the flag left inline the line was still being won by *wrapping* -- the
+   97px real tag overflowed the 93px column while the 19px stand-in fit beside the status
+   -- so tagged rows stayed 5px taller and this whole change did nothing. */
+.tag.topic-flag {
+  display: block;
+  width: fit-content;
+  margin-top: 2px;
+}
+
+/* Holds the line open on a row with nothing to say. Invisible rather than absent, and
+   aria-hidden at the markup, so it is spacing and not a claim about the topic. */
+.topic-flag-empty {
+  visibility: hidden;
+}
+
+/*
+ * The topic name: one line, clipped, and it scrolls itself into view on hover.
+ *
+ * A wrapped name was the other reason rows differed in height. Clipping fixes that, and
+ * the hover scroll is what keeps clipping honest -- nothing is permanently out of reach.
+ *
+ * 100cqw is the visible width and 100% is the text's own, so their difference is exactly
+ * the overflow. min() with 0 is what makes it self-limiting: a name that already fits
+ * yields a positive number and does not move at all. No measuring in JavaScript, and
+ * nothing to update if the column is resized.
+ */
+.topic-name {
+  display: block;
+  container-type: inline-size;
+  overflow: hidden;
+  white-space: nowrap;
+  /* A fade rather than an ellipsis, because it is self-conditional: the gradient only
+     bites on text that actually reaches the right edge, so a short name is untouched.
+     CSS has no "is this overflowing" selector to ask instead. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+}
+
+.topic-name > span {
+  display: inline-block;
+  transition: transform 3.5s linear;
+}
+
+/* On the name, not the row: hovering a name is deliberate, where hovering the row would
+   set names scrolling as the pointer crossed the table. */
+.topic-name:hover > span {
+  transform: translateX(min(0px, calc(100cqw - 100%)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Both, so it stays still rather than snapping to the end. The title attribute is the
+     way to read a clipped name here, as it is on touch. */
+  .topic-name > span {
+    transition: none;
+  }
+
+  .topic-name:hover > span {
+    transform: none;
+  }
+}
+
+/* ⚠️ Declared, because container-type above brings inline-size containment: the name no
+   longer contributes to the column's intrinsic width, which would leave the ~65px topic
+   id and the header to size the whole column. */
+.topic-col {
+  width: 45%;
 }
 
 /* --- Session history ---------------------------------------------------- */
@@ -176,8 +254,13 @@
 
 /* --- Attendance panel --------------------------------------------------- */
 
+/* ⚠️ Wraps unconditionally rather than under a viewport media query. This row of two date
+   inputs now sits in a half-width card, and a media query cannot see that -- on a wide
+   screen it would report "plenty of room" while the header crowded. At full width there is
+   nothing to wrap and the rule costs nothing. */
 .period {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
@@ -220,8 +303,33 @@
   padding-left: 0;
 }
 
-@media (max-width: 720px) {
-  .period {
-    flex-wrap: wrap;
-  }
+
+
+/* The report detail's everything-else list.
+ *
+ * A grid rather than a definition list so the labels line up in columns and an empty value
+ * still occupies its slot -- the page shows every field whether or not the report filled it
+ * in, and a dash that sits where the value would be is what makes that legible. */
+.report-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--space-3) var(--space-5);
+}
+
+.report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.report-field-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.report-field-value {
+  overflow-wrap: anywhere;
 }

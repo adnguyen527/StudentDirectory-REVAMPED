@@ -25,7 +25,8 @@
 
 .list-filter-input {
   width: 100%;
-  padding: var(--space-2) var(--space-2) var(--space-2) 34px;
+  /* Right padding leaves room for the clear button -- see .search-clear. */
+  padding: var(--space-2) 30px var(--space-2) 34px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-sunken);

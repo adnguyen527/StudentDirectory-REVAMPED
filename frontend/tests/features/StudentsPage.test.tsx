@@ -37,6 +37,13 @@ describe('students page', () => {
     expect(within(anthony).getByText('Mar 14, 2026')).toBeInTheDocument()
   })
 
+  it('names the browser tab for the page', async () => {
+    renderApp('/students')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    expect(document.title).toBe('Students · Sigma')
+  })
+
   it('takes its filter from the URL, so a search result is linkable', async () => {
     renderApp('/students?query=Chloe')
 
@@ -56,6 +63,31 @@ describe('students page', () => {
     await waitFor(() => expect(currentLocation()).toBe('/students?query=Chloe'))
     await waitFor(() => expect(tableRows()).toHaveLength(1))
     expect(screen.getByRole('row', { name: /Chloe Tan/ })).toBeInTheDocument()
+  })
+
+  it('clears the search from a button in the field', async () => {
+    // The browsers' own clear button is switched off in ListFilter.css because it collides
+    // with the rounded field, so this is the only way to empty the box in one gesture.
+    // Deliberately past the end -- offset 50 over one match renders no rows, which is
+    // exactly the state the offset has to be cleared out of.
+    const { user } = renderApp('/students?query=Chloe&offset=50')
+    const box = await screen.findByRole('searchbox', { name: /search students by name/i })
+    await waitFor(() => expect(box).toHaveValue('Chloe'))
+
+    await user.click(screen.getByRole('button', { name: /clear search/i }))
+
+    // The offset goes with the term, as it does when the term is deleted by hand.
+    await waitFor(() => expect(currentLocation()).toBe('/students'))
+    expect(box).toHaveValue('')
+    expect(await screen.findByRole('row', { name: /Anthony Nguyen/ })).toBeInTheDocument()
+  })
+
+  it('offers nothing to clear on an empty search box', async () => {
+    // A permanently visible X on an empty field is a control that does nothing.
+    renderApp('/students')
+
+    await screen.findByRole('row', { name: /Anthony Nguyen/ })
+    expect(screen.queryByRole('button', { name: /clear search/i })).not.toBeInTheDocument()
   })
 
   it('shows the filter it arrived with in the box', async () => {

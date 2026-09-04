@@ -2,12 +2,22 @@
 
 Kept out of any single model so neither has to import the other for a filter that belongs
 to both. `students` and `instructors` store `centers` in the same shape -- a list of
-`{name, sessions}` -- so one criterion serves the list route on either.
+`{name, sessions}` -- so one criterion serves the list route on either. `dwp_reports` does
+not, which is what the `field` argument below is for.
 """
 
+# Where the center names sit on students and instructors: a list of {name, sessions}, so
+# the criterion has to reach through the array into a subfield.
+CENTER_FIELD = 'centers.name'
 
-def center_criteria(centers):
+
+def center_criteria(centers, field=CENTER_FIELD):
     """Rows at any of these centers, or no restriction when none are given.
+
+    `field` names where the center lives, because the collections do not agree. Students
+    and instructors carry `[{name, sessions}]` and take the default; `dwp_reports` carries
+    a bare list of strings and passes `centers`. The criterion is otherwise identical --
+    `$in` against an array field matches if any element does, either way.
 
     The filter is multi-select, so several names are a union rather than an intersection.
     On students that union is also a partition -- every student belongs to exactly one
@@ -26,7 +36,7 @@ def center_criteria(centers):
     value, so the two would disagree.
     """
     wanted = [name for name in (centers or []) if name]
-    return {'centers.name': {'$in': wanted}} if wanted else {}
+    return {field: {'$in': wanted}} if wanted else {}
 
 
 def range_criteria(bounds, filterable):

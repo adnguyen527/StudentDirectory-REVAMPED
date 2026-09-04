@@ -1,24 +1,21 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { formatDate, formatNumber, formatTime } from '../../api/bson'
+import { formatDate, formatNumber } from '../../api/bson'
 import { decodeEntities } from '../../api/text'
 import type { DwpReport } from '../../api/types'
 import { Card } from '../../shell/Card'
+import { DateRangeFilter } from '../DateRangeFilter'
+import { useCardRange } from '../ranges'
+import { timeRange } from '../timeRange'
 import { Pager } from '../../shell/Pager'
 import './Profile.css'
 
 const ROWS_PER_PAGE = 25
 
-/** "5:53 PM – 6:53 PM", or just the start. Sessions without an end are 0.7% of the data. */
-function timeRange(report: DwpReport): string {
-  if (!report.session_start) return '—'
-  const start = formatTime(report.session_start)
-  return report.session_end ? `${start} – ${formatTime(report.session_end)}` : start
-}
-
-/** One labelled block of prose, or nothing at all -- never an empty labelled section. */
-function Note({ label, value, internal }: { label: string; value: string | null; internal?: boolean }) {
+/** One labelled block of prose, or nothing at all -- never an empty labelled section.
+ *  Exported for ReportsTable, which builds the same expander. */
+export function Note({ label, value, internal }: { label: string; value: string | null; internal?: boolean }) {
   if (!value?.trim()) return null
   return (
     <div className="note">
@@ -49,13 +46,44 @@ interface SessionHistoryCardProps {
 export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
   const [offset, setOffset] = useState(0)
   const [expanded, setExpanded] = useState<string | null>(null)
+  // Local rather than the URL: every session is already in hand, so this narrows what is
+  // on screen and has no request to make. Same hook the instructor columns above use.
+  const period = useCardRange()
 
-  const slice = reports.slice(offset, offset + ROWS_PER_PAGE)
+  const shown = useMemo(() => {
+    if (!period.active) return reports
+    // Compared as YYYY-MM-DD text, which is what <input type="date"> gives and what the
+    // API's own date bounds parse -- and it sidesteps the timezone question entirely,
+    // since these dates are stored at midnight and rendered in UTC.
+    const day = (report: DwpReport) => (report.date.$date as string).slice(0, 10)
+    return reports.filter((report) => {
+      const on = day(report)
+      // Both ends inclusive, as routes/filtering.py has them.
+      if (period.low && on < period.low) return false
+      if (period.high && on > period.high) return false
+      return true
+    })
+  }, [reports, period.active, period.low, period.high])
+
+  // Snapped back during render rather than reset in an effect, as the Topics card does:
+  // a narrowed list is a different list, and page 3 of it is not page 3 of the whole.
+  const start = offset < shown.length ? offset : 0
+  const slice = shown.slice(start, start + ROWS_PER_PAGE)
 
   return (
-    <Card title="Session history" flush>
+    <Card
+      title="Session history"
+      controls={
+        <DateRangeFilter column="date" label="session date" standalone range={period} />
+      }
+      flush
+    >
       {reports.length === 0 ? (
         <p className="state">No sessions recorded for this student.</p>
+      ) : shown.length === 0 ? (
+        // Distinct from the line above: this student has sessions, just none in the
+        // window asked for, and saying "no sessions recorded" would be wrong.
+        <p className="state">No sessions in this period.</p>
       ) : (
         <>
           <div className="table-scroll">
@@ -70,6 +98,8 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                   <th className="numeric">Mathlete</th>
                   <th className="numeric">Topics</th>
                   <th>Status</th>
+                  {/* No heading: the buttons under it say what they do. */}
+                  <th aria-label="Open report" />
                 </tr>
               </thead>
               <tbody>
@@ -148,11 +178,24 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                             <span className="tag tag-warn">Unfinalized</span>
                           )}
                         </td>
+                        <td>
+                          {/* The same button the reports list carries, so one report has
+                              one page reached the same way from either table. On every
+                              row, including the ones with nothing to expand. */}
+                          <Link
+                            className="button button-row"
+                            to={`/reports/${id}`}
+                            aria-label={`Open the ${formatDate(report.date)} report`}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            Open
+                          </Link>
+                        </td>
                       </tr>
 
                       {isOpen && (
                         <tr className="row-detail row-open-detail">
-                          <td colSpan={8}>
+                          <td colSpan={9}>
                             <Note label="Session summary" value={report.session_summary_notes} />
                             {/* Staff commentary about a named child: labelled so it is
                                 never mistaken for parent-facing copy. */}
@@ -183,8 +226,10 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
           <Pager
             page={{
               limit: ROWS_PER_PAGE,
-              offset,
-              total: reports.length,
+              offset: start,
+              // The filtered total, not the student's: a pager counting rows the table is
+              // not showing would say "1-25 of 149" over three.
+              total: shown.length,
               returned: slice.length,
             }}
             onChange={(next) => {

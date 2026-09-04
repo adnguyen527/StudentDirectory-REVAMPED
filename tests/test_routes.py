@@ -6,7 +6,13 @@ import pytest
 
 from config import DEFAULT_ORIGINS, parse_bool, parse_origins, parse_port
 from tests.conftest import TEST_API_KEY
-from tests.sample_data import ACCOUNT_NGUYEN, ACCOUNT_TAN, ANTHONY_KEY, CHLOE_KEY
+from tests.sample_data import (
+    ACCOUNT_NGUYEN,
+    ACCOUNT_TAN,
+    ANTHONY_KEY,
+    CHLOE_DWP_IDS,
+    CHLOE_KEY,
+)
 
 
 def names(payload):
@@ -972,6 +978,286 @@ class TestGetTopic:
 
     def test_the_route_requires_a_credential(self, anonymous_client):
         assert anonymous_client.get('/api/topics/T-100').status_code == 401
+
+
+def report_students(payload):
+    """The student on each report, in the order served."""
+    return [r['student_name'] for r in payload['reports']]
+
+
+def report_dates(payload):
+    return [r['date']['$date'][:10] for r in payload['reports']]
+
+
+class TestListReports:
+    """GET /api/reports -- the raw session records, not a rollup of them.
+
+    The fixtures: Anthony 3/7 and 3/14 at Westside, Ava 3/10 at Westside, Chloe 2/1 at
+    Eastside.
+    """
+
+    def test_lists_every_report(self, client):
+        response = client.get('/api/reports')
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['page']['total'] == 4
+        assert len(body['reports']) == 4
+
+    def test_newest_first(self, client):
+        assert report_dates(client.get('/api/reports').get_json()) == [
+            '2026-03-14', '2026-03-10', '2026-03-07', '2026-02-01'
+        ]
+
+    def test_paging_never_repeats_or_drops_a_row(self, client):
+        """The property this route exists on. 29,382 real reports over 309 days is a
+        median of 85 a day, so nearly every page boundary lands inside a date tie, and
+        skip/limit over a partial order answers one row on two pages."""
+        seen = []
+        for offset in range(4):
+            page = client.get(
+                '/api/reports', query_string={'limit': 1, 'offset': offset}
+            ).get_json()
+            seen.extend(r['_id']['$oid'] for r in page['reports'])
+        assert len(set(seen)) == 4
+
+    def test_carries_the_student_key_the_row_links_to(self, client):
+        """dwp_reports stores account_id and student_name and no key -- it is raw source
+        data. An account_id alone is a household, so the key has to carry the name."""
+        anthony = next(
+            r for r in client.get('/api/reports').get_json()['reports']
+            if r['student_name'] == 'Anthony Nguyen'
+        )
+        assert anthony['student_key'] == ANTHONY_KEY
+
+    def test_bson_is_serialised(self, client):
+        report = client.get('/api/reports').get_json()['reports'][0]
+        assert '$oid' in report['_id']
+        assert '$date' in report['date']
+
+    def test_empty_result_is_an_empty_list(self, client):
+        body = client.get('/api/reports', query_string={'query': 'nobody'}).get_json()
+        assert body['reports'] == []
+        assert body['page']['total'] == 0
+
+
+class TestReportPrivacy:
+    """What /api/reports must not send.
+
+    The private fields are withheld everywhere. student_notes is the one that differs by
+    route: a student's own profile serves it, and this list does not -- reading one
+    child's notes and paging through 3,594 of them are different acts.
+    """
+
+    @pytest.mark.parametrize('field', [
+        'row_hash',
+        'lead_id',
+        'internal_notes',
+        'notes_from_center_director',
+        'notes_for_center_director',
+        'student_notes',
+    ])
+    def test_withheld_fields_are_not_served(self, client, field):
+        reports = client.get('/api/reports').get_json()['reports']
+        assert reports, 'no reports -- the assertion below is vacuous'
+        assert all(field not in report for report in reports)
+
+    def test_the_response_is_not_empty_of_everything(self, client):
+        """Guards the guard: a projection that withheld the whole document would make
+        every assertion above pass for the wrong reason."""
+        chloe = next(
+            r for r in client.get('/api/reports').get_json()['reports']
+            if r['student_name'] == 'Chloe Tan'
+        )
+        assert chloe['session_summary_notes'] == 'worked through angle pairs'
+        assert chloe['pages_completed'] == 7
+
+    def test_the_profile_still_serves_the_student_notes(self, client):
+        """The withholding is this route's, not a change to what the profile shows."""
+        reports = client.get(f'/api/students/{CHLOE_KEY}').get_json()['dwp_reports']
+        assert reports[0]['student_notes'] == 'gets discouraged when a page runs long'
+
+
+class TestFilterReports:
+
+    def test_query_matches_the_student(self, client):
+        payload = client.get('/api/reports', query_string={'query': 'Chloe'}).get_json()
+        assert report_students(payload) == ['Chloe Tan']
+
+    def test_query_does_not_match_the_instructor(self, client):
+        """The instructor is a column you read, not the thing you arrive looking for --
+        and a search that quietly matched both would answer two questions at once."""
+        payload = client.get('/api/reports', query_string={'query': 'Dana'}).get_json()
+        assert payload['reports'] == []
+
+    def test_filters_by_center(self, client):
+        """The centers on a report are bare strings, not the {name, sessions} pairs
+        students and instructors carry -- a criterion built for those matches nothing."""
+        payload = client.get('/api/reports', query_string={'center': 'Eastside'}).get_json()
+        assert report_students(payload) == ['Chloe Tan']
+
+    def test_an_unknown_center_matches_nothing_rather_than_400ing(self, client):
+        payload = client.get('/api/reports', query_string={'center': 'Xyz'}).get_json()
+        assert payload['reports'] == []
+        assert payload['page']['total'] == 0
+
+    def test_filters_by_a_date_window_with_both_ends_inclusive(self, client):
+        payload = client.get('/api/reports', query_string={
+            'date_from': '2026-03-07', 'date_to': '2026-03-10'
+        }).get_json()
+        assert report_dates(payload) == ['2026-03-10', '2026-03-07']
+
+    def test_the_filters_narrow_together(self, client):
+        # Chloe is the only Eastside student and she is not a Nguyen.
+        payload = client.get('/api/reports', query_string={
+            'query': 'Nguyen', 'center': 'Eastside'
+        }).get_json()
+        assert payload['reports'] == []
+
+    def test_refuses_a_backwards_window(self, client):
+        response = client.get('/api/reports', query_string={
+            'date_from': '2026-03-10', 'date_to': '2026-03-01'
+        })
+        assert response.status_code == 400
+
+    def test_refuses_a_date_that_is_not_a_date(self, client):
+        assert client.get('/api/reports?date_from=last-tuesday').status_code == 400
+
+
+class TestSortReports:
+
+    def test_sorts_by_student_and_breaks_the_tie_on_the_id(self, client):
+        """Anthony has two sessions, so his name is not a total order on its own."""
+        payload = client.get('/api/reports?sort=student').get_json()
+        assert report_students(payload) == [
+            'Anthony Nguyen', 'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan'
+        ]
+
+    def test_reverses_the_student_column_without_reversing_the_tie_break(self, client):
+        """The tie-break is ascending whichever way the column runs -- models/sorting.py.
+        Anthony's two rows hold the same order in both directions."""
+        ascending = [r['_id']['$oid'] for r in
+                     client.get('/api/reports?sort=student&direction=asc').get_json()['reports']]
+        descending = [r['_id']['$oid'] for r in
+                      client.get('/api/reports?sort=student&direction=desc').get_json()['reports']]
+        assert ascending[:2] == descending[-2:]
+
+    def test_sorts_by_date_oldest_first(self, client):
+        payload = client.get('/api/reports?sort=date&direction=asc').get_json()
+        assert report_dates(payload) == [
+            '2026-02-01', '2026-03-07', '2026-03-10', '2026-03-14'
+        ]
+
+    def test_pages_a_sorted_list_without_repeating_a_row(self, client):
+        seen = []
+        for offset in range(4):
+            seen += report_students(
+                client.get(f'/api/reports?sort=student&limit=1&offset={offset}').get_json()
+            )
+        assert seen == ['Anthony Nguyen', 'Anthony Nguyen', 'Ava Nguyen', 'Chloe Tan']
+
+    def test_sorts_a_search_result(self, client):
+        payload = client.get('/api/reports?query=Nguyen&sort=date&direction=asc').get_json()
+        assert report_dates(payload) == ['2026-03-07', '2026-03-10', '2026-03-14']
+
+    def test_refuses_a_column_that_does_not_exist(self, client):
+        assert client.get('/api/reports?sort=bogus').status_code == 400
+
+    def test_refuses_a_column_that_is_null_on_unfinalized_rows(self, client):
+        """Pages and mathlete score are not sortable yet: both are null on the 1,068
+        reports nobody finalized, and ordering them honestly needs the nulls-last
+        treatment Topic._page carries. Refused rather than silently ignored."""
+        assert client.get('/api/reports?sort=pages').status_code == 400
+
+    def test_refuses_a_direction_that_is_not_one(self, client):
+        assert client.get('/api/reports?sort=date&direction=sideways').status_code == 400
+
+
+class TestGetReport:
+    """GET /api/reports/<report_id> -- one session, whole."""
+
+    def report_id(self, client):
+        """Chloe's, which is the fixture carrying every private field and the notes."""
+        return str(CHLOE_DWP_IDS[0])
+
+    def test_returns_the_report(self, client):
+        response = client.get(f'/api/reports/{self.report_id(client)}')
+        assert response.status_code == 200
+
+        report = response.get_json()['report']
+        assert report['student_name'] == 'Chloe Tan'
+        assert report['pages_completed'] == 7
+        assert report['centers'] == ['Eastside']
+
+    def test_carries_the_student_key(self, client):
+        """The header links back to the student, and dwp_reports stores no key."""
+        report = client.get(f'/api/reports/{self.report_id(client)}').get_json()['report']
+        assert report['student_key'] == CHLOE_KEY
+
+    def test_serves_the_student_notes_the_list_withholds(self, client):
+        """⚠️ The one deliberate difference between DETAIL_PROJECTION and LIST_PROJECTION.
+
+        Asserted as one test rather than two so the difference reads as a decision. One
+        report opened on purpose is the act the student's own profile already allows;
+        paging through 3,594 of them behind a date filter is not.
+        """
+        detail = client.get(f'/api/reports/{self.report_id(client)}').get_json()['report']
+        assert detail['student_notes'] == 'gets discouraged when a page runs long'
+
+        listed = client.get('/api/reports').get_json()['reports']
+        assert listed, 'no reports -- the assertion below is vacuous'
+        assert all('student_notes' not in report for report in listed)
+
+    @pytest.mark.parametrize('field', [
+        'row_hash',
+        'lead_id',
+        'internal_notes',
+        'notes_from_center_director',
+        'notes_for_center_director',
+    ])
+    def test_private_fields_are_still_withheld(self, client, field):
+        """Everything PRIVATE_FIELDS covers stays server-side on this route too."""
+        report = client.get(f'/api/reports/{self.report_id(client)}').get_json()['report']
+        assert field not in report
+
+    def test_bson_is_serialised(self, client):
+        report = client.get(f'/api/reports/{self.report_id(client)}').get_json()['report']
+        assert '$oid' in report['_id']
+        assert '$date' in report['date']
+
+    def test_unknown_id_is_404(self, client):
+        response = client.get('/api/reports/64b0000000000000000000ff')
+        assert response.status_code == 404
+        assert response.get_json() == {'error': 'Report not found'}
+
+    def test_a_malformed_id_is_404_rather_than_500(self, client):
+        """A mistyped URL reaches ObjectId() as arbitrary text. Without find_by_id
+        absorbing InvalidId this is a stack trace, and the honest answer is the same
+        either way: there is no such report."""
+        response = client.get('/api/reports/not-an-oid')
+        assert response.status_code == 404
+        assert response.get_json() == {'error': 'Report not found'}
+
+
+class TestReportPagination:
+
+    def test_defaults_to_one_page(self, client):
+        page = client.get('/api/reports').get_json()['page']
+        assert page['limit'] == 50
+        assert page['offset'] == 0
+        assert page['returned'] == 4
+
+    def test_total_counts_every_match_not_the_page(self, client):
+        body = client.get('/api/reports', query_string={'limit': 1}).get_json()
+        assert body['page']['returned'] == 1
+        assert body['page']['total'] == 4
+
+    def test_the_total_follows_the_filter(self, client):
+        body = client.get('/api/reports', query_string={'center': 'Eastside'}).get_json()
+        assert body['page']['total'] == 1
+
+    def test_refuses_a_limit_of_zero(self, client):
+        # pymongo reads .limit(0) as "no limit", which would serve the collection.
+        assert client.get('/api/reports?limit=0').status_code == 400
 
 
 class TestMetrics:

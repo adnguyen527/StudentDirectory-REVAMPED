@@ -209,6 +209,17 @@ export interface InstructorRosterEntry {
   student_name: string
   account_id: string
   sessions: number
+  /**
+   * Sessions with a recorded page count, which is exactly the finalized ones -- the two
+   * are the same thing in this data. It is the denominator for pages per session:
+   * dividing by `sessions` folds in reports nobody ever completed and understates the
+   * rate. Same field, same reason, as StudentInstructor.
+   *
+   * Optional because the `instructors` collection only grew it when the roster started
+   * showing that column; a document built before that rebuild has none, and
+   * pagesPerSession answers such a row with the same dash it gives an under-five pair.
+   */
+  finalized_sessions?: number
   pages_completed: number
 }
 
@@ -365,6 +376,77 @@ export interface CentersResponse {
   centers: string[]
 }
 
+/**
+ * A report as the list route returns it.
+ *
+ * The profile's shape minus student_notes, which /api/reports does not send -- reading one
+ * child's notes on their own profile and paging through 3,594 of them are different acts,
+ * and models/dwp_report.py's LIST_PROJECTION is where that is decided. `Omit` rather than a
+ * hand-written twin so a field added to DwpReport arrives here too.
+ *
+ * student_key is derived by the route rather than stored: dwp_reports is raw source data
+ * and carries account_id and student_name alone -- routes/reports.py, _with_student_key.
+ */
+export type ReportListItem = Omit<DwpReport, 'student_notes'> & {
+  student_name: string
+  account_id: string
+  student_key: string
+}
+
+/**
+ * One report, whole -- everything /api/reports/<id> returns.
+ *
+ * The list's row plus student_notes and the fields nothing else renders. The percentages
+ * are measured over all 29,382 reports and are the point of writing them down: this page
+ * shows every field whether or not it has a value, so a row that is always empty is the
+ * data saying so rather than a bug. Two of them are empty in *every* report today.
+ */
+export interface ReportDetail extends ReportListItem {
+  /** Staff commentary about a named child. 12.2%. Served here, withheld by the list. */
+  student_notes: string | null
+
+  /** On 100% of reports, and shown nowhere else in the app. */
+  sessions_this_month: number | null
+  last_punch_of_day: boolean | null
+  needs_primary_deck_update: boolean | null
+  needs_secondary_deck_update: boolean | null
+
+  /** 94.7% and 95.1%. */
+  finalized_date: ExtDate | null
+  center_orgs: string[]
+
+  /** The digital reward system: 9.0% carry a card, 3.3% a star count, 1.0% a session's. */
+  card_level: string | null
+  stars_current: number | null
+  stars_max: number | null
+  session_stars_added: number | null
+
+  /** 1.0%. ⚠️ secondary_deck_next_page is null in all 29,382 -- kept so it appears if the
+   *  source ever starts writing it, but nothing is designed around it. */
+  primary_deck_next_page: string | null
+  secondary_deck_next_page: string | null
+
+  /** ⚠️ Null in all 29,382 reports. As secondary_deck_next_page. */
+  internet_rating: string | null
+
+  /** 17.4% carry the two flags, 13.0% a description, and under 1.5% either time figure. */
+  schoolwork_completed: boolean | null
+  schoolwork_checked: boolean | null
+  schoolwork_description: string | null
+  schoolwork_start_time: string | null
+  schoolwork_duration_min: number | null
+
+  /** 161 reports, 0.5% -- the rarest fields in the collection. */
+  student_goal1: string | null
+  student_goal2: string | null
+  student_goal3: string | null
+}
+
+export interface ReportDetailResponse {
+  report: ReportDetail
+}
+
 export type StudentsResponse = Paged<'students', StudentListItem>
 export type InstructorsResponse = Paged<'instructors', InstructorListItem>
 export type TopicsResponse = Paged<'topics', TopicListItem>
+export type ReportsResponse = Paged<'reports', ReportListItem>

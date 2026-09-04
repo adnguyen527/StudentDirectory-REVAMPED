@@ -6,9 +6,11 @@ import { getTopic } from '../../api/endpoints'
 import type { TopicDetailResponse } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
 import { Card } from '../../shell/Card'
+import { CardRow } from '../../shell/CardRow'
 import { ChevronIcon, DashboardIcon, StudentsIcon } from '../../shell/Icons'
 import { Pager } from '../../shell/Pager'
 import { StatTile } from '../../shell/StatTile'
+import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import './Profile.css'
 
 /** The median topic has 17 instructors and the widest 82 -- 62% need more than one page. */
@@ -30,6 +32,17 @@ export function TopicProfilePage() {
   )
 
   const topic = data?.topic
+
+  // Named for the record, not the route, so a row of tabs and the Back menu say which
+  // topic. Null while it loads, so the previous title holds rather than flashing the
+  // wordmark between two real names.
+  //
+  // The id leads: 90 names are carried by more than one topic and four are called
+  // "Patterns - Number Patterns", so the name alone can name two different tabs the same
+  // thing -- and the front of the string is the half that survives a narrow one.
+  useDocumentTitle(
+    error?.status === 404 ? 'Topic not found' : topic ? `${topic.topic_id} ${topic.name}` : null,
+  )
 
   if (error?.status === 404) {
     return (
@@ -144,74 +157,80 @@ export function TopicProfilePage() {
         />
       </div>
 
-      <Card title="Where students stand" flush>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>State</th>
-                <th className="numeric">Students</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* These three are mutually exclusive and sum to unique_students: `state`
-                  reads a student's last assignment only. The first is shown as a fraction
-                  of its own count -- how many of the students who finished it got to
-                  Mastered rather than stopping at Completed. */}
-              <tr>
-                <td>Mastered</td>
-                <td className="numeric">
-                  {topic.students_finished === 0 ? (
-                    <span className="muted">—</span>
-                  ) : (
-                    `${formatNumber(topic.students_mastered)} / ${formatNumber(
-                      topic.students_finished,
-                    )}`
-                  )}
-                </td>
-              </tr>
-              <tr>
-                <td>Still on the plan</td>
-                <td className="numeric">{formatNumber(topic.students_on_plan)}</td>
-              </tr>
-              <tr>
-                <td>Came off the plan unfinished</td>
-                <td className="numeric">{formatNumber(topic.students_removed)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      {/* Side by side because they are the same three states counted two ways -- once
+          per student, once per session -- and the difference between the two columns is
+          the thing worth seeing. Stacked, you had to remember the first to read the
+          second. */}
+      <CardRow>
+        <Card title="Where students stand" flush>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>State</th>
+                  <th className="numeric">Students</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* These three are mutually exclusive and sum to unique_students: `state`
+                    reads a student's last assignment only. The first is shown as a fraction
+                    of its own count -- how many of the students who finished it got to
+                    Mastered rather than stopping at Completed. */}
+                <tr>
+                  <td>Mastered</td>
+                  <td className="numeric">
+                    {topic.students_finished === 0 ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      `${formatNumber(topic.students_mastered)} / ${formatNumber(
+                        topic.students_finished,
+                      )}`
+                    )}
+                  </td>
+                </tr>
+                <tr>
+                  <td>Still on the plan</td>
+                  <td className="numeric">{formatNumber(topic.students_on_plan)}</td>
+                </tr>
+                <tr>
+                  <td>Came off the plan unfinished</td>
+                  <td className="numeric">{formatNumber(topic.students_removed)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Card>
 
-      <Card title="How sessions ended" flush>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th className="numeric">Sessions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* The ladder, not three labels: Mastered implies Completed implies Worked
-                  On. The source writes one status per session, so a topic mastered is
-                  almost never also written as completed. */}
-              <tr>
-                <td>Worked on</td>
-                <td className="numeric">{formatNumber(topic.times_worked_on)}</td>
-              </tr>
-              <tr>
-                <td>Completed</td>
-                <td className="numeric">{formatNumber(topic.times_completed)}</td>
-              </tr>
-              <tr>
-                <td>Mastered</td>
-                <td className="numeric">{formatNumber(topic.times_mastered)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </Card>
+        <Card title="How sessions ended" flush>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th className="numeric">Sessions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* The ladder, not three labels: Mastered implies Completed implies Worked
+                    On. The source writes one status per session, so a topic mastered is
+                    almost never also written as completed. */}
+                <tr>
+                  <td>Worked on</td>
+                  <td className="numeric">{formatNumber(topic.times_worked_on)}</td>
+                </tr>
+                <tr>
+                  <td>Completed</td>
+                  <td className="numeric">{formatNumber(topic.times_completed)}</td>
+                </tr>
+                <tr>
+                  <td>Mastered</td>
+                  <td className="numeric">{formatNumber(topic.times_mastered)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </CardRow>
 
       <Card title={`Taught most by · ${formatNumber(topic.instructors.length)} instructors`} flush>
         {topic.instructors.length === 0 ? (

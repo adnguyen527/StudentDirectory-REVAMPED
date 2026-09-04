@@ -4,13 +4,16 @@ import { Link, useParams } from 'react-router-dom'
 import { formatDate, formatNumber, toDate } from '../../api/bson'
 import { getInstructor } from '../../api/endpoints'
 import type { ExtDate } from '../../api/bson'
-import type { InstructorDetailResponse } from '../../api/types'
+import type { InstructorDetailResponse, InstructorRosterEntry } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
+import { CardRow } from '../../shell/CardRow'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { Pager } from '../../shell/Pager'
 import { StatTile } from '../../shell/StatTile'
+import { useDocumentTitle } from '../../shell/useDocumentTitle'
+import { PAGES_PER_SESSION_MIN, pagesPerSession } from './pagesPerSession'
 import './Profile.css'
 
 /** Matches the topic page's instructor table. 91% of rosters need more than one page --
@@ -39,6 +42,19 @@ function daysByMonth(days: ExtDate[]): { month: string; days: number }[] {
  * Keyed on the name, which is all the source data carries -- so two people sharing one
  * are merged here and nothing can separate them.
  */
+/**
+ * The pages-per-session cell, or the dash that stands in for no rate.
+ *
+ * Two ways to have no rate, and they are the same answer on screen: fewer than
+ * PAGES_PER_SESSION_MIN sessions together, or a roster document built before the
+ * `instructors` collection carried finalized_sessions at all.
+ */
+function rate(entry: InstructorRosterEntry) {
+  const value = pagesPerSession(entry)
+  if (value === null) return <span className="muted">—</span>
+  return value.toFixed(1)
+}
+
 export function InstructorProfilePage() {
   const { instructorName = '' } = useParams()
   const [rosterOffset, setRosterOffset] = useState(0)
@@ -50,6 +66,11 @@ export function InstructorProfilePage() {
 
   const instructor = data?.instructor
   const months = useMemo(() => daysByMonth(instructor?.days_taught ?? []), [instructor])
+
+  // Named for the record, not the route: a row of tabs and the Back menu are only useful
+  // if they say which student. Null while it loads, so the previous title holds rather
+  // than flashing the wordmark between two real names.
+  useDocumentTitle(error?.status === 404 ? 'Instructor not found' : instructor?.instructor_name ?? null)
 
   if (error?.status === 404) {
     return (
@@ -159,85 +180,100 @@ export function InstructorProfilePage() {
         />
       </div>
 
-      <Card title="Days taught by month" flush>
-        <AsyncBoundary
-          loading={false}
-          error={null}
-          empty={months.length === 0}
-          emptyMessage="No days recorded."
-        >
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th className="numeric">Days</th>
-                </tr>
-              </thead>
-              <tbody>
-                {months.map((month) => (
-                  <tr key={month.month}>
-                    <td>{month.month}</td>
-                    <td className="numeric">{formatNumber(month.days)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </AsyncBoundary>
-      </Card>
-
-      <Card title={`Roster · ${formatNumber(rosterSize)} students`} flush>
-        {instructor.students.length === 0 ? (
-          <p className="state">No students on this roster.</p>
-        ) : (
-          <>
+      {/* Side by side: when they worked and who they worked with are the two halves of
+          the same question, and the months table is two columns of numbers that spent a
+          full-width row saying very little. */}
+      <CardRow>
+        <Card title="Days taught by month" flush>
+          <AsyncBoundary
+            loading={false}
+            error={null}
+            empty={months.length === 0}
+            emptyMessage="No days recorded."
+          >
             <div className="table-scroll">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Student</th>
-                    <th>Account</th>
-                    <th className="numeric">Sessions</th>
-                    <th className="numeric">Pages completed</th>
+                    <th>Month</th>
+                    <th className="numeric">Days</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {roster.map((entry) => (
-                    <tr key={entry.student_key}>
-                      <td className="primary-name">
-                        {/* The roster carries student_key, so this links straight through
-                            with no lookup. */}
-                        <Link
-                          className="row-link"
-                          to={`/students/${encodeURIComponent(entry.student_key)}`}
-                        >
-                          {entry.student_name}
-                        </Link>
-                      </td>
-                      <td className="muted account-id" title={entry.account_id}>
-                        {entry.account_id.slice(0, 8)}
-                      </td>
-                      <td className="numeric">{formatNumber(entry.sessions)}</td>
-                      <td className="numeric">{formatNumber(entry.pages_completed)}</td>
+                  {months.map((month) => (
+                    <tr key={month.month}>
+                      <td>{month.month}</td>
+                      <td className="numeric">{formatNumber(month.days)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          </AsyncBoundary>
+        </Card>
 
-            <Pager
-              page={{
-                limit: ROSTER_PAGE,
-                offset,
-                total: instructor.students.length,
-                returned: roster.length,
-              }}
-              onChange={setRosterOffset}
-            />
-          </>
-        )}
-      </Card>
+        <Card title={`Roster · ${formatNumber(rosterSize)} students`} flush>
+          {instructor.students.length === 0 ? (
+            <p className="state">No students on this roster.</p>
+          ) : (
+            <>
+              <div className="table-scroll">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th className="numeric">Sessions</th>
+                      <th className="numeric">Pages completed</th>
+                      {/* The same figure the student's own profile shows for this pair,
+                          from the other side -- see pagesPerSession. */}
+                      <th className="numeric">Pages / session</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roster.map((entry) => (
+                      <tr key={entry.student_key}>
+                        <td className="primary-name">
+                          {/* The roster carries student_key, so this links straight through
+                              with no lookup. */}
+                          <Link
+                            className="row-link"
+                            to={`/students/${encodeURIComponent(entry.student_key)}`}
+                          >
+                            {entry.student_name}
+                          </Link>
+                        </td>
+                        <td className="numeric">{formatNumber(entry.sessions)}</td>
+                        <td className="numeric">{formatNumber(entry.pages_completed)}</td>
+                        {/* A dash, not a zero: under five sessions together there is no
+                            pace to quote, and a roster built before the collection grew
+                            finalized_sessions has nothing to divide by either. */}
+                        <td className="numeric">{rate(entry)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* The same caveat the student's own profile carries for this figure, since
+                  it is the same figure read from the other side. */}
+              <p className="muted table-footnote">
+                * Pages per session is shown from {PAGES_PER_SESSION_MIN} sessions together
+                and averages over sessions with a recorded page count, so it will not equal
+                pages &divide; sessions where a report was never finalized.
+              </p>
+
+              <Pager
+                page={{
+                  limit: ROSTER_PAGE,
+                  offset,
+                  total: instructor.students.length,
+                  returned: roster.length,
+                }}
+                onChange={setRosterOffset}
+              />
+            </>
+          )}
+        </Card>
+      </CardRow>
 
       {/* Named in the README's profile spec but not buildable: the instructors collection
           carries no topic data, so there is nothing to rank. See the P2 data-integrity

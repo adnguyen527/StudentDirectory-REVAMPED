@@ -6,6 +6,7 @@ import { getStudent } from '../../api/endpoints'
 import type { StudentDetailResponse, StudentInstructor } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
 import { Card } from '../../shell/Card'
+import { CardRow } from '../../shell/CardRow'
 import { Pager } from '../../shell/Pager'
 import { NumberRangeFilter } from '../NumberRangeFilter'
 import { ColumnHeader } from '../SortHeader'
@@ -13,33 +14,16 @@ import { useCardRange } from '../ranges'
 import { useCardSort } from '../useSort'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
+import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { AttendancePanel } from './AttendancePanel'
 import { SessionHistoryCard } from './SessionHistoryCard'
 import { TopicsCard } from './TopicsCard'
+import { PAGES_PER_SESSION_MIN, pagesPerSession } from './pagesPerSession'
 import './Profile.css'
 
 /** Matches the other two profile tables. The median student has 9 instructors and the
  *  widest 23, so 43% of profiles need more than one page. */
 const INSTRUCTOR_PAGE = 10
-
-/** Below this many sessions a pages-per-session figure is noise, not a pace. The median
- *  (student, instructor) pair is 2 sessions, so most rows show a dash. */
-const PAGES_PER_SESSION_MIN = 5
-
-/**
- * An instructor's pages per session with this student, or null where there is no rate to
- * quote -- under five sessions together, or nothing finalized to divide by.
- *
- * One function for the cell, the sort and the filter, so a row cannot display one figure
- * and be ordered by another. Null is the same answer in all three: shown as a dash, sorted
- * to the bottom, and matched by no range -- the same shape as topics' median, and for the
- * same reason.
- */
-function pagesPerSession(instructor: StudentInstructor): number | null {
-  if (instructor.sessions < PAGES_PER_SESSION_MIN) return null
-  if (instructor.finalized_sessions === 0) return null
-  return instructor.pages_completed / instructor.finalized_sessions
-}
 
 /** The value a column is read, sorted and filtered by. */
 const INSTRUCTOR_VALUES: Record<string, (row: StudentInstructor) => number | null> = {
@@ -99,6 +83,11 @@ export function StudentProfilePage() {
     }
     return months.size
   }, [data])
+
+  // Named for the record, not the route: a row of tabs and the Back menu are only useful
+  // if they say which student. Null while it loads, so the previous title holds rather
+  // than flashing the wordmark between two real names.
+  useDocumentTitle(error?.status === 404 ? 'Student not found' : data?.student?.student_name ?? null)
 
   // A mistyped or stale key is an ordinary thing to do, not an error to shout about.
   if (error?.status === 404) {
@@ -237,12 +226,17 @@ export function StudentProfilePage() {
         />
       </div>
 
-      <AttendancePanel
-        studentKey={student.student_key}
-        lastSessionDate={student.last_session_date}
-      />
+      {/* The two panel cards share a row: both are a header control over a narrow table,
+          and neither filled a full-width one. Their headers wrap rather than crowd --
+          see .period in Profile.css, which had to stop keying off the viewport. */}
+      <CardRow>
+        <AttendancePanel
+          studentKey={student.student_key}
+          lastSessionDate={student.last_session_date}
+        />
 
-      <TopicsCard topics={student.topics} />
+        <TopicsCard topics={student.topics} />
+      </CardRow>
 
       <Card title="Instructors" flush>
         <div className="table-scroll">

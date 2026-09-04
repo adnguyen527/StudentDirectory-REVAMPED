@@ -6,12 +6,28 @@ import type { Metrics } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { FunnelIcon } from '../shell/Icons'
 import { FilterPopover } from '../shell/FilterPopover'
-import { useRange } from './ranges'
+import { useRange, type RangeState } from './ranges'
 import './ColumnFilter.css'
 
 interface DateRangeFilterProps {
   column: string
   label: string
+  /**
+   * Renders as a labelled pill rather than the column headers' glyph.
+   *
+   * The two looks answer two positions. In a header row the filter is one of seven and has
+   * to disappear until wanted, so it is a faint funnel; in a card header's control row it
+   * stands beside a search box and a center dropdown, where a bare icon reads as a stray
+   * button. FilterPopover already draws both -- it falls back to the summary text and a
+   * caret when no icon is given -- so this only chooses between them.
+   */
+  standalone?: boolean
+  /**
+   * Where the bounds are kept. Omitted on the list pages, which keep them in the URL and
+   * send them to the API; supplied by a profile card, which filters rows it already has.
+   * Same escape hatch, same reason, as NumberRangeFilter.
+   */
+  range?: RangeState
 }
 
 /** Windows worth one click. Days back from the newest session, not from today. */
@@ -47,8 +63,10 @@ function dateSummary(from: string, to: string) {
  * that anchor has loaded, the panel offers the two date boxes alone rather than a window
  * it cannot honestly name.
  */
-export function DateRangeFilter({ column, label }: DateRangeFilterProps) {
-  const { low, high, active, apply } = useRange(column, 'date')
+export function DateRangeFilter({ column, label, standalone, range }: DateRangeFilterProps) {
+  // Always called, ignored when the caller brought its own -- see NumberRangeFilter.
+  const urlRange = useRange(column, 'date')
+  const { low, high, active, apply } = range ?? urlRange
   const { data } = useApi<Metrics>((signal) => getMetrics(signal), [])
 
   // Seeded from the URL and re-seeded when it changes, so an arrived-at filter shows its
@@ -73,8 +91,8 @@ export function DateRangeFilter({ column, label }: DateRangeFilterProps) {
       label={`Filter by ${label}`}
       summary={dateSummary(low, high)}
       active={active}
-      icon={<FunnelIcon />}
-      className="column-filter-trigger"
+      icon={standalone ? undefined : <FunnelIcon />}
+      className={standalone ? undefined : 'column-filter-trigger'}
     >
       <form
         className="column-filter"

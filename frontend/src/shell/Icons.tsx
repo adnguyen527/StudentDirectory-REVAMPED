@@ -1,7 +1,7 @@
 /**
  * The handful of glyphs the shell needs, inline.
  *
- * Six icons is not worth an icon package. All of them stroke in currentColor and size
+ * A handful of icons is not worth an icon package. All of them stroke in currentColor and size
  * from the `size` prop, so a nav item colouring itself colours its icon too.
  */
 
@@ -78,6 +78,18 @@ export function TopicsIcon({ size = 19, className }: IconProps) {
   )
 }
 
+/** A single sheet with lines on it: one session's report, not a folder of them. */
+export function ReportsIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M6 3.5h7.5L19 9v11.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" />
+      <path d="M13.5 3.5V9H19" />
+      <path d="M8.5 13h7" />
+      <path d="M8.5 16.5h4.5" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ size = 19, className }: IconProps) {
   return (
     <svg {...base(size, className)}>
@@ -91,6 +103,15 @@ export function PlusIcon({ size = 17, className }: IconProps) {
   return (
     <svg {...base(size, className)}>
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+/** The clear button on a search field. */
+export function CloseIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="m6 6 12 12M18 6 6 18" />
     </svg>
   )
 }

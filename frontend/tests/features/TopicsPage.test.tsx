@@ -37,7 +37,25 @@ describe('topics page', () => {
     // By position, not by text: several of these columns hold the same number on this
     // row, so a text query would be ambiguous about which column it proved.
     const cells = within(row).getAllByRole('cell').map((cell) => cell.textContent)
-    expect(cells).toEqual(['FractionsT-100', '9', '3', '2', '1', '0', '3', '1'])
+    // The trailing cell is the answer-key placeholder, which has no figure to check.
+    expect(cells).toEqual([
+      'FractionsT-100', '9', '3', '2', '1', '0', '3', '1', 'Answer key',
+    ])
+  })
+
+  it('offers an answer key on every row, not yet wired to anything', async () => {
+    // ⚠️ A placeholder: there are no answer-key PDFs and nothing serving them. It is
+    // rendered so the column's width and the row's proportions are settled, and disabled
+    // so it does not promise a document that will not open -- the same bargain the
+    // sidebar's "New report" button makes.
+    renderApp('/topics')
+
+    const rows = await screen.findAllByRole('row')
+    const buttons = screen.getAllByRole('button', { name: 'Answer key' })
+    // One per data row, header excluded.
+    expect(buttons).toHaveLength(rows.length - 1)
+    for (const button of buttons) expect(button).toBeDisabled()
+    expect(buttons[0]).toHaveAttribute('title', 'Coming with answer-key PDFs')
   })
 
   it('leads with the most worked topic and says so', async () => {

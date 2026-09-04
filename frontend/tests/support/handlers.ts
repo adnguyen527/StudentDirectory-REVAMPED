@@ -1,16 +1,19 @@
 import { HttpResponse, http } from 'msw'
 
-import type { TopicDetail, TopicListItem } from '../../src/api/types'
+import type { ReportDetail, TopicDetail, TopicListItem } from '../../src/api/types'
 
 import {
   ANTHONY_ATTENDANCE,
   ANTHONY_DETAIL,
   ANTHONY_REPORTS,
+  BARE_REPORT,
   DANA_DETAIL,
   DECIMALS_TWO_DETAIL,
   FRACTIONS_DETAIL,
   INSTRUCTORS,
   METRICS,
+  REPORTS,
+  RICH_REPORT,
   STUDENTS,
   TOPICS,
 } from './sampleData'
@@ -52,6 +55,17 @@ function atCenters<T extends { centers: { name: string }[] }>(rows: T[], url: UR
 }
 
 /**
+ * The same union over `dwp_reports`, where a center is a bare string rather than a
+ * {name, sessions} pair -- models/dwp_report.py, CENTER_FIELD. One report can name more
+ * than one center, so this union is not a partition either.
+ */
+function atCenterNames<T extends { centers: string[] }>(rows: T[], url: URL) {
+  const wanted = url.searchParams.getAll('center')
+  if (wanted.length === 0) return rows
+  return rows.filter((row) => row.centers.some((name) => wanted.includes(name)))
+}
+
+/**
  * routes/sorting.py and models/sorting.py, reimplemented here for the same reason the
  * search rules are: a fake that sorts more forgivingly than the API lets a header pass a
  * test it would fail in the browser.
@@ -76,6 +90,13 @@ const INSTRUCTOR_SORTS: SortSpec = {
   days: ['total_days_taught', 'desc'],
   unfinalized: ['unfinalized_sessions', 'desc'],
   last_session: ['last_session_date', 'desc'],
+}
+
+// Two columns only: pages and mathlete score are null on unfinalized reports and are not
+// sortable on the real route either -- models/dwp_report.py says why.
+const REPORT_SORTS: SortSpec = {
+  date: ['date', 'desc'],
+  student: ['student_name', 'asc'],
 }
 
 const TOPIC_SORTS: SortSpec = {
@@ -182,6 +203,10 @@ const TOPIC_RANGES: RangeSpec = {
   reassigned: ['total_reassignments', 'number'],
 }
 
+const REPORT_RANGES: RangeSpec = {
+  date: ['date', 'date'],
+}
+
 /** A row's value as something comparable to a bound of the same kind. */
 function bounded(value: unknown, kind: 'number' | 'date') {
   if (value === null || value === undefined) return null
@@ -241,6 +266,12 @@ function matchingTopics(rows: TopicListItem[], query: string | null) {
       row.topic_id.toLowerCase().includes(needle) ||
       row.also_known_as.some((name) => name.toLowerCase().includes(needle)),
   )
+}
+
+/** As TOPIC_DETAILS. The rich one carries every sparse field, the bare one none of them. */
+const REPORT_DETAILS: Record<string, ReportDetail> = {
+  [RICH_REPORT._id.$oid]: RICH_REPORT,
+  [BARE_REPORT._id.$oid]: BARE_REPORT,
 }
 
 /** The detail route answers for these ids and 404s for anything else. */
@@ -369,5 +400,37 @@ export const handlers = [
       return HttpResponse.json({ error: 'Topic not found' }, { status: 404 })
     }
     return HttpResponse.json({ topic: detail })
+  }),
+
+  // --- Reports ---
+
+  // The tie-break is _id -- read off the $oid, since the field itself is an object and
+  // would compare as "[object Object]". models/dwp_report.py: date alone is not a total
+  // order on this collection.
+  http.get('/api/reports', ({ request }) => {
+    const url = new URL(request.url)
+    const rows = withinRanges(
+      atCenterNames(matching(REPORTS, url.searchParams.get('query'), studentName), url),
+      url,
+      REPORT_RANGES,
+    )
+    const ordered = sorted(
+      rows.map((row) => ({ ...row, _tie: row._id.$oid })),
+      url,
+      REPORT_SORTS,
+      '_tie',
+    )
+    if (!ordered) return BAD_SORT
+    return HttpResponse.json(
+      envelope('reports', ordered.map(({ _tie: _drop, ...row }) => row), url),
+    )
+  }),
+
+  http.get('/api/reports/:reportId', ({ params }) => {
+    const detail = REPORT_DETAILS[String(params.reportId)]
+    if (!detail) {
+      return HttpResponse.json({ error: 'Report not found' }, { status: 404 })
+    }
+    return HttpResponse.json({ report: detail })
   }),
 ]

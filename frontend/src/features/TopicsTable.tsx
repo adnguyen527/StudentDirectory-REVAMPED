@@ -98,6 +98,10 @@ export function TopicsTable({ topics, sortable }: TopicsTableProps) {
             >
               Reassigned
             </ColumnHeader>
+            {/* No heading: the buttons under it say what they are, and a column called
+                "Answer key" would be read out before every one of them -- as the reports
+                list does with its Open column. */}
+            <th aria-label="Answer key" />
           </tr>
         </thead>
         <tbody>
@@ -132,6 +136,20 @@ export function TopicsTable({ topics, sortable }: TopicsTableProps) {
                 ) : (
                   <span className="muted">0</span>
                 )}
+              </td>
+              <td>
+                {/* Placeholder. There are no answer-key PDFs to open yet and nothing
+                    serving them -- shown so the column's width and the row's proportions
+                    are settled, disabled so it does not promise anything. The same
+                    bargain the sidebar's "New report" button makes. */}
+                <button
+                  type="button"
+                  className="button button-row"
+                  disabled
+                  title="Coming with answer-key PDFs"
+                >
+                  Answer key
+                </button>
               </td>
             </tr>
           ))}

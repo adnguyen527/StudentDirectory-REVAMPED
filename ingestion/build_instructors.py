@@ -131,14 +131,22 @@ def build_instructors():
                 key = make_student_key(acct_id, student_name)
                 if key not in inst['students']:
                     inst['students'][key] = {
-                        'student_key':     key,
-                        'account_id':      acct_id,
-                        'student_name':    student_name,
-                        'sessions':        0,
-                        'pages_completed': 0,
+                        'student_key':        key,
+                        'account_id':         acct_id,
+                        'student_name':       student_name,
+                        'sessions':           0,
+                        # Kept apart from `sessions` for the reason build_students.py
+                        # spells out at its own roster loop: an unfinalized report has no
+                        # page count, so it counts as a session but must stay out of any
+                        # pages-per-session denominator. The instructor's roster and the
+                        # student's instructor list show the same pair from opposite
+                        # sides and have to divide by the same number.
+                        'finalized_sessions': 0,
+                        'pages_completed':    0,
                     }
-                inst['students'][key]['sessions']        += 1
-                inst['students'][key]['pages_completed'] += pages
+                inst['students'][key]['sessions']           += 1
+                inst['students'][key]['finalized_sessions'] += 1 if doc.get('finalized') else 0
+                inst['students'][key]['pages_completed']    += pages
 
             # Per-topic tracking. A co-taught session credits each instructor the whole
             # entry, the same rule as pages above and as topics.instructors[] -- the two

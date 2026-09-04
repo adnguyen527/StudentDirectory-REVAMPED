@@ -15,7 +15,8 @@
 
 .search-input {
   width: 100%;
-  padding: var(--space-3) var(--space-3) var(--space-3) 40px;
+  /* Right padding leaves room for the clear button -- see .search-clear. */
+  padding: var(--space-3) 34px var(--space-3) 40px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-sunken);

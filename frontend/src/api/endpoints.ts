@@ -7,6 +7,8 @@ import type {
   InstructorDetailResponse,
   InstructorsResponse,
   Metrics,
+  ReportDetailResponse,
+  ReportsResponse,
   StudentDetailResponse,
   StudentsResponse,
   TopicDetailResponse,
@@ -70,6 +72,30 @@ export function listInstructors(params: ListParams = {}, signal?: AbortSignal) {
  */
 export function listTopics(params: ListParams = {}, signal?: AbortSignal) {
   return request<TopicsResponse>('/topics', listQuery(params), signal)
+}
+
+/**
+ * The session-report list.
+ *
+ * `query` matches the student the session was for, not the instructor -- this list is read
+ * student-first. The response withholds student_notes; see ReportListItem.
+ */
+export function listReports(params: ListParams = {}, signal?: AbortSignal) {
+  return request<ReportsResponse>('/reports', listQuery(params), signal)
+}
+
+/**
+ * One report, whole.
+ *
+ * _id is the key -- dwp_reports has no natural one -- so the hex travels in the path. A
+ * malformed id answers 404 rather than 500; see find_by_id in models/dwp_report.py.
+ */
+export function getReport(reportId: string, signal?: AbortSignal) {
+  return request<ReportDetailResponse>(
+    `/reports/${encodeURIComponent(reportId)}`,
+    undefined,
+    signal,
+  )
 }
 
 /** The center names the filter offers. Served rather than hard-coded, so a new center

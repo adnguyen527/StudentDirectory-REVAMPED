@@ -4,6 +4,7 @@ import {
   DashboardIcon,
   InstructorsIcon,
   PlusIcon,
+  ReportsIcon,
   SettingsIcon,
   StudentsIcon,
   TopicsIcon,
@@ -15,6 +16,7 @@ const NAV = [
   { to: '/students', label: 'Students', icon: StudentsIcon, end: false },
   { to: '/instructors', label: 'Instructors', icon: InstructorsIcon, end: false },
   { to: '/topics', label: 'Topics', icon: TopicsIcon, end: false },
+  { to: '/reports', label: 'Reports', icon: ReportsIcon, end: false },
 ]
 
 /** Fixed left rail: wordmark, primary action, nav, settings pinned to the bottom. */

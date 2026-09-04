@@ -488,6 +488,76 @@ describe('student profile', () => {
     expect(screen.queryByText(/Student not found/)).not.toBeInTheDocument()
   })
 
+  it('opens a session from the history, the same way the reports list does', async () => {
+    // One report, one page, reached the same way from either table. ANTHONY_REPORTS[0] is
+    // the 3/14 session, which is also RICH_REPORT on the reports list.
+    const { user } = renderApp(PROFILE)
+
+    const history = await card(/Session history/)
+    await user.click(
+      within(history).getByRole('link', { name: /open the mar 14, 2026 report/i }),
+    )
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(`/reports/${ANTHONY_REPORTS[0]._id.$oid}`),
+    )
+    expect(await screen.findByRole('heading', { name: 'Session details' })).toBeInTheDocument()
+  })
+
+  it('offers that button on every session, expandable or not', async () => {
+    // ANTHONY_REPORTS[1] has no topics, no summary and no assessment -- its row does not
+    // respond to a click, so the button is the only way into it.
+    renderApp(PROFILE)
+
+    const history = await card(/Session history/)
+    const rows = within(history).getAllByRole('row').slice(1)
+    expect(within(history).getAllByRole('link', { name: /^open the/i })).toHaveLength(rows.length)
+
+    const bare = within(history).getByRole('row', { name: /Mar 10, 2026/ })
+    expect(bare).not.toHaveAttribute('aria-expanded')
+    expect(within(bare).getByRole('link', { name: /open the mar 10, 2026 report/i })).toBeInTheDocument()
+  })
+
+  it('narrows the session history to a period', async () => {
+    // Anthony's two sessions are 3/14 and 3/10. Every session is already in the detail
+    // response, so this filters what is on screen and makes no request.
+    const { user } = renderApp(PROFILE)
+
+    const history = await card(/Session history/)
+    expect(within(history).getAllByRole('row').slice(1)).toHaveLength(2)
+
+    await user.click(
+      within(history).getByRole('button', { name: /filter by session date: any time/i }),
+    )
+    await user.type(screen.getByLabelText(/earliest session date/i), '2026-03-12')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    // Both ends inclusive, as the API's own date bounds are.
+    await waitFor(() => expect(within(history).getAllByRole('row').slice(1)).toHaveLength(1))
+    expect(within(history).getByText('Mar 14, 2026')).toBeInTheDocument()
+    expect(within(history).queryByText('Mar 10, 2026')).not.toBeInTheDocument()
+    // The pager counts the period, not the student's whole history.
+    expect(within(history).getByText('1–1 of 1')).toBeInTheDocument()
+  })
+
+  it('says a period is empty differently from a student with no sessions', async () => {
+    // "No sessions recorded for this student" would be a false statement about a student
+    // who simply did not attend in the window asked for.
+    const { user } = renderApp(PROFILE)
+
+    const history = await card(/Session history/)
+    await user.click(
+      within(history).getByRole('button', { name: /filter by session date: any time/i }),
+    )
+    await user.type(screen.getByLabelText(/earliest session date/i), '2026-06-01')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await within(history).findByText('No sessions in this period.')).toBeInTheDocument()
+    expect(
+      within(history).queryByText(/No sessions recorded for this student/),
+    ).not.toBeInTheDocument()
+  })
+
   it('pages the session history in the browser and collapses any open row', async () => {
     // The detail route returns every session in one response, so a page change here costs
     // no request. An expanded row must not survive the change -- you would return to it
@@ -564,6 +634,292 @@ describe('student profile', () => {
       .slice(1)
       .map((row) => within(row).getAllByRole('cell')[0].textContent)
     expect(names).toEqual(['NewerPK-C', 'OlderPK-A', 'UndatedPK-B'])
+  })
+
+  it('pages the topic list ten at a time', async () => {
+    // 47 topics is an ordinary student and 68 is the widest in the data, so the card had
+    // been rendering the whole history in one column.
+    const topics = Array.from({ length: 23 }, (_, i) => ({
+      ...ANTHONY_DETAIL.topics[0],
+      id: `PK-${String(i).padStart(4, '0')}`,
+      name: `Topic ${String(i).padStart(3, '0')}`,
+      state: 'on_plan' as const,
+      last_seen: day(`2026-03-${String((i % 28) + 1).padStart(2, '0')}`),
+    }))
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, topics },
+          stats: { total_dwp_reports: 0 },
+          dwp_reports: [],
+        }),
+      ),
+    )
+    const { user } = renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    expect(await within(card_).findByText('1–10 of 23')).toBeInTheDocument()
+    expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(10)
+
+    await user.click(within(card_).getByRole('button', { name: /next/i }))
+    expect(await within(card_).findByText('11–20 of 23')).toBeInTheDocument()
+
+    await user.click(within(card_).getByRole('button', { name: /next/i }))
+    expect(await within(card_).findByText('21–23 of 23')).toBeInTheDocument()
+    // Three real rows on the short last page, and nowhere further to go. The seven fillers
+    // beside them are aria-hidden, so they are not rows as far as this query is concerned.
+    expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(3)
+    expect(card_.querySelectorAll('tbody tr')).toHaveLength(10)
+    expect(within(card_).getByRole('button', { name: /next/i })).toBeDisabled()
+  })
+
+  it('wraps the topic name so it can scroll, and keeps the full one reachable', async () => {
+    // The name is clipped to one line, so the untruncated text has to survive somewhere:
+    // in the title, and in the inner span the hover transform translates. Neither the
+    // scrolling nor the clipping is assertable here -- jsdom does no layout -- but the
+    // markup they both depend on is.
+    renderApp(PROFILE)
+
+    const row = within(await card(/^Topics$/)).getByRole('row', { name: /Combining Radicals/ })
+    const name = row.querySelector('.topic-name') as HTMLElement
+    expect(name).toHaveAttribute('title', 'Combining Radicals')
+    expect(name.querySelector('span')?.textContent).toBe('Combining Radicals')
+  })
+
+  it('gives every row a tag line, whether or not it has a tag to put in it', async () => {
+    // ⚠️ The fix for the uneven rows. A tag rendered only on the rows that had one made
+    // those rows taller and the card jump between filters. The stand-in has to be present
+    // but aria-hidden: it is spacing, not a claim that the topic was reassigned.
+    const topics = [
+      { ...ANTHONY_DETAIL.topics[0], id: 'PK-A', name: 'Came back', state: 'on_plan' as const, times_assigned: 2 },
+      { ...ANTHONY_DETAIL.topics[0], id: 'PK-B', name: 'Never left', state: 'on_plan' as const, times_assigned: 1 },
+    ]
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, topics },
+          stats: { total_dwp_reports: 0 },
+          dwp_reports: [],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    const rowFor = (name: string) =>
+      within(card_).getByRole('row', { name: new RegExp(name) })
+
+    const flagged = rowFor('Came back').querySelector('.topic-flag') as HTMLElement
+    expect(flagged).toHaveTextContent('reassigned ×1')
+    expect(flagged).not.toHaveAttribute('aria-hidden')
+
+    const held = rowFor('Never left').querySelector('.topic-flag') as HTMLElement
+    expect(held).toBeInTheDocument()
+    expect(held).toHaveAttribute('aria-hidden', 'true')
+    expect(held).not.toHaveTextContent('reassigned')
+  })
+
+  it('pads a short page so the card does not change height with the filter', async () => {
+    // ⚠️ The card shares a CardRow with the attendance panel, so a height that moved with
+    // the chip moved the whole row. Four topics render four rows plus one blank.
+    const topics = Array.from({ length: 4 }, (_, i) => ({
+      ...ANTHONY_DETAIL.topics[0],
+      id: `PK-${String(i).padStart(4, '0')}`,
+      name: `Topic ${String(i).padStart(3, '0')}`,
+      state: 'on_plan' as const,
+    }))
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, topics },
+          stats: { total_dwp_reports: 0 },
+          dwp_reports: [],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    // Four topics, four rows in the accessibility tree...
+    await waitFor(() => expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(4))
+    // ...and ten in the DOM. The fillers are deliberately outside that tree, so the
+    // physical count has to be read from the markup.
+    expect(card_.querySelectorAll('tbody tr')).toHaveLength(10)
+
+    // The pager counts the topics, never the padding.
+    expect(within(card_).getByText('1–4 of 4')).toBeInTheDocument()
+  })
+
+  it('keeps the space for the pager controls when everything fits one page', async () => {
+    // ⚠️ The last thing that moved this card. The pager drops its buttons when there is
+    // nowhere to go -- right for most cards, wrong for one whose height is arranged not to
+    // change. Reserved means present but hidden and unannounced, not rendered and dead.
+    const topics = Array.from({ length: 3 }, (_, i) => ({
+      ...ANTHONY_DETAIL.topics[0],
+      id: `PK-${i}`,
+      name: `Topic ${i}`,
+      state: 'on_plan' as const,
+    }))
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, topics },
+          stats: { total_dwp_reports: 0 },
+          dwp_reports: [],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    await within(card_).findByText('1–3 of 3')
+
+    // Out of the accessibility tree: nothing to tab to, nothing announced...
+    expect(within(card_).queryByRole('button', { name: /next/i })).not.toBeInTheDocument()
+    // ...but still in the layout, which is the entire point.
+    const held = card_.querySelector('.pager-buttons-held')
+    expect(held).toBeInTheDocument()
+    expect(held).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('pads nothing when the page is already full', async () => {
+    const topics = Array.from({ length: 10 }, (_, i) => ({
+      ...ANTHONY_DETAIL.topics[0],
+      id: `PK-${String(i).padStart(4, '0')}`,
+      name: `Topic ${String(i).padStart(3, '0')}`,
+      state: 'on_plan' as const,
+    }))
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, topics },
+          stats: { total_dwp_reports: 0 },
+          dwp_reports: [],
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    await waitFor(() => expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(10))
+    expect(card_.querySelectorAll('tbody tr')).toHaveLength(10)
+  })
+
+  it('names the browser tab for the student, once they have loaded', async () => {
+    // The tab and the Back menu were identical on every route, which made the history
+    // useless for finding the student you were reading a few minutes ago.
+    renderApp(PROFILE)
+
+    await screen.findByRole('heading', { name: 'Anthony Nguyen' })
+    await waitFor(() => expect(document.title).toBe('Anthony Nguyen · Sigma'))
+  })
+
+  it('says so in the tab when there is no such student', async () => {
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({ error: 'Student not found' }, { status: 404 }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    await screen.findByText(/Student not found/)
+    await waitFor(() => expect(document.title).toBe('Student not found · Sigma'))
+  })
+
+  it('searches the topic list from the box where the title used to be', async () => {
+    const { user } = renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    // The heading is still there for a screen reader; what is gone is the visible title.
+    expect(within(card_).getByRole('heading', { name: 'Topics' })).toHaveClass('sr-only')
+
+    await user.click(await screen.findByRole('button', { name: /^All/ }))
+    await user.type(screen.getByRole('searchbox', { name: /search topics/i }), 'radicals')
+
+    await waitFor(() =>
+      expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(1),
+    )
+    expect(within(card_).getByText('Combining Radicals')).toBeInTheDocument()
+    expect(within(card_).queryByText('Distributive Property')).not.toBeInTheDocument()
+  })
+
+  it('clears the topic search from a button in the field', async () => {
+    const { user } = renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    await user.click(await screen.findByRole('button', { name: /^All/ }))
+    const box = screen.getByRole('searchbox', { name: /search topics/i })
+    await user.type(box, 'radicals')
+    await waitFor(() => expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(1))
+
+    await user.click(within(card_).getByRole('button', { name: /clear search/i }))
+
+    expect(box).toHaveValue('')
+    // The whole list is back, and the chips are counting it again.
+    await waitFor(() => expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(3))
+    // Focus stays in the field the button just removed itself from.
+    expect(box).toHaveFocus()
+  })
+
+  it('matches the topic id as well as the name', async () => {
+    // The row shows the id under the name and it is a real handle, so a box that showed
+    // ids but could not search them would be incoherent -- as the topics list page says.
+    const { user } = renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    await user.click(await screen.findByRole('button', { name: /^All/ }))
+    await user.type(screen.getByRole('searchbox', { name: /search topics/i }), 'PK-1000')
+
+    await waitFor(() => expect(within(card_).getAllByRole('row').slice(1)).toHaveLength(1))
+    expect(within(card_).getByText('Distributive Property')).toBeInTheDocument()
+  })
+
+  it('counts the chips over the search, so a zero is an answer', async () => {
+    // ⚠️ The search narrows first and the chips count what it left. Counting the whole
+    // list instead would offer a chip reading 4 that lands on an empty table.
+    const { user } = renderApp(PROFILE)
+
+    await screen.findByRole('button', { name: /^All/ })
+    await user.type(screen.getByRole('searchbox', { name: /search topics/i }), 'radicals')
+
+    // Combining Radicals is the on-plan one, so every other state drops to zero. Read off
+    // the chips' own text rather than their accessible names, which JSX joins without a
+    // separator and would pin this test to that detail.
+    const chipText = () =>
+      [...document.querySelectorAll('.chip')].map((c) => c.textContent)
+    await waitFor(() =>
+      expect(chipText()).toEqual(['On plan1', 'Finished0', 'Removed0', 'All1']),
+    )
+  })
+
+  it('returns to the first page when the filter changes', async () => {
+    // ⚠️ Page 2 of "On plan" is not page 2 of "Finished" -- the same rule the list pages
+    // apply when they drop ?offset= on a filter change. Without it you land mid-list, or
+    // on a page that does not exist in the filter you just picked.
+    const topics = Array.from({ length: 14 }, (_, i) => ({
+      ...ANTHONY_DETAIL.topics[0],
+      id: `PK-${String(i).padStart(4, '0')}`,
+      name: `Topic ${String(i).padStart(3, '0')}`,
+      state: 'on_plan' as const,
+    }))
+    server.use(
+      http.get('/api/students/:key', () =>
+        HttpResponse.json({
+          student: { ...ANTHONY_DETAIL, topics: [...topics, ANTHONY_DETAIL.topics[0]] },
+          stats: { total_dwp_reports: 0 },
+          dwp_reports: [],
+        }),
+      ),
+    )
+    const { user } = renderApp(PROFILE)
+
+    const card_ = await card(/^Topics$/)
+    await user.click(await within(card_).findByRole('button', { name: /next/i }))
+    expect(await within(card_).findByText('11–14 of 14')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^All/ }))
+
+    expect(await within(card_).findByText('1–10 of 15')).toBeInTheDocument()
   })
 
   it('says so when a topic filter selects nothing', async () => {
