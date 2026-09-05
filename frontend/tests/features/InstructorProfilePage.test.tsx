@@ -76,6 +76,58 @@ describe('instructor profile', () => {
     expect(months.queryByRole('row', { name: /2026-02/ })).not.toBeInTheDocument()
   })
 
+  it('says how often they work, not just how much', async () => {
+    // Dana's two days are 2026-02-02 and 2026-03-14 -- a 6-week span with a 4-week gap in
+    // it, so the break comes out and the rate is 2 days over the 2 weeks worked.
+    renderApp(PROFILE)
+
+    const months = within(await card(/Days taught by month/))
+    expect(months.getByText(/1\.0 days a week/)).toBeInTheDocument()
+    // ⚠️ The correction has to be visible. A reader who cannot see that four weeks were
+    // taken out has no way to check the number against the months listed underneath.
+    expect(months.getByText(/4 weeks off excluded/)).toBeInTheDocument()
+  })
+
+  it('says nothing about breaks when there were none', async () => {
+    // Three consecutive weeks worked: nothing to exclude, so no clause. "0 weeks off
+    // excluded" would be noise on the majority of instructors.
+    server.use(
+      http.get('/api/instructors/:name', () =>
+        HttpResponse.json({
+          instructor: {
+            ...DANA_DETAIL,
+            days_taught: [day('2026-02-02'), day('2026-02-09'), day('2026-02-16')],
+          },
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const months = within(await card(/Days taught by month/))
+    expect(await months.findByText(/1\.0 days a week/)).toBeInTheDocument()
+    expect(months.queryByText(/excluded/)).not.toBeInTheDocument()
+  })
+
+  it('refuses a weekly rate over a span too short to support one', async () => {
+    // Four instructors in the real data span less than two weeks. A rate off a few days in
+    // one week is noise, so the card says the thing that is actually known.
+    server.use(
+      http.get('/api/instructors/:name', () =>
+        HttpResponse.json({
+          instructor: {
+            ...DANA_DETAIL,
+            days_taught: [day('2026-02-02'), day('2026-02-04')],
+          },
+        }),
+      ),
+    )
+    renderApp(PROFILE)
+
+    const months = within(await card(/Days taught by month/))
+    expect(await months.findByText(/2 days taught, over less than two weeks/)).toBeInTheDocument()
+    expect(months.queryByText(/days a week/)).not.toBeInTheDocument()
+  })
+
   it('links a roster row straight to that student, with no lookup', async () => {
     const { user } = renderApp(PROFILE)
 

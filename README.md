@@ -993,17 +993,19 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       sides and must agree; an integration check in `tests/test_live_database.py` holds the
       two collections to identical figures for every shared pair. A roster document built
       before the rebuild has no denominator and dashes rather than guessing.
-- [ ] `P2` **Average days worked per week, on the instructor profile.** A card beside
-      *Days taught by month*, answering how often someone actually works rather than how
-      much they have worked in total. **Frontend-only** — `days_taught[]` is already on the
-      detail response, and the whole thing is a grouping of that array.
+- [x] `P2` **Average days worked per week, on the instructor profile.** Done — a line at the
+      top of the *Days taught by month* card, above the months it summarises. Not a card
+      beside it, as this item originally said: that card now shares a `CardRow` with the
+      Roster, and the reading is the same one the months make, so it belongs in with them.
+      Frontend-only as promised — `days_taught[]` was already on the detail response.
+      The rule lives in `features/profile/daysPerWeek.ts`.
 
       **The denominator is the whole point.** Count the weeks from their first day taught
       to their last, then **drop any run of three or more consecutive weeks with nothing
       taught**. A one- or two-week gap still counts against the average — a week off is part
       of how someone works — but a longer absence is a term break, a closure or leave, and
-      charging it to them measures the calendar rather than the person. **31 of the 103
-      instructors have a gap of four weeks or more**, so this is not a rare correction.
+      charging it to them measures the calendar rather than the person. **24 of the 103
+      instructors have a run of four or more empty weeks**, so this is not a rare correction.
 
       It lands where it should, between the two readings that get this wrong:
 
@@ -1013,13 +1015,26 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       | **gaps ≤ 2 weeks counted** | **1.76** | **0.62** |
       | only weeks actually worked | 1.98 | 1.00 by construction — flatters everyone |
 
-      That rule drops **384 of 2,620 span weeks, 15%**, as long absences. A run after the
+      That rule drops **384 of 2,624 span weeks, 15%**, as long absences. A run after the
       final day taught never counts either, since the span ends there.
 
-      Two edges: **4 instructors span less than two weeks**, where any weekly rate is noise
-      — show the raw days instead. And group by **ISO week in UTC**, for the same reason the
-      months grouping does: these are naive wall-clock dates, so a local read can push a
-      Sunday or Monday across a week boundary.
+      ⚠️ **The table above is computed over the 99 instructors who span two weeks or more,
+      not all 103.** Over all of them it reads 1.50 / 1.69 / 1.94, which looks like a
+      discrepancy and is not — it is the four short-span instructors, who have no rate to
+      contribute. Recorded because the figures reproduce to the decimal either way and
+      nothing on their face says which population they came from.
+
+      Two edges, both handled: **4 instructors span less than two weeks** — Theresa Foster,
+      Michelle Erickson, Lee Singleton and Jon Brown, one day each — where any weekly rate
+      is noise, so the card shows the raw days instead. And the weeks are grouped **in UTC**,
+      for the same reason the months grouping is: these are naive wall-clock dates, and a
+      local read pushes a Sunday or Monday across a week boundary.
+
+      ⚠️ **The implementation groups by a Monday-start week *index*, not an
+      `(isoYear, isoWeek)` pair.** Same buckets, but one orderable integer — walking a span
+      and spotting consecutive empty runs is arithmetic on it, where the pairs sort wrongly
+      across a year boundary and need special-casing for 53-week years. There is a test for
+      exactly that case.
 - [x] `P2` **Topics tab in the sidebar.** Done — `TopicsPage` / `TopicsTable`, 771 topics
       paged off the shared envelope with the filter and offset in the URL. Per row: students
       who worked it, finished, on plan, removed, median sessions to finish and
@@ -1074,6 +1089,17 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       stops treating it as numeric — `TopicsCard` already does exactly this via `.topic-col`,
       for the same reason. Or drop a column, for which the identity above names the
       candidates.
+
+      ⚠️ **Declaring the width on its own does not work here — tried and measured.** Under
+      `table-layout: auto` a width is a suggestion, not an instruction, and this table gives
+      the browser every reason to decline: the seven count columns and the answer-key button
+      all want a fixed amount, and their demands exceed what is left. Setting `width: 34%`
+      on the Topic header left the computed width at **130px, unchanged**. It binds on
+      `TopicsCard` only because that table has slack for it to bind into.
+
+      Making it stick needs `table-layout: fixed` on this table as well — which is a larger
+      change than it sounds, since fixed layout then governs every column here and is the
+      wrong default for tables whose content genuinely varies.
 
       ⚠️ **A cut has to answer the reasoning already in `TopicsTable.tsx`**, not just free up
       pixels: counts rather than rates (a finish-rate column ranks `GF` and `WCH` items to
