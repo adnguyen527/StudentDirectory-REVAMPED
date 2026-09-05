@@ -259,6 +259,15 @@
   padding: 0 var(--space-5) var(--space-3);
 }
 
+/* The caveat under a figure on the topic page. Small and quiet: it qualifies the number
+   above it rather than competing with it, but these numbers are not safe to read without
+   it -- see the page-pace note. */
+.topic-field-note {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--font-size-sm);
+}
+
 /* --- Attendance panel --------------------------------------------------- */
 
 /* ⚠️ Wraps unconditionally rather than under a viewport media query. This row of two date

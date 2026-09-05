@@ -10,10 +10,12 @@ const RICH = `/reports/${RICH_REPORT._id.$oid}`
 const BARE = `/reports/${BARE_REPORT._id.$oid}`
 
 /** The label/value pairs in the Session details card, as the page lays them out. */
-function field(label: string) {
+function field(label: string): HTMLElement {
   const cell = screen.getByText(label).closest('.report-field')
   if (!cell) throw new Error(`no field labelled ${label}`)
-  return cell
+  // closest() is typed as Element; within() wants an HTMLElement, and every .report-field
+  // is one.
+  return cell as HTMLElement
 }
 
 function fieldLabels() {

@@ -18,7 +18,14 @@ tested here is that they add up.
 
 from datetime import datetime
 
-from ingestion.build_topics import canonical_name, collect, make_documents, roll_up
+from ingestion.build_topics import (
+    SESSION_PAGES_MIN,
+    canonical_name,
+    collect,
+    make_documents,
+    page_ratios,
+    roll_up,
+)
 
 
 def day(n):
@@ -369,3 +376,114 @@ class TestDocuments:
             seen('T-110', 'Worked On', 'Decimals'),
         ]))})
         assert [d['topic_id'] for d in make_documents(topics, {}, {})] == ['T-110', 'T-100']
+
+
+def sessions_of(student, pages_and_topics):
+    """[(pages, [topic_ids]), ...] for one student, as page_ratios takes them."""
+    return [(student, pages, set(ids)) for pages, ids in pages_and_topics]
+
+
+def repeat(student, pages, topic_ids, times):
+    """Enough identical sessions to clear SESSION_PAGES_MIN."""
+    return sessions_of(student, [(pages, topic_ids)] * times)
+
+
+class TestPageRatios:
+    """What a topic does to a session's page count, against the student's own pace.
+
+    ⚠️ A comparison, never an attribution: the numerator is the whole session's pages, not
+    the topic's share of them. A session carries 2.17 topics on average, so a per-topic
+    share does not exist to be computed.
+    """
+
+    def test_a_student_who_always_does_the_same_pages_sits_at_one(self):
+        ratios, _ = page_ratios(repeat('a', 5, ['T-100'], SESSION_PAGES_MIN))
+        assert ratios['T-100']['ratio'] == 1.0
+        assert ratios['T-100']['basis'] == SESSION_PAGES_MIN
+
+    def test_a_topic_on_the_bigger_sessions_reads_above_one(self):
+        # Half the sessions are 10 pages and carry the topic, half are 2 and do not, so
+        # the baseline is 6 and the topic's sessions run 10/6.
+        big = repeat('a', 10, ['T-100'], SESSION_PAGES_MIN)
+        small = repeat('a', 2, [], SESSION_PAGES_MIN)
+        ratios, _ = page_ratios(big + small)
+        assert ratios['T-100']['ratio'] == 10 / 6
+
+    def test_a_session_with_no_topics_still_counts_toward_the_baseline(self):
+        """⚠️ The student's baseline is their pace across everything they did. 5,455 of
+        the finalized sessions with a page count carry no topics; dropping them would
+        raise every baseline and drag every ratio down."""
+        with_only_topic_sessions, _ = page_ratios(repeat('a', 10, ['T-100'], SESSION_PAGES_MIN))
+        with_a_blank_one, _ = page_ratios(
+            repeat('a', 10, ['T-100'], SESSION_PAGES_MIN) + sessions_of('a', [(2, [])])
+        )
+        assert with_only_topic_sessions['T-100']['ratio'] == 1.0
+        assert with_a_blank_one['T-100']['ratio'] > 1.0
+
+    def test_a_thin_topic_gets_a_basis_but_no_figure(self):
+        """A ratio off a handful of sessions is noise. Nulled in the builder rather than
+        in the page, so there is one threshold in one place."""
+        ratios, _ = page_ratios(repeat('a', 5, ['T-100'], SESSION_PAGES_MIN - 1))
+        assert ratios['T-100']['ratio'] is None
+        assert ratios['T-100']['basis'] == SESSION_PAGES_MIN - 1
+
+    def test_a_student_with_no_pages_at_all_cannot_divide_by_zero(self):
+        ratios, median_ratio = page_ratios(repeat('a', 0, ['T-100'], SESSION_PAGES_MIN))
+        assert ratios == {}
+        assert median_ratio is None
+
+    def test_the_program_median_is_taken_over_the_qualifying_topics_only(self):
+        """⚠️ The line every topic is read against, and the reason it is not 1.0: a
+        session's pages count once for every topic on it, which biases the whole
+        distribution upward."""
+        # Two topics clear the bar at 1.0 and 2.0; a third sits at 5.0 on one session and
+        # must not drag the median.
+        a = repeat('a', 5, ['T-100'], SESSION_PAGES_MIN)
+        b = repeat('b', 5, ['T-200'], SESSION_PAGES_MIN)
+        thin = sessions_of('c', [(50, ['T-300'])] + [(1, [])] * 9)
+        ratios, median_ratio = page_ratios(a + b + thin)
+        assert ratios['T-300']['ratio'] is None
+        assert median_ratio == 1.0
+
+    def test_one_session_counts_once_for_each_topic_on_it(self):
+        # Both topics ride the same sessions, so both get the same figure -- which is the
+        # co-occurrence caveat, visible in the arithmetic.
+        ratios, _ = page_ratios(repeat('a', 5, ['T-100', 'T-200'], SESSION_PAGES_MIN))
+        assert ratios['T-100']['ratio'] == ratios['T-200']['ratio'] == 1.0
+        assert ratios['T-100']['basis'] == SESSION_PAGES_MIN
+
+
+class TestTimeToFinish:
+    """The two figures beside the median sessions already stored."""
+
+    def finished(self, *days):
+        topics = roll_up({'a': student(*days)})
+        return make_documents(topics, {}, {})[0]
+
+    def test_days_run_from_first_sight_to_the_finishing_session(self):
+        """⚠️ From first sight, not from the last assignment's start -- 13 days against 9
+        program-wide. The shorter figure hides the time a topic spent assigned, dropped
+        and assigned again."""
+        doc = self.finished(
+            (1, [seen('T-100', 'Worked On')]),
+            (9, [seen('T-100', 'Mastered')]),
+        )
+        assert doc['median_days_to_finish'] == 8
+
+    def test_a_topic_finished_the_day_it_started_is_zero_days_not_missing(self):
+        # 7.7% of finished pairs land here. None would read as "no data".
+        doc = self.finished((1, [seen('T-100', 'Mastered')]))
+        assert doc['median_days_to_finish'] == 0
+
+    def test_the_mean_sessions_sits_beside_the_median(self):
+        doc = self.finished(
+            (1, [seen('T-100', 'Worked On')]),
+            (2, [seen('T-100', 'Mastered')]),
+        )
+        assert doc['median_sessions_to_finish'] == 2
+        assert doc['mean_sessions_to_finish'] == 2
+
+    def test_a_topic_nobody_finished_carries_neither(self):
+        doc = self.finished((1, [seen('T-100', 'Worked On')]))
+        assert doc['median_days_to_finish'] is None
+        assert doc['mean_sessions_to_finish'] is None

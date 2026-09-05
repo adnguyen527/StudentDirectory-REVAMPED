@@ -70,7 +70,7 @@ Safe to re-run -- drops and rebuilds the target collection each time.
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from statistics import median
+from statistics import mean, median
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -81,6 +81,11 @@ from ingestion.build_students import STATUS_COUNTS, build_topic_history
 
 
 TARGET_COLLECTION = 'topics'
+
+
+# Below this many finalized sessions a page ratio is noise rather than a pace. 283 of the
+# 771 topics clear it, and they are the ones the program median is taken over.
+SESSION_PAGES_MIN = 50
 
 
 def canonical_name(names):
@@ -109,31 +114,54 @@ def canonical_name(names):
 def collect(dwp_collection):
     """Read dwp_reports once into the three things the rollup needs.
 
-    Returns (days_by_student, names, instructors, skipped), where days_by_student is
-    {student_key: {date: [(topic_id, name, status), ...]}} -- the shape
-    build_topic_history expects.
+    Returns (days_by_student, names, instructors, sessions, skipped), where
+    days_by_student is {student_key: {date: [(topic_id, name, status), ...]}} -- the shape
+    build_topic_history expects -- and sessions is [(student_key, pages, {topic_ids})] for
+    page_ratios below.
+
+    The page comparison is described in the README as needing a second pass over
+    dwp_reports. It needs a second pass over the *data*, since every student's baseline
+    has to be complete before any ratio can be taken, but not a second read: this loop is
+    already touching every document, so it collects the sessions on the way past.
     """
     # Buffered per student for the same reason it is buffered in build_students: an
     # assignment boundary is decided by the topics worked on the days in between.
     days_by_student = {}
     names = {}        # topic_id -> name -> {sessions, last}
     instructors = {}  # topic_id -> instructor name -> sessions taught
+    sessions = []     # (student_key, pages, {topic_ids}) for the page comparison
     skipped = 0
 
     for doc in dwp_collection.find(
-        {}, {'account_id': 1, 'student_name': 1, 'date': 1, 'topics': 1, 'instructors': 1}
+        {}, {'account_id': 1, 'student_name': 1, 'date': 1, 'topics': 1,
+             'instructors': 1, 'pages_completed': 1, 'finalized': 1}
     ):
         entries = doc.get('topics') or []
-        if not entries:
-            continue
 
         account_id   = doc.get('account_id')
         student_name = doc.get('student_name')
-        if not account_id or not student_name or not str(student_name).strip():
-            skipped += 1
+        named = bool(account_id and student_name and str(student_name).strip())
+        key = make_student_key(account_id, str(student_name).strip()) if named else None
+
+        # ⚠️ Before the topic check below, on purpose. A student's baseline is their own
+        # pace across *everything* they did, so a session that recorded no topics still
+        # belongs in the denominator -- 5,455 of the 28,314 finalized sessions with a page
+        # count carry none, and dropping them would raise every student's baseline.
+        if key and doc.get('finalized') and doc.get('pages_completed') is not None:
+            sessions.append((
+                key,
+                doc['pages_completed'],
+                {t.get('id') for t in entries if t.get('id')},
+            ))
+
+        if not entries:
             continue
 
-        key = make_student_key(account_id, str(student_name).strip())
+        # Counted only for documents that had topics to roll up, which is what this
+        # number has always meant.
+        if not named:
+            skipped += 1
+            continue
         dt  = doc.get('date')
         day = days_by_student.setdefault(key, {}).setdefault(dt, [])
 
@@ -164,7 +192,55 @@ def collect(dwp_collection):
                 for instructor in taught_by:
                     taught[instructor] = taught.get(instructor, 0) + 1
 
-    return days_by_student, names, instructors, skipped
+    return days_by_student, names, instructors, sessions, skipped
+
+
+def page_ratios(sessions):
+    """({topic_id: {'ratio': float|None, 'basis': int}}, program median) from the sessions.
+
+    What a topic does to a session's page count -- read against the student's own pace,
+    because page pace varies far more between students than between topics, which is what
+    makes the student their own control.
+
+    ⚠️ **A comparison, never an attribution.** The numerator is the *whole session's*
+    pages_completed, not the topic's share of them. A session carries 2.17 topics on
+    average and only 29.5% carry one, so a per-topic share does not exist to be computed.
+    Nobody should later "simplify" this into one.
+
+    ⚠️ **Its neutral point is not 1.0.** A session's pages count once for every topic on
+    it, which biases every ratio upward: centred on 1.0, 223 of the 283 qualifying topics
+    read as speeding students up. The program median returned here -- 1.21 on the current
+    data -- is the line to read them against, and half the topics sit each side of it by
+    construction.
+    """
+    total, count = {}, {}
+    for key, pages, _ in sessions:
+        total[key] = total.get(key, 0) + pages
+        count[key] = count.get(key, 0) + 1
+
+    ratios = {}
+    for key, pages, topic_ids in sessions:
+        baseline = total[key] / count[key] if count.get(key) else 0
+        # A student whose finalized sessions recorded no pages at all has no pace to be
+        # compared against, and would divide by zero.
+        if baseline <= 0:
+            continue
+        for topic_id in topic_ids:
+            ratios.setdefault(topic_id, []).append(pages / baseline)
+
+    per_topic = {
+        topic_id: {
+            # Thin topics get a basis but no figure. A ratio off a handful of sessions is
+            # noise, and nulling it here rather than in the page keeps one threshold in
+            # one place for the frontend to check against.
+            'ratio': mean(values) if len(values) >= SESSION_PAGES_MIN else None,
+            'basis': len(values),
+        }
+        for topic_id, values in ratios.items()
+    }
+
+    qualifying = [t['ratio'] for t in per_topic.values() if t['ratio'] is not None]
+    return per_topic, median(qualifying) if qualifying else None
 
 
 def roll_up(days_by_student):
@@ -191,6 +267,7 @@ def roll_up(days_by_student):
                     'first_taught':           None,
                     'last_taught':            None,
                     '_sessions_to_finish':    [],
+                    '_days_to_finish':        [],
                 }
 
             t['sessions']            += entry['sessions']
@@ -214,6 +291,18 @@ def roll_up(days_by_student):
                 t['students_ever_finished'] += 1
                 t['_sessions_to_finish'].append(entry['sessions'])
 
+                # Elapsed days is a different question from sessions: a topic can take
+                # four sessions spread over two months.
+                #
+                # From first sight rather than from last_assignment_started -- 13 days
+                # against 9 program-wide. The shorter figure hides the time a topic spent
+                # assigned, dropped and assigned again, and "how long does this take" is
+                # asked about the whole of it. Both are in the loop if the other is ever
+                # wanted.
+                first, last = entry['first_seen'], entry['last_seen']
+                if first is not None and last is not None:
+                    t['_days_to_finish'].append((last - first).days)
+
             if entry['first_seen'] is not None:
                 if t['first_taught'] is None or entry['first_seen'] < t['first_taught']:
                     t['first_taught'] = entry['first_seen']
@@ -224,12 +313,14 @@ def roll_up(days_by_student):
     return topics
 
 
-def make_documents(topics, names, instructors):
+def make_documents(topics, names, instructors, pages=None, pages_median=None):
     """Settle each topic's name, finish the derived fields, and order the collection."""
+    pages = pages or {}
     documents = []
     for topic_id, t in topics.items():
         name, alternates = canonical_name(names.get(topic_id, {}))
         to_finish = t.pop('_sessions_to_finish')
+        days_to_finish = t.pop('_days_to_finish')
         # Most sessions first, then alphabetical, so the ranking is stable between builds.
         taught_by = sorted(
             instructors.get(topic_id, {}).items(), key=lambda kv: (-kv[1], kv[0])
@@ -244,6 +335,23 @@ def make_documents(topics, names, instructors):
             # Sessions the finishing students spent on the topic, counting every
             # assignment -- a topic handed back and finished again carries both.
             'median_sessions_to_finish': median(to_finish) if to_finish else None,
+            # ⚠️ The median leads on both of these. The mean days to finish is 26.7
+            # against a median of 13, with a 393-day tail and 7.7% finishing the same
+            # day -- a mean on its own describes almost nobody. The mean sessions is
+            # stored because it is worth showing *beside* the median, not instead.
+            'mean_sessions_to_finish':   mean(to_finish) if to_finish else None,
+            'median_days_to_finish':     median(days_to_finish) if days_to_finish else None,
+            # What a session carrying this topic does to its page count, against the
+            # student's own pace -- see page_ratios. `basis` is how many finalized
+            # sessions it rests on, so the page can say what the figure is worth; the
+            # ratio itself is null below SESSION_PAGES_MIN of them.
+            'session_pages_ratio':       pages.get(topic_id, {}).get('ratio'),
+            'session_pages_ratio_basis': pages.get(topic_id, {}).get('basis', 0),
+            # ⚠️ Program-wide, and therefore identical on all 771 documents. Denormalised
+            # deliberately: it only moves when this builder runs, the whole collection is
+            # rebuilt in one pass anyway, and it keeps the detail page a single request.
+            # It is the line a topic's own ratio is read against -- not 1.0.
+            'session_pages_ratio_median': pages_median,
             'last_modified':             datetime.now(timezone.utc),
         })
 
@@ -260,13 +368,16 @@ def build_topics():
     total_dwp = dwp_collection.count_documents({})
     print(f"Reading {total_dwp} dwp_reports into '{TARGET_COLLECTION}'...")
 
-    days_by_student, names, instructors, skipped = collect(dwp_collection)
+    days_by_student, names, instructors, sessions, skipped = collect(dwp_collection)
 
     print(f"Read {len(days_by_student)} students. Rolling up topic histories...")
     if skipped:
         print(f"  ({skipped} dwp_reports skipped -- missing account_id or student_name)")
 
-    documents = make_documents(roll_up(days_by_student), names, instructors)
+    pages, pages_median = page_ratios(sessions)
+    documents = make_documents(
+        roll_up(days_by_student), names, instructors, pages, pages_median
+    )
 
     print(f"Found {len(documents)} topics. Building collection...")
 
@@ -296,6 +407,20 @@ def build_topics():
     print(f"  topics carrying more than one name: {len(renamed)}")
     for d in renamed:
         print(f"    {d['topic_id']}: '{d['name']}' also {d['also_known_as']}")
+    rated = [d for d in documents if d['session_pages_ratio'] is not None]
+    print(f"  page pace: {len(rated)} topics with {SESSION_PAGES_MIN}+ finalized sessions, "
+          f"program median {pages_median:.2f}x" if pages_median else "  page pace: none")
+    if rated:
+        by_ratio = sorted(rated, key=lambda d: d['session_pages_ratio'])
+        print(f"    slowest {by_ratio[0]['session_pages_ratio']:.2f}x "
+              f"{by_ratio[0]['name']}")
+        print(f"    fastest {by_ratio[-1]['session_pages_ratio']:.2f}x "
+              f"{by_ratio[-1]['name']}")
+    finished = [d for d in documents if d['median_days_to_finish'] is not None]
+    if finished:
+        print(f"  median days to finish, across {len(finished)} topics: "
+              f"{median(d['median_days_to_finish'] for d in finished):.0f}")
+
     credited = sum(i['sessions'] for d in documents for i in d['instructors'])
     print(f"  instructor roster entries: {sum(len(d['instructors']) for d in documents)}")
     print(f"  sessions credited to instructors: {credited} "

@@ -681,20 +681,20 @@ Items are listed in priority order within each group.
       of `topics.instructors[]`: the same 16,932 pairs from the other side, same co-taught
       full-credit rule, named by the same `canonical_name`, and reconciled pair for pair in
       the integration tests. 103 instructors, a median of 126 distinct topics each.
-- [ ] `P2` **Three fields the topic detail page needs**, none of which are in `topics`
-      today. Two are cheap: `mean_sessions_to_finish` and `median_days_to_finish` — the
-      `roll_up()` loop in `ingestion/build_topics.py` already holds each student's
-      `sessions`, `first_seen`, `last_seen` and `last_assignment_started`, so both fall out
-      of what it is already iterating.
+- [x] `P2` **Three fields the topic detail page needs.** Done — `mean_sessions_to_finish`
+      and `median_days_to_finish` fall out of the `roll_up()` loop, which already held each
+      student's `sessions`, `first_seen` and `last_seen`. The days run **from first sight**,
+      not from `last_assignment_started`: 13 days against 9 program-wide, and the shorter
+      figure hides the time a topic spent assigned, dropped and assigned again.
 
-      The third is the page figure, and it is the one that adds real work: it needs a
-      second pass over `dwp_reports` to build each student's baseline pages-per-session
-      before any topic can be compared against it. **It reads the session's total
-      `pages_completed`, compared to the student's own baseline — not the topic's share of
-      the pages.** Nobody should later "simplify" it into an attribution; a session carries
-      2.17 topics on average, so a per-topic share does not exist to be computed. See the
-      detail-page item under **Frontend** for the ~1.12 neutral point and the co-occurrence
-      caveat.
+      The page figure needed a second pass over the *data* but **not a second read** — the
+      existing `collect()` loop already touches every document, so it gathers the sessions
+      on the way past. `page_ratios()` is pure and unit-tested beside `roll_up`.
+
+      ⚠️ **A student's baseline includes their sessions that recorded no topics.** 5,455 of
+      the 28,314 finalized sessions with a page count carry none; dropping them would raise
+      every baseline and drag every ratio down. `collect()` therefore records the session
+      *before* its early exit for topic-less documents.
 - [ ] `P2` **Switch `_upsert()` to the natural key**, so an edited row updates its document
       instead of landing beside it. Hash demoted to change detection. The write endpoints
       need this.
@@ -1105,13 +1105,10 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       pixels: counts rather than rates (a finish-rate column ranks `GF` and `WCH` items to
       the bottom and reads as "hardest topics"), and the visible `topic_id` without which 90
       shared names make rows look like duplicates. Both are load-bearing.
-- [ ] `P2` **Topic detail page** — *built, on the fields that exist*. `TopicProfilePage`
-      is reachable from any list row and shows the header with `also_known_as`, the state
-      breakdown, the status ladder and the ranked instructors, each linking onward. What
-      remains is the first section below: the two time figures and the page comparison are
-      not in `topics` yet, and the page carries a placeholder card naming them rather than
-      faking a number. Finish this item by adding those three fields (see **Data
-      integrity**) and filling that card in.
+- [x] `P2` **Topic detail page.** Done — `TopicProfilePage` is reachable from any list row
+      and shows the header with `also_known_as`, the state breakdown, the status ladder,
+      the ranked instructors, and now the *Time to finish and page pace* card that used to
+      be a placeholder.
 
       Three things beyond what the list row already shows:
 
@@ -1128,17 +1125,21 @@ time-scoped, and an overflow menu in the corner, which is where the pin button l
       that total. So it is a comparison against the student's own baseline, never an
       attribution; page pace varies far more between students than between topics, which is
       why the student is their own control. Real signal, and face-valid: across 283 topics
-      with 50+ finalized sessions it runs 0.69× to 2.11×, the drag end being long division
-      (*Division – 5-digit by 2-digit* 0.69×) and the fast end shape recognition
-      (*Transversals* 2.11×).
+      with 50+ finalized sessions it runs **0.70× to 2.23×**, the drag end being long
+      division (*Division – 5-digit by 2-digit* `PK-3303-00`, 0.70×) and the fast end shape
+      recognition (*Transversals* `PK-3506-00`, 2.23×).
 
-      ⚠️ **Its neutral point is ~1.12, not 1.0.** Sessions carry 2.17 topics on average and
-      only 29.6% carry one, and a session's pages count once for every topic on it — which
-      biases every ratio upward. Centred on 1.0 the page claims almost every topic speeds
-      students up. Read it against the program median, label it "sessions including this
-      topic", and do not imply the topic caused it: a topic usually worked alongside fast
-      ones inherits their pace. Separating co-occurring topics needs a marginal effect
-      rather than a mean — a later refinement, not a blocker.
+      ⚠️ **Cite the id, not the name.** There are two topics called *Transversals*:
+      `PK-3506-00` at 2.23× over 78 sessions, and `FO-0272-00` with four sessions and no
+      figure at all. The same trap the list item warns about, and it caught a spot-check
+      during this work.
+
+      ⚠️ **Its neutral point is 1.21, not 1.0** — and not the ~1.12 this item used to claim.
+      That figure did not reproduce: three baselines (mean pages, leave-one-out, median
+      pages) crossed with two aggregations give 1.07, 1.21, 1.07, 1.24, 1.20 and 1.40, never
+      1.12. **1.21 is the median across the 283 qualifying topics**, so half sit either side
+      of it by construction, which is what makes the page checkable. It is stored on every
+      topic document as `session_pages_ratio_median`.
 
       **Who teaches it most.** Already built — `topics.instructors[]` is ranked and holds
       the same pairs as `instructors.topics[]`.

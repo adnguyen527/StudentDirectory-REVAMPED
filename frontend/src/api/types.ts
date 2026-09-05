@@ -343,6 +343,35 @@ export interface TopicRollupBase {
   total_reassignments: number
   /** Null when nobody has finished it -- an answer, not a missing field. */
   median_sessions_to_finish: number | null
+  /** Beside the median, not instead of it. Program-wide the mean days to finish is 26.7
+   *  against a median of 13, with a 393-day tail -- a mean alone describes almost nobody. */
+  mean_sessions_to_finish: number | null
+  /** Elapsed days from first sight to the finishing session. A different question from
+   *  sessions: a topic can take four sessions spread over two months. Median 13 across the
+   *  9,189 finished (student, topic) pairs; 662 topics carry one. */
+  median_days_to_finish: number | null
+  /**
+   * What a session carrying this topic does to its page count, against the student's own
+   * pace -- 0.70x to 2.23x across the 283 topics that qualify.
+   *
+   * ⚠️ A comparison, never an attribution: the numerator is the *whole session's* pages.
+   * A session carries 2.17 topics on average, so a per-topic share does not exist.
+   *
+   * Null below the builder's 50-session threshold, where the figure would be noise.
+   */
+  session_pages_ratio: number | null
+  /** Finalized sessions the ratio rests on, kept even when the ratio is null so the page
+   *  can say what it is worth -- or why there is none. */
+  session_pages_ratio_basis: number
+  /**
+   * ⚠️ The line a topic's ratio is read against, and it is **not 1.0**: a session's pages
+   * count once for every topic on it, so centred on 1.0 some 223 of 283 topics read as
+   * speeding students up. 1.21 on the current data, with half the topics each side.
+   *
+   * Program-wide and identical on every document -- see build_topics.py for why it is
+   * denormalised rather than served separately.
+   */
+  session_pages_ratio_median: number | null
   first_taught: ExtDate | null
   last_taught: ExtDate | null
   last_modified: ExtDate
