@@ -114,9 +114,10 @@ Work: `finalized`, `pages_completed`, `session_page_goal`, `mathlete_score`, `to
 Notes: `session_summary_notes`, `student_notes`, `internal_notes`,
 `notes_from_center_director`, `assessment`.
 
-**Indexes**: `date`, `account_id`, `row_hash` (**unique** — this is what enforces import
-idempotency), `finalized`, and `(date DESC, _id ASC)` — the compound one is `/api/reports`'
-resting order, and without it a page of it was a collection scan and a blocking sort.
+**Indexes**: `date`, `account_id`, `finalized`, `natural_key`
+(`account_id, student_name, date, session_start` — what every import looks its rows up by,
+deliberately **not** unique), `row_hash` (**unique**, now a corruption tripwire rather than
+the idempotency mechanism), and `(date DESC, _id ASC)`
 
 ### `students` — 893 documents
 
@@ -382,17 +383,26 @@ is still distinct before writing, and aborts untouched if not. `backfill_center_
 and `backfill_placeholder_instructors.py` change data the aggregates embed, so rebuild
 after those two.
 
-**`import_reports.py` is idempotent for unchanged files.** Every row carries a `row_hash`
-content fingerprint, `_upsert()` skips hashes already stored, and a unique index on
-`row_hash` enforces it at the database. Re-importing a file that is already loaded reports
-its rows as already present rather than duplicating them.
+**`import_reports.py` writes on a natural key.** A dwp row is identified by
+`(account_id, student_name, date, session_start)` — `NATURAL_KEY` — and `row_hash` answers
+only *did this row change?*. A row whose hash matches what is stored is skipped; a row whose
+hash differs **replaces its document in place, keeping its `_id`**. So re-importing an
+unchanged file is a no-op, and re-importing a file in which a row was corrected at the
+source updates that row instead of landing a second copy beside it.
 
-⚠️ **A row edited at the source is imported as a new document.** The hash covers the whole
-document, so a corrected row hashes differently, fails to match, and lands beside the
-original — both versions then count in the aggregates. Correcting an already-imported row
-is a separate operation from re-importing a file. Fixing this needs a *natural* key
-(`account_id + student_name + date + session_start` is the only stable candidate) to
-identify the session, with the hash demoted to change-detection.
+Keeping the `_id` is the part the rest of the system depends on:
+`students.dwp_report_ids[]` and `attendance_reports.dwp_report_ids[]` hold those ids, and
+`/api/reports/<id>` is the only handle the frontend has on a report.
+
+⚠️ **The natural key is not unique, and an ambiguous key is skipped rather than guessed at.**
+Four student-days carry two rows each (see *Known Issues*). When a key matches more than one
+stored document — or more than one row within a single file, disagreeing on content —
+`_upsert()` writes none of them and names the key in its output:
+
+```
+    [ok] 0 new, 992 unchanged, 0 updated, 8 ambiguous -> dwp_reports
+      ambiguous: Elizabeth Burch 2025-07-01 15:30 (2 stored documents share this key)
+```
 
 ---
 
@@ -599,8 +609,6 @@ pipeline = [
   padding machinery for that already exists in `TopicsCard.tsx`; what it does not have is
   a filler row that can carry a message.
 
-- **A row edited at the source imports as a new document** rather than replacing the
-  original — see *Rebuilding the aggregates*. Re-importing an unchanged file is a no-op.
 - **A list row still costs more than it should.** Paging and the `instructors[]` projection
   took `/api/students` from 1.08 MB to 31.0 KB a page, but what remains is mostly field
   *names* paid once per row: the six topic counters are ~160 KB across 893 students, much
@@ -630,11 +638,15 @@ pipeline = [
   the defaults are safe and the danger is documented, but it is still two env vars away.
   A deployment needs a real WSGI server instead.
 - **Four collisions on the natural key.** Four student-days have two rows sharing a
-  `session_start`. Three are an abandoned draft beside the real record, and the
-  `finalized` flag now separates those; the fourth (2025-07-01) is two completed reports
-  for one session by two instructors, which needs a human decision. Scoped to finalized
-  rows, only that one remains — so a partial unique index is available once it is
-  resolved.
+  `session_start` — Kimberly Thomas 2024-12-14, Michael Evans 2024-09-21, Laura Scott
+  2025-06-18, Elizabeth Burch 2025-07-01. Three are an abandoned draft beside the real
+  record; the fourth (2025-07-01) is two completed reports for one session by two
+  instructors, differing in their notes, assessments, `session_page_goal` and topic
+  statuses, which needs a human decision. Since the natural-key switch these are
+  **reported and skipped** on every import rather than silently duplicated, so they are
+  visible and inert rather than quietly wrong — but they are also the four rows an import
+  can no longer update. Scoped to finalized rows only the 2025-07-01 pair remains, so a
+  partial unique index is available once it is resolved.
 - **217 sessions have no recorded end time.** The source writes the literal string
   `'None'` into `session_end` rather than leaving it blank. `parse_session` now nulls it
   on the way in and `backfill_session_times.py` cleaned the stored rows, so nothing
@@ -695,9 +707,15 @@ Items are listed in priority order within each group.
       the 28,314 finalized sessions with a page count carry none; dropping them would raise
       every baseline and drag every ratio down. `collect()` therefore records the session
       *before* its early exit for topic-less documents.
-- [ ] `P2` **Switch `_upsert()` to the natural key**, so an edited row updates its document
-      instead of landing beside it. Hash demoted to change detection. The write endpoints
-      need this.
+- [x] `P2` **Switch `_upsert()` to the natural key.** Done — `_upsert()` now keys on
+      `NATURAL_KEY` (`account_id, student_name, date, session_start`) and writes
+      `ReplaceOne(..., upsert=True)`, so a row corrected at the source updates its document
+      **in place, keeping its `_id`** instead of landing beside it. `row_hash` is demoted to
+      change detection: matching hash means skip, differing hash means replace. `finalized`
+      is deliberately out of the key, since a draft later completed is the commonest edit
+      there is. A key matching more than one document is reported and skipped rather than
+      half-updated — see *Known Issues*. Backed by a non-unique `natural_key` index and by
+      `TestUpsert`, the first tests `_upsert()` has ever had.
 - [ ] `P3` **Split restricted fields out of `dwp_reports`** so access is decided by what a
       caller can reach, not by every reader remembering `PRIVATE_FIELDS`. Candidate axes:
       sensitivity, center. *Exploring — not decided.*
@@ -705,8 +723,10 @@ Items are listed in priority order within each group.
       `instructors` and `attendance_reports` are batch-built; update on write, or show how
       stale they are. Moot until something writes.
 - [ ] `P3` **Partial unique index** on `(account_id, student_name, date, session_start)`
-      where `finalized: true` — blocked on the one 2025-07-01 duplicate under *Known
-      Issues*.
+      where `finalized: true` — still blocked on the one 2025-07-01 duplicate under *Known
+      Issues*. Less urgent now: `_upsert()` refuses an ambiguous key in application code,
+      so the index would be a second line of defence rather than the only one. The
+      non-unique `natural_key` index it would replace already exists.
 - [ ] `P3` **A rename map for centers**, so a rebrand merges into one identity instead of
       taking a parser change and a backfill each time. The 2025-09-05 `Mann Mathematics` →
       `Math Made Simple` cutover is normalized at import today, and the next one would be
@@ -736,9 +756,9 @@ Items are listed in priority order within each group.
       each route remembering. Candidate scopes: center, own students, `student_notes`.
       The `P3` restricted-fields split and the prompt-driven agent both wait on this.
 - [ ] `P2` **Write endpoints for the report form** — create, update, finalize, plus the
-      validation the importer never needed. Needs the natural-key switch above.
-      *Open:* whether drafts live in `dwp_reports` as `finalized: false` or their own
-      collection.
+      validation the importer never needed. No longer blocked: the natural-key switch
+      above landed, so a report has an identity to address. *Open:* whether drafts live in
+      `dwp_reports` as `finalized: false` or their own collection.
 - [ ] `P2` **Center-wide metrics.** Sessions, students, pages and instructors per location
       — the four centers have no rollup and no route. Has to aggregate `dwp_reports`
       directly: instructor totals double-count co-taught pages, so they cannot be summed

@@ -29,8 +29,9 @@ export default function App() {
         {/* topic_id, e.g. PK-3121-00 -- URL-safe as stored, encoded anyway. */}
         <Route path="topics/:topicId" element={<TopicProfilePage />} />
         <Route path="reports" element={<ReportsPage />} />
-        {/* _id, the only unique field on dwp_reports -- it has no natural key. A malformed
-            one answers 404 rather than 500; see find_by_id in models/dwp_report.py. */}
+        {/* _id, the only unique field on dwp_reports -- its natural key is shared by four
+            student-days. A malformed one answers 404 rather than 500; see find_by_id in
+            models/dwp_report.py. */}
         <Route path="reports/:reportId" element={<ReportDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

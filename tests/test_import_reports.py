@@ -1,14 +1,19 @@
-"""Row parsing in import_reports.py.
+"""Row parsing and the write path in import_reports.py.
 
-These are pure functions over the compound strings the Excel exports carry, so they are
-testable without a database. `Key: Value;  Key: Value` is the source's own format --
-semicolon, two spaces.
+Most of these are pure functions over the compound strings the Excel exports carry, so
+they need no database. `Key: Value;  Key: Value` is the source's own format -- semicolon,
+two spaces.
+
+TestUpsert at the bottom is the exception: it drives the real write path against
+mongomock, the same in-memory server the rest of the suite uses.
 """
 
 from datetime import datetime
 
+import mongomock
 import pytest
 
+from ingestion import import_reports
 from ingestion.import_reports import (
     _bool,
     _int,
@@ -23,6 +28,7 @@ from ingestion.import_reports import (
     parse_general_information,
     parse_lp_assignment,
     parse_session,
+    DataImporter,
     row_hash,
     transform_dwp_row,
 )
@@ -320,3 +326,149 @@ class TestTransformDwpRow:
         doc = transform_dwp_row({'Session': SESSION, 'Date': '01/02/2025'})
         assert 'session' not in doc
         assert 'Session' not in doc
+
+
+# -- The natural-key write path ------------------------------------------------
+
+@pytest.fixture
+def importer(monkeypatch):
+    """A DataImporter writing to mongomock rather than a cluster.
+
+    DataImporter builds its own MongoClient rather than going through database.py, so
+    the conftest patch that covers the API does not reach it -- this patches the name
+    the importer actually calls.
+    """
+    monkeypatch.setattr(import_reports, 'MongoClient', mongomock.MongoClient)
+    return DataImporter()
+
+
+def dwp_row(name='Anthony Nguyen', date='01/02/2025', start='3:58 PM', pages='5', notes=None):
+    """One row as the Excel export spells it, before transform_dwp_row sees it."""
+    row = {
+        'Account Id': 'acct-1',
+        'Student Name': name,
+        'Date': date,
+        'Session': (f'Sessions This Month: 4;  Session Start: {start};  '
+                    'Session End: 5:05 PM;  Instructors: Dana Reyes'),
+        'General Information': f'Pages Completed: {pages}' if pages is not None else '',
+        'Center': 'Tyler, Mann Mathematics',
+    }
+    if notes is not None:
+        row['Session Summary Notes'] = notes
+    return row
+
+
+def a_file(*rows):
+    """Rows parsed the way import_file parses them -- freshly, as a re-import would."""
+    return [transform_dwp_row(row) for row in rows]
+
+
+class TestUpsert:
+    """_upsert, keyed on NATURAL_KEY for dwp_reports and on row_hash for the rest.
+
+    Every case returns (inserted, unchanged, updated, repeated, ambiguous).
+    """
+
+    def test_a_fresh_file_inserts_every_row(self, importer):
+        result = importer._upsert('dwp_reports', a_file(dwp_row(name='A'), dwp_row(name='B')))
+        assert result == (2, 0, 0, 0, 0)
+        assert importer.db.dwp_reports.count_documents({}) == 2
+
+    def test_reimporting_an_unchanged_file_writes_nothing(self, importer):
+        importer._upsert('dwp_reports', a_file(dwp_row()))
+        before = importer.db.dwp_reports.find_one()
+
+        assert importer._upsert('dwp_reports', a_file(dwp_row())) == (0, 1, 0, 0, 0)
+        assert importer.db.dwp_reports.find_one() == before
+
+    def test_an_edited_row_replaces_its_document_in_place(self, importer):
+        """The point of the natural key: a correction updates the session it corrects.
+
+        Under the old hash key this row hashed differently, matched nothing and was
+        inserted beside the original -- and both then counted in every aggregate.
+        """
+        importer._upsert('dwp_reports', a_file(dwp_row(notes='first pass')))
+        stored = importer.db.dwp_reports.find_one()
+
+        assert importer._upsert('dwp_reports', a_file(dwp_row(notes='corrected'))) == (
+            0, 0, 1, 0, 0)
+        assert importer.db.dwp_reports.count_documents({}) == 1
+
+        after = importer.db.dwp_reports.find_one()
+        assert after['session_summary_notes'] == 'corrected'
+        assert after['row_hash'] != stored['row_hash']
+        # students.dwp_report_ids[] and attendance_reports.dwp_report_ids[] hold this,
+        # and /api/reports/<id> is the only handle the frontend has on a report.
+        assert after['_id'] == stored['_id']
+
+    def test_a_draft_later_finalized_updates_the_same_document(self, importer):
+        """Why `finalized` is not in the key -- this is the commonest edit there is."""
+        importer._upsert('dwp_reports', a_file(dwp_row(pages=None)))
+        draft = importer.db.dwp_reports.find_one()
+        assert draft['finalized'] is False
+
+        assert importer._upsert('dwp_reports', a_file(dwp_row(pages='7'))) == (0, 0, 1, 0, 0)
+        assert importer.db.dwp_reports.count_documents({}) == 1
+
+        final = importer.db.dwp_reports.find_one()
+        assert final['_id'] == draft['_id']
+        assert final['finalized'] is True
+        assert final['pages_completed'] == 7
+
+    def test_two_stored_documents_on_one_key_are_left_alone(self, importer):
+        """The 2025-07-01 shape: two completed reports for one session.
+
+        Replacing either one would leave the other stale and invisible, so neither is
+        touched and the key is named in the output instead.
+        """
+        importer.db.dwp_reports.insert_many(
+            a_file(dwp_row(notes='by one instructor'), dwp_row(notes='by another')))
+        before = list(importer.db.dwp_reports.find())
+
+        assert importer._upsert('dwp_reports', a_file(dwp_row(notes='by one instructor'))) == (
+            0, 0, 0, 0, 1)
+        assert list(importer.db.dwp_reports.find()) == before
+        assert importer.ambiguous_keys == [
+            'ambiguous: Anthony Nguyen 2025-01-02 15:58 (2 stored documents share this key)']
+
+    def test_two_rows_in_one_file_on_one_key_are_both_skipped(self, importer):
+        """Nothing here can tell a corrected row from a second genuine one."""
+        result = importer._upsert(
+            'dwp_reports', a_file(dwp_row(notes='one'), dwp_row(notes='two')))
+        assert result == (0, 0, 0, 0, 2)
+        assert importer.db.dwp_reports.count_documents({}) == 0
+        assert importer.ambiguous_keys == [
+            'ambiguous: Anthony Nguyen 2025-01-02 15:58 (2 rows in this file share this key)']
+
+    def test_identical_rows_repeated_in_one_file_collapse_to_one(self, importer):
+        """Same key and the same content, so there is nothing to disambiguate."""
+        assert importer._upsert('dwp_reports', a_file(dwp_row(), dwp_row())) == (1, 0, 0, 1, 0)
+        assert importer.db.dwp_reports.count_documents({}) == 1
+
+    def test_rows_with_an_unparseable_date_do_not_overwrite_each_other(self, importer):
+        """A null key component makes every such row for one student share a key.
+
+        No row in the data has one, and the ambiguity guard means a future one is
+        reported rather than silently collapsed into whichever arrived first.
+        """
+        result = importer._upsert('dwp_reports', a_file(
+            dwp_row(date='not a date', notes='one'), dwp_row(date='not a date', notes='two')))
+        assert result == (0, 0, 0, 0, 2)
+        assert importer.db.dwp_reports.count_documents({}) == 0
+
+    def test_a_collection_with_no_natural_key_still_keys_on_the_hash(self, importer):
+        """Unchanged behaviour for the raw collections: an edited row lands beside the
+        original, because nothing about them is stable enough to key on."""
+        original = {'Student': 'A', 'Present': 'Yes'}
+        original['row_hash'] = row_hash(original)
+        assert importer._upsert('birthday_reports', [original]) == (1, 0, 0, 0, 0)
+
+        edited = {'Student': 'A', 'Present': 'No'}
+        edited['row_hash'] = row_hash(edited)
+        assert importer._upsert('birthday_reports', [edited]) == (1, 0, 0, 0, 0)
+        assert importer.db.birthday_reports.count_documents({}) == 2
+
+    def test_the_lookup_index_exists(self, importer):
+        """Without it, every import scans the collection once per 1,000 keys."""
+        importer._ensure_indexes('dwp_reports')
+        assert 'natural_key' in importer.db.dwp_reports.index_information()

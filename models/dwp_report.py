@@ -40,8 +40,9 @@ DETAIL_PROJECTION = dict(PRIVATE_FIELDS)
 # ⚠️ date alone is NOT a total order here. 29,382 reports over 309 days is a median of 85 a
 # day and 192 on the busiest, so nearly every page boundary lands inside a tie, and
 # skip/limit over a partial order repeats a document on one page and drops it from the
-# next. _id is the only field on this collection guaranteed unique -- there is no natural
-# key, which is why ingestion carries row_hash at all.
+# next. _id is the only field on this collection guaranteed unique: ingestion keys writes
+# on NATURAL_KEY (account_id, student_name, date, session_start), but four student-days
+# share one, so it cannot break a tie here.
 LIST_SORT = [('date', DESCENDING), ('_id', ASCENDING)]
 
 TIE_BREAK = '_id'
@@ -93,10 +94,11 @@ class DigitalWorkoutPlan:
     def find_by_id(report_id):
         """One report, or None -- including when the id is not an ObjectId at all.
 
-        dwp_reports has no natural key, so _id is the handle the URL carries. A mistyped
-        one reaches ObjectId() as arbitrary text and raises InvalidId; swallowing that
-        here is what makes /api/reports/not-an-oid a 404 rather than a 500, which is the
-        honest answer -- there is no such report either way.
+        dwp_reports' natural key is not unique -- four student-days share one -- so _id
+        stays the handle the URL carries. A mistyped one reaches ObjectId() as arbitrary
+        text and raises InvalidId; swallowing that here is what makes
+        /api/reports/not-an-oid a 404 rather than a 500, which is the honest answer --
+        there is no such report either way.
         """
         try:
             key = ObjectId(report_id)
