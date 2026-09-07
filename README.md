@@ -16,6 +16,38 @@ dashboard.
 
 ---
 
+## Requirements and versions
+
+| Category | Component | Version / requirement |
+|---|---|---|
+| Runtime | Python | 3.x; minor version not currently pinned |
+| Runtime | Node.js | `^20.19.0` or `>=22.12.0` |
+| Runtime | MongoDB | Atlas or compatible MongoDB instance |
+| Backend | pymongo | 4.6.1 |
+| Backend | Flask | 3.0.0 |
+| Backend | Flask-CORS | 4.0.0 |
+| Backend | python-dotenv | 1.0.0 |
+| Backend | openpyxl | 3.1.5 |
+| Frontend | React | 19.2.8 |
+| Frontend | React DOM | 19.2.8 |
+| Frontend | React Router DOM | 7.18.3 |
+| Frontend tooling | TypeScript | 6.0.3 |
+| Frontend tooling | Vite | 8.2.2 |
+| Frontend tooling | oxlint | 1.79.0 |
+| Backend testing | pytest | 9.1.1 |
+| Backend testing | mongomock | 4.3.0 |
+| Frontend testing | Vitest | 4.1.11 |
+| Frontend testing | Testing Library React | 16.3.3 |
+| Frontend testing | Testing Library Jest DOM | 7.0.1 |
+| Frontend testing | Testing Library User Event | 14.6.6 |
+| Frontend testing | MSW | 2.15.0 |
+| Frontend testing | jsdom | 30.0.1 |
+
+Python packages are pinned in `requirements.txt` and `requirements-dev.txt`; frontend
+versions are resolved by `frontend/package-lock.json`.
+
+---
+
 ## Setup
 
 The connection string carries cluster credentials and is **not** in source. Copy the
@@ -751,6 +783,8 @@ Items remain in priority order within each group.
       count column.
 - [ ] `P2` **Build the report entry page** with drafts, reopen, and finalize flows. It depends
       on the report write endpoints and development database.
+- [ ] `P2` **Build a center metrics page** showing sessions, students, pages, and instructors
+      by location, using the center-wide metrics API.
 - [ ] `P3` **Add pinned stats to the Home page.** Decide which stats qualify and whether each
       user's layout belongs in `users` or browser storage.
 - [ ] `P3` **Add a separate spreadsheet upload page** for incoming `.xlsx` reports; the
