@@ -1,8 +1,10 @@
 """HTTP surface, end to end over the in-memory database."""
 
 import os
+from datetime import datetime
 
 import pytest
+from bson import ObjectId
 
 from config import DEFAULT_ORIGINS, parse_bool, parse_origins, parse_port
 from tests.conftest import TEST_API_KEY
@@ -388,6 +390,107 @@ class TestCenters:
 
     def test_the_route_requires_a_credential(self, anonymous_client):
         assert anonymous_client.get('/api/centers').status_code == 401
+
+
+class TestCenterMetrics:
+    """GET /api/centers/metrics -- the center dashboard's stat tiles."""
+
+    def totals(self, client, *centers):
+        response = client.get('/api/centers/metrics',
+                              query_string=[('center', c) for c in centers])
+        assert response.status_code == 200
+        return response.get_json()['totals']
+
+    def test_pages_are_the_pages_recorded_not_the_pages_credited(self, client):
+        """⚠️ The assertion this whole route exists for.
+
+        Anthony's 3/14 session was co-taught, so Dana and Marcus are each credited its
+        full 7 pages. Summing what the instructors collection holds for Westside gives
+        16 + 7 = 23. Only 16 pages were actually turned. Read from dwp_reports, which is
+        the one place a session is counted once.
+        """
+        assert self.totals(client, 'Westside')['pages_completed'] == 16
+
+    def test_siblings_count_as_two_students(self, client):
+        """Anthony and Ava share an account. An account is a household, not a student."""
+        assert self.totals(client, 'Westside')['students'] == 2
+
+    def test_counts_sessions_instructors_and_days(self, client):
+        totals = self.totals(client, 'Westside')
+        assert (totals['sessions'], totals['instructors'], totals['days']) == (3, 2, 3)
+
+    def test_reports_the_span_of_the_sessions_it_counted(self, client):
+        totals = self.totals(client, 'Westside')
+        assert totals['first_session']['$date'].startswith('2026-03-07')
+        assert totals['last_session']['$date'].startswith('2026-03-14')
+
+    def test_no_center_given_is_every_center(self, client):
+        """An absent filter and a filter on everything are the same question."""
+        totals = self.totals(client)
+        assert totals['sessions'] == 4
+        assert totals['students'] == 3
+        assert totals['instructors'] == 3
+        assert totals['pages_completed'] == 23
+
+    def test_a_blank_center_is_ignored_rather_than_matched(self, client):
+        """A truncated URL means no filter, as it does on every list route."""
+        assert self.totals(client, '') == self.totals(client)
+
+    def test_an_instructor_at_two_selected_centers_counts_once(self, client, seeded_db):
+        """11 of 103 instructors work at more than one center, and are still one person.
+
+        The shared fixtures give Dana no Eastside session, so one is added here rather
+        than changing counts that the rest of this file asserts.
+        """
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_TAN,
+            'student_name': 'Chloe Tan',
+            'date': datetime(2026, 2, 8),
+            'centers': ['Eastside'],
+            'instructors': ['Dana Reyes'],
+            'pages_completed': 3,
+        })
+
+        both = self.totals(client, 'Westside', 'Eastside')
+        assert both['instructors'] == 3          # Dana, Marcus, Sam -- not 4
+        assert self.totals(client, 'Westside')['instructors'] == 2
+        assert self.totals(client, 'Eastside')['instructors'] == 2
+
+    def test_a_report_with_no_finalized_flag_counts_as_outstanding(self, client):
+        """The follow-up queue errs towards showing work, not towards looking clean."""
+        assert self.totals(client, 'Westside')['unfinalized'] == 3
+
+    def test_a_finalized_report_leaves_the_outstanding_count(self, client, seeded_db):
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_NGUYEN,
+            'student_name': 'Anthony Nguyen',
+            'date': datetime(2026, 3, 21),
+            'centers': ['Westside'],
+            'instructors': ['Dana Reyes'],
+            'pages_completed': 2,
+            'finalized': True,
+        })
+
+        totals = self.totals(client, 'Westside')
+        assert totals['sessions'] == 4
+        assert totals['unfinalized'] == 3
+
+    def test_an_unknown_center_is_zeroes_and_not_an_error(self, client):
+        """"Nothing happened at Xyz" is a correct answer. `sort=bogus` has none."""
+        assert self.totals(client, 'Nowhere') == {
+            'sessions': 0, 'students': 0, 'instructors': 0, 'pages_completed': 0,
+            'unfinalized': 0, 'days': 0, 'first_session': None, 'last_session': None,
+        }
+
+    def test_echoes_the_selection_it_answered(self, client):
+        body = client.get('/api/centers/metrics',
+                          query_string=[('center', 'Westside'), ('center', '')]).get_json()
+        assert body['centers'] == ['Westside']
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/centers/metrics').status_code == 401
 
 
 class TestSearchStudents:

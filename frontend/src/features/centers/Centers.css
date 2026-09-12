@@ -1,0 +1,43 @@
+/* The center selector.
+ *
+ * Pills rather than the filter dropdown the list pages use: on those the center is one
+ * filter among five and belongs behind a button; here it is the question the page answers,
+ * so the selection is readable without a click. */
+
+.center-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.center-pill {
+  padding: 6px var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.center-pill:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Selected reads as filled rather than merely outlined: with four pills side by side a
+   border change alone is easy to miss, and aria-pressed is not visible. */
+.center-pill-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+.center-pill-on:hover {
+  background: var(--accent-hover);
+  color: var(--text-on-accent);
+}

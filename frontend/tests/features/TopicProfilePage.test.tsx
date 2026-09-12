@@ -155,11 +155,57 @@ describe('topic profile page', () => {
     expect(await screen.findByText(/nobody has finished it/)).toBeInTheDocument()
   })
 
-  it('names the stats that are not built yet rather than faking them', async () => {
+  it('shows how long a topic takes, leading with the median', async () => {
+    // ⚠️ The mean days to finish is 26.7 program-wide against a median of 13, with a
+    // 393-day tail -- a mean on its own describes almost nobody. The mean sessions sits
+    // beside its median rather than replacing it.
     renderApp(`/topics/${FRACTIONS_ID}`)
 
-    const pending = await card(/Time to finish and page pace/)
-    expect(within(pending).getByText(/Not available yet/)).toBeInTheDocument()
+    const pace = within(await card(/Time to finish and page pace/))
+    expect(pace.getByText(/3 median · 3\.5 mean/)).toBeInTheDocument()
+    expect(pace.getByText(/13 median/)).toBeInTheDocument()
+    expect(pace.getByText(/From first sight to the finishing session/)).toBeInTheDocument()
+  })
+
+  it('reads the page ratio against the program median, not against 1.00', async () => {
+    // ⚠️ The whole point of storing the median. A session's pages count once for every
+    // topic on it, so the distribution sits above 1.0 -- read against 1.0, 223 of the 283
+    // qualifying topics look like they speed students up.
+    renderApp(`/topics/${FRACTIONS_ID}`)
+
+    const pace = within(await card(/Time to finish and page pace/))
+    expect(pace.getByText('1.35×')).toBeInTheDocument()
+    expect(pace.getByText('1.21×')).toBeInTheDocument()
+    expect(pace.getByText(/The comparison point, not 1\.00×/)).toBeInTheDocument()
+    // Says what the figure rests on, so a reader can weigh it.
+    expect(pace.getByText(/over 137 sessions/)).toBeInTheDocument()
+  })
+
+  it('never claims the topic caused the page count', async () => {
+    // A comparison, never an attribution: the numerator is the whole session's pages, and
+    // a topic worked alongside fast ones inherits their pace.
+    renderApp(`/topics/${FRACTIONS_ID}`)
+
+    const pace = within(await card(/Time to finish and page pace/))
+    expect(pace.getByText(/does not exist to be computed/)).toBeInTheDocument()
+    expect(pace.getByText(/a session carries 2\.17 topics on average/)).toBeInTheDocument()
+    // The label says whose pages these are: the session's, not the topic's.
+    expect(pace.getByText(/Sessions including this topic/)).toBeInTheDocument()
+  })
+
+  it('says why a thin topic has no page ratio instead of showing one', async () => {
+    // DECIMALS_TWO sits under the builder's 50-session threshold, so it carries a basis
+    // and no figure. A ratio off 8 sessions would be noise dressed as a measurement.
+    renderApp(`/topics/${DECIMALS_TWO_ID}`)
+
+    const pace = within(await card(/Time to finish and page pace/))
+    expect(
+      await pace.findByText(/Too few finalized sessions to compare — 8 so far/),
+    ).toBeInTheDocument()
+    // The program median still shows -- it is program-wide, and it is what the missing
+    // figure would have been read against. What must be absent is this topic's own.
+    expect(pace.getByText('1.21×')).toBeInTheDocument()
+    expect(pace.queryByText(/over 8 sessions/)).not.toBeInTheDocument()
   })
 
   it('offers a way back for an unknown topic', async () => {

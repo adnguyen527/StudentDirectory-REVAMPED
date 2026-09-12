@@ -4,13 +4,17 @@ Import anonymized data from Excel files into MongoDB.
 DWP rows are parsed at import time -- compound string fields are split into
 discrete typed fields before insertion.
 
-Imports are idempotent: every row carries a row_hash content fingerprint, writes are
-upserts keyed on it, and a unique index enforces it. Re-importing a file that has
-already been loaded reports its rows as "unchanged" instead of duplicating them.
+Writes are keyed on a natural key -- (account_id, student_name, date, session_start)
+for dwp_reports, and row_hash for the collections that have nothing stable to key on.
+row_hash is now only change detection: a row whose hash matches what is stored is
+skipped, and a row whose hash differs REPLACES its document in place, keeping its _id.
 
-Note that a row edited at the source produces a different hash, so it is imported as a
-new document rather than replacing the original. Correcting an already-imported row is
-a separate operation from re-importing a file.
+So re-importing an unchanged file is a no-op, and re-importing a file in which a row was
+corrected at the source updates that row rather than landing a second copy beside it.
+
+The natural key is not unique in the current data -- four student-days carry two rows
+each. A key matching more than one stored document is reported and skipped rather than
+half-updated; see _upsert.
 
 Run ingestion/migrations/backfill_row_hash.py once before the first import, to hash documents
 loaded before this mechanism existed.
@@ -18,10 +22,11 @@ loaded before this mechanism existed.
 
 import hashlib
 import re
+from collections import defaultdict
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time
 from bson import json_util
-from pymongo import MongoClient, ASCENDING, DESCENDING
+from pymongo import MongoClient, ReplaceOne, ASCENDING, DESCENDING
 from pymongo.errors import BulkWriteError
 from mongo_url import uri, db_name
 import openpyxl
@@ -281,12 +286,12 @@ def parse_center(value):
     return {'centers': centers, 'center_orgs': orgs}
 
 def row_hash(doc):
-    """Content fingerprint of a document, used as its idempotency key.
+    """Content fingerprint of a document -- what tells a changed row from an unchanged one.
 
-    A composite of (account_id, student_name, date, session_start) is NOT unique --
-    four session pairs in the current data share one while being genuinely different
-    records (different instructors, different notes). Hashing the whole document
-    avoids collapsing those. All 29,382 existing documents hash distinctly.
+    Not an identity. Two documents hashing differently means the row was edited, not that
+    it is a different session; NATURAL_KEY answers identity. The hash is still the only
+    key the collections below dwp_reports have, since they are stored as the source
+    spells them and carry nothing stable to key on.
 
     json_util handles BSON types (datetime, ObjectId) deterministically; sort_keys
     makes the digest independent of field insertion order.
@@ -295,10 +300,46 @@ def row_hash(doc):
     return hashlib.sha1(json_util.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
+# The fields that say which session a dwp row is about, as opposed to what it records
+# about that session. Everything else on the document can be corrected at the source
+# without the row becoming a different record, which is what makes these the identity.
+#
+# `finalized` is deliberately NOT among them. A draft that is later completed is the
+# commonest edit there is, and keying on the flag would file the completed report as a
+# second session rather than as an update to the first -- the exact bug this key exists
+# to fix.
+#
+# The key is NOT unique. Four student-days in the current data carry two rows sharing
+# one: three are an abandoned draft beside the real record, and the fourth (2025-07-01)
+# is two completed reports for one session by two instructors, differing in their notes,
+# assessments and topic statuses. No key built from stable fields separates that last
+# pair, so _upsert refuses to guess between them rather than pretending it can.
+NATURAL_KEY = ('account_id', 'student_name', 'date', 'session_start')
+
+
+def _key_fields(collection_name):
+    """What identifies a row in this collection.
+
+    Only dwp_reports is parsed into fields with a meaning. The rest are stored as the
+    source spells them, so their fingerprint is the only identity available and an edited
+    row there still lands as a new document.
+    """
+    return NATURAL_KEY if collection_name == 'dwp_reports' else ('row_hash',)
+
+
+def _describe(value):
+    """One key component, short enough that a whole key sits on one terminal line."""
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d' if value.time() == time.min else '%H:%M')
+    return str(value)
+
+
 def _is_row_hash_conflict(write_error):
     """True if a duplicate-key error came from the row_hash index rather than another.
 
-    keyPattern is present on modern servers; the message is the fallback.
+    Only a race reaches this now: another writer storing the same row between _upsert's
+    read and its write. keyPattern is present on modern servers; the message is the
+    fallback.
     """
     key_pattern = write_error.get('keyPattern')
     if key_pattern is not None:
@@ -358,10 +399,15 @@ class DataImporter:
             'birthday_reports': 0,
             'total_files': 0,
             'total_documents': 0,
-            'already_present': 0,
+            'unchanged': 0,
+            'updated': 0,
             'repeated_in_file': 0,
+            'ambiguous': 0,
             'errors': 0
         }
+        # Keys _upsert could not resolve, for the file being imported. Held rather than
+        # printed as they are found so they land under that file's summary line.
+        self.ambiguous_keys = []
 
     def _read_excel(self, path):
         wb = openpyxl.load_workbook(path)
@@ -407,48 +453,94 @@ class DataImporter:
                 row['row_hash'] = row_hash(row)
 
         try:
-            inserted, already, repeated = self._upsert(collection_name, rows)
-            note = f", {repeated} repeated in file" if repeated else ""
-            print(f"    [ok] {inserted} new, {already} already present{note} "
-                  f"-> {collection_name}")
+            inserted, unchanged, updated, repeated, ambiguous = self._upsert(
+                collection_name, rows)
+            notes = ''.join([
+                f", {repeated} repeated in file" if repeated else "",
+                f", {ambiguous} ambiguous" if ambiguous else "",
+            ])
+            print(f"    [ok] {inserted} new, {unchanged} unchanged, {updated} updated"
+                  f"{notes} -> {collection_name}")
+            for line in self.ambiguous_keys:
+                print(f"      {line}")
             self.stats[collection_name] += inserted
             self.stats['total_documents'] += inserted
-            self.stats['already_present'] += already
+            self.stats['unchanged'] += unchanged
+            self.stats['updated'] += updated
             self.stats['repeated_in_file'] += repeated
+            self.stats['ambiguous'] += ambiguous
         except Exception as e:
             print(f"    [!!] Insert error: {e}")
             self.stats['errors'] += 1
 
     def _upsert(self, collection_name, docs):
-        """Write only rows whose row_hash is not already stored.
+        """Write each row to the document its natural key names, if the row changed.
 
-        There is deliberately no update path. row_hash covers the whole document, so a
-        hash that already exists means a byte-identical document is already stored and
-        rewriting it would change nothing. A row edited at the source hashes
-        differently and is inserted as a new document.
+        A key naming nothing is inserted. A key naming one document is left alone when
+        the row_hash matches and REPLACED when it differs -- replaced rather than
+        re-inserted, so the _id survives: students.dwp_report_ids[] and
+        attendance_reports.dwp_report_ids[] hold those ids, and /api/reports/<id> is the
+        only handle the frontend has on a report.
 
-        Returns (inserted, already_present, repeated_within_file).
+        A key naming more than one document is AMBIGUOUS and skipped whole. Updating one
+        of two would leave the other stale and invisible, and there is no rule that picks
+        correctly between the 2025-07-01 pair -- see NATURAL_KEY. The same applies
+        within one file: rows sharing a key but disagreeing on content are all skipped,
+        since nothing here can tell a corrected row from a second genuine one.
+
+        Returns (inserted, unchanged, updated, repeated_within_file, ambiguous), where
+        ambiguous counts rows in the file that were not written.
         """
         collection = self.db[collection_name]
         self._ensure_indexes(collection_name)
+        fields = _key_fields(collection_name)
+        self.ambiguous_keys = []
 
-        # Collapse rows repeated inside a single file before touching the database.
-        by_hash = {d['row_hash']: d for d in docs}
-        repeated = len(docs) - len(by_hash)
+        by_key = defaultdict(list)
+        for doc in docs:
+            by_key[tuple(doc.get(field) for field in fields)].append(doc)
 
-        hashes = list(by_hash)
-        already = set()
-        for i in range(0, len(hashes), 1000):
-            chunk = hashes[i:i + 1000]
-            already |= set(collection.distinct('row_hash', {'row_hash': {'$in': chunk}}))
+        repeated = ambiguous = 0
+        candidates = {}
+        for key, group in by_key.items():
+            if len({d['row_hash'] for d in group}) > 1:
+                ambiguous += len(group)
+                self._note_ambiguous(fields, key, len(group), 'rows in this file')
+                continue
+            # Byte-identical rows repeated inside one file: collapse to a single write.
+            repeated += len(group) - 1
+            candidates[key] = group[0]
 
-        fresh = [d for h, d in by_hash.items() if h not in already]
-        inserted = 0
-        if fresh:
+        # One read per 1,000 keys, the way the hash lookup it replaces was chunked.
+        # Served by the natural_key index -- without it this is a collection scan.
+        projection = dict.fromkeys(fields, 1)
+        projection['row_hash'] = 1
+        stored = defaultdict(list)
+        keys = list(candidates)
+        for i in range(0, len(keys), 1000):
+            chunk = keys[i:i + 1000]
+            query = {'$or': [dict(zip(fields, key)) for key in chunk]}
+            for found in collection.find(query, projection):
+                stored[tuple(found.get(field) for field in fields)].append(found)
+
+        ops, unchanged = [], 0
+        for key, doc in candidates.items():
+            matches = stored.get(key, [])
+            if len(matches) > 1:
+                ambiguous += 1
+                self._note_ambiguous(fields, key, len(matches), 'stored documents')
+            elif matches and matches[0].get('row_hash') == doc['row_hash']:
+                unchanged += 1
+            else:
+                ops.append(ReplaceOne(dict(zip(fields, key)), doc, upsert=True))
+
+        inserted = updated = 0
+        if ops:
             try:
-                inserted = len(collection.insert_many(fresh, ordered=False).inserted_ids)
+                result = collection.bulk_write(ops, ordered=False)
+                inserted, updated = result.upserted_count, result.modified_count
             except BulkWriteError as e:
-                # A row_hash duplicate here means another writer inserted the same row
+                # A row_hash duplicate here means another writer stored the same row
                 # between the read above and this write -- harmless, the row is stored.
                 # A duplicate on any other index is a real problem and must not be
                 # swallowed, so check which index actually collided.
@@ -456,18 +548,41 @@ class DataImporter:
                               if w['code'] != 11000 or not _is_row_hash_conflict(w)]
                 if unexpected:
                     raise
-                inserted = e.details['nInserted']
+                inserted, updated = e.details['nUpserted'], e.details['nModified']
 
-        return inserted, len(by_hash) - inserted, repeated
+        return inserted, unchanged, updated, repeated, ambiguous
+
+    def _note_ambiguous(self, fields, key, count, what):
+        """Record a key that could not be resolved, in terms a person can look it up by.
+
+        account_id is dropped from the description: it is a household UUID, and the
+        student name beside the date and time is what identifies the session to someone
+        reading the source.
+        """
+        described = ' '.join(_describe(value)
+                             for field, value in zip(fields, key)
+                             if field != 'account_id')
+        self.ambiguous_keys.append(
+            f"ambiguous: {described} ({count} {what} share this key)")
 
     def _ensure_indexes(self, collection_name):
         collection = self.db[collection_name]
-        # Unique on row_hash is what actually enforces idempotency -- a second import
-        # of the same row matches an existing document instead of inserting beside it.
+        # No longer what enforces idempotency -- the natural key is. Kept, and kept
+        # unique, for two reasons: it is still the only key the collections without a
+        # natural one have, and on dwp_reports it is a corruption tripwire, since the key
+        # fields are part of the hashed body and two documents sharing a hash would have
+        # to be one session stored twice.
         collection.create_index([('row_hash', ASCENDING)], unique=True)
         if collection_name == 'dwp_reports':
             collection.create_index([('date', ASCENDING)])
             collection.create_index([('account_id', ASCENDING)])
+            # Created here as well as by backfill_finalized.py, which is where it came
+            # from -- a fresh import into an empty cluster never runs that migration.
+            collection.create_index([('finalized', ASCENDING)])
+            # What every import looks its rows up by. Deliberately not unique: four
+            # student-days carry two rows each -- see NATURAL_KEY.
+            collection.create_index([(field, ASCENDING) for field in NATURAL_KEY],
+                                    name='natural_key')
             # The list route's resting order, so a page of it is an index scan rather
             # than a blocking sort over 29,382 documents. _id is in the key because the
             # order has to be total -- see LIST_SORT in models/dwp_report.py.
@@ -497,9 +612,12 @@ class DataImporter:
         print(f"\n{'='*60}\nIMPORT COMPLETE\n{'='*60}")
         print(f"Files:           {self.stats['total_files']}")
         print(f"New documents:   {self.stats['total_documents']}")
-        print(f"Already present: {self.stats['already_present']}  (skipped -- re-import is a no-op)")
+        print(f"Unchanged:       {self.stats['unchanged']}  (skipped -- re-import is a no-op)")
+        print(f"Updated:         {self.stats['updated']}  (edited at the source, replaced in place)")
         if self.stats['repeated_in_file']:
             print(f"Repeated in file: {self.stats['repeated_in_file']}")
+        if self.stats['ambiguous']:
+            print(f"Ambiguous:       {self.stats['ambiguous']}  (key matched more than one row -- not written)")
         print(f"Errors:          {self.stats['errors']}")
         print(f"\nBy collection:")
         for name in ['dwp_reports', 'attendance_reports', 'enrollment_reports', 'student_reports', 'birthday_reports']:

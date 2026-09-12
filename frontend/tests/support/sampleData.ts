@@ -506,6 +506,14 @@ export const FRACTIONS: TopicListItem = {
   students_ever_finished: 2,
   total_reassignments: 1,
   median_sessions_to_finish: 3,
+  mean_sessions_to_finish: 3.5,
+  median_days_to_finish: 13,
+  // Above the program median below, so this topic reads as one of the faster ones.
+  session_pages_ratio: 1.35,
+  session_pages_ratio_basis: 137,
+  // ⚠️ Not 1.0 -- the line topics are actually read against. Identical on every document,
+  // as the builder stores it.
+  session_pages_ratio_median: 1.21,
   first_taught: day('2026-02-01'),
   last_taught: day('2026-03-14'),
   last_modified: at('2026-03-15', '09:00'),
@@ -542,6 +550,12 @@ export const DECIMALS_TWO: TopicListItem = {
   students_ever_finished: 0,
   // Nobody finished it, so there is no median. Null, not zero.
   median_sessions_to_finish: null,
+  // Thin: under the builder's 50-session threshold, so it carries a basis and no
+  // figure. The page has to say why rather than showing a ratio off 8 sessions.
+  mean_sessions_to_finish: null,
+  median_days_to_finish: null,
+  session_pages_ratio: null,
+  session_pages_ratio_basis: 8,
 }
 
 export const ANGLES: TopicListItem = {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { formatDate, toDate } from '../api/bson'
+import { formatDate, isoDay, toDate } from '../api/bson'
 import { getMetrics } from '../api/endpoints'
 import type { Metrics } from '../api/types'
 import { useApi } from '../hooks/useApi'
@@ -33,23 +33,21 @@ interface DateRangeFilterProps {
 /** Windows worth one click. Days back from the newest session, not from today. */
 const PRESETS = [30, 90, 180]
 
-/** 'YYYY-MM-DD' in local terms, which is what <input type="date"> and the API both take. */
-function isoDay(date: Date) {
-  return date.toISOString().slice(0, 10)
-}
-
 function daysBefore(anchor: Date, days: number) {
   const start = new Date(anchor)
   start.setDate(start.getDate() - days)
   return isoDay(start)
 }
 
-/** "Any time", "Since Jun 19, 2025", "Up to …", "Jun 19 – Sep 17, 2025". */
+/** "Any time", "Since Jun 19, 2025", "Up to …", "Sep 17, 2025", "Jun 19 to Sep 17, 2025". */
 function dateSummary(from: string, to: string) {
   const said = (day: string) => formatDate({ $date: `${day}T00:00:00Z` })
   if (!from && !to) return 'Any time'
   if (from && !to) return `Since ${said(from)}`
   if (!from && to) return `Up to ${said(to)}`
+  // One day is a date, not a range. "Sep 17, 2025 to Sep 17, 2025" is the same fact said
+  // twice, and this pill is what tells a reader the card is showing a single day.
+  if (from === to) return said(from)
   return `${said(from)} to ${said(to)}`
 }
 

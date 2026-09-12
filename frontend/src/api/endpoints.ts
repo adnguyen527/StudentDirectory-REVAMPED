@@ -3,6 +3,7 @@
 import { request } from './client'
 import type {
   AttendanceResponse,
+  CenterMetricsResponse,
   CentersResponse,
   InstructorDetailResponse,
   InstructorsResponse,
@@ -102,6 +103,17 @@ export function getReport(reportId: string, signal?: AbortSignal) {
  *  appears in the checkboxes without a release. */
 export function listCenters(signal?: AbortSignal) {
   return request<CentersResponse>('/centers', undefined, signal)
+}
+
+/**
+ * All-time totals across a selection of centers, for the metrics dashboard's tiles.
+ *
+ * Several centers are a union, as everywhere else `?center=` is accepted, and an empty
+ * selection means every center rather than none -- the route treats an absent filter and a
+ * filter on everything as the same question. An unrecognised name answers zeroes, not a 400.
+ */
+export function getCenterMetrics(centers: string[] = [], signal?: AbortSignal) {
+  return request<CenterMetricsResponse>('/centers/metrics', { center: centers }, signal)
 }
 
 /**

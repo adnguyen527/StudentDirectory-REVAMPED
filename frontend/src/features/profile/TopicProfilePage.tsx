@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { formatDate, formatNumber } from '../../api/bson'
+import { formatNumber } from '../../api/bson'
 import { getTopic } from '../../api/endpoints'
 import type { TopicDetailResponse } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
@@ -22,6 +22,36 @@ const INSTRUCTOR_PAGE = 10
  * Every count here is per (student, topic) pair rather than per session -- a student who
  * worked a topic across nine sessions counts once. See ingestion/build_topics.py.
  */
+/**
+ * One labelled figure, with the caveat that makes it readable under it.
+ *
+ * `note` and `caveat` are two different jobs and so two different lines. A note says what
+ * the figure rests on -- how many sessions, measured from where -- and a reader who skips
+ * it still reads the number correctly. A caveat says what the number is *not*, and a reader
+ * who skips that one draws a conclusion the data does not support, so it is set in the
+ * stronger ink of the two.
+ */
+function Field({
+  label,
+  value,
+  note,
+  caveat,
+}: {
+  label: string
+  value: string | null
+  note?: string
+  caveat?: string
+}) {
+  return (
+    <div className="report-field">
+      <span className="report-field-label">{label}</span>
+      <span className="report-field-value">{value ?? <span className="muted">—</span>}</span>
+      {note && <span className="topic-field-note">{note}</span>}
+      {caveat && <span className="topic-field-caveat">{caveat}</span>}
+    </div>
+  )
+}
+
 export function TopicProfilePage() {
   const { topicId = '' } = useParams()
   const [instructorOffset, setInstructorOffset] = useState(0)
@@ -109,9 +139,6 @@ export function TopicProfilePage() {
               also “{name}”
             </span>
           ))}
-          <span className="muted">
-            taught {formatDate(topic.first_taught)} – {formatDate(topic.last_taught)}
-          </span>
         </p>
       </div>
 
@@ -156,7 +183,82 @@ export function TopicProfilePage() {
           wash={4}
         />
       </div>
+          <Card title="Time to finish and page pace" showOverflow={false}>
+              <div className="report-fields">
+                  {/* Median leads on both. The mean days to finish is 26.7 against a median of 13,
+                  with a 393-day tail -- a mean alone describes almost nobody. The mean sessions
+                  sits beside its median rather than replacing it. */}
+                  <Field
+                      label="Sessions to finish"
+                      value={
+                          topic.median_sessions_to_finish === null
+                              ? null
+                              : `${formatNumber(topic.median_sessions_to_finish)} median` +
+                              (topic.mean_sessions_to_finish === null
+                                  ? ''
+                                  : ` · ${topic.mean_sessions_to_finish.toFixed(1)} mean`)
+                      }
+                  />
+                  <Field
+                      label="Days to finish"
+                      value={
+                          topic.median_days_to_finish === null
+                              ? null
+                              : `${formatNumber(topic.median_days_to_finish)} median`
+                      }
+                      note="From first sight to the finishing session, not from the last assignment."
+                  />
+                  {/* ⚠️ The caveat below is the only thing on this card that disarms the
+                      trap the figure sets. The numerator is the *whole session's* page
+                      count, so a topic worked alongside fast ones inherits their pace, and
+                      1.35× otherwise reads as "this topic makes students do 35% more" when
+                      nothing of the sort was measured. It is shown only beside a real
+                      figure: with no ratio there is no misreading to prevent, and the null
+                      branch already explains itself.
 
+                      2.17 is program-wide and not on the document -- 50,900 topic entries
+                      across the 23,437 sessions that carry any. See api/types.ts on
+                      session_pages_ratio, and build_topics.py for the 50-session floor. */}
+                  <Field
+                      label="Pages per session"
+                      value={
+                          topic.session_pages_ratio === null
+                              ? null
+                              : `${topic.session_pages_ratio.toFixed(2)}×`
+                      }
+                      note={
+                          topic.session_pages_ratio === null
+                              ? // Below the builder's threshold. Say why rather than showing a figure
+                              // off a handful of sessions.
+                              `Too few finalized sessions to compare — ${formatNumber(
+                                  topic.session_pages_ratio_basis,
+                              )} so far.`
+                              : `Sessions including this topic, against each student's own pace, over ` +
+                              `${formatNumber(topic.session_pages_ratio_basis)} sessions.`
+                      }
+                      caveat={
+                          topic.session_pages_ratio === null
+                              ? undefined
+                              : `The whole session's pages, not this topic's — a session carries ` +
+                              `2.17 topics on average, so a per-topic share does not exist to be ` +
+                              `computed.`
+                      }
+                  />
+                  {/* ⚠️ Shown beside the figure, because the figure is meaningless without it. A
+                  session's pages count once for every topic on it, so the distribution sits
+                  above 1.0: read against 1.0, 223 of 283 topics look like they speed students
+                  up. Half the topics sit either side of this line. */}
+                  <Field
+                      label="Program median"
+                      value={
+                          topic.session_pages_ratio_median === null
+                              ? null
+                              : `${topic.session_pages_ratio_median.toFixed(2)}×`
+                      }
+                      note="What a typical topic does. The comparison point, not 1.00×."
+                  />
+              </div>
+          </Card>
       {/* Side by side because they are the same three states counted two ways -- once
           per student, once per session -- and the difference between the two columns is
           the thing worth seeing. Stacked, you had to remember the first to read the
@@ -279,18 +381,6 @@ export function TopicProfilePage() {
             />
           </>
         )}
-      </Card>
-
-      {/* Named in the README's detail-page spec but not buildable yet: the three fields
-          it needs are not in the collection. See the P2 data-integrity item "Three fields
-          the topic detail page needs". */}
-      <Card title="Time to finish and page pace" showOverflow={false}>
-        <p className="muted">
-          Not available yet — <code>topics</code> carries no elapsed-days figure and no page
-          comparison. Both need adding to <code>ingestion/build_topics.py</code> first: the
-          days are cheap, the page figure needs a second pass over <code>dwp_reports</code>{' '}
-          for each student&rsquo;s baseline.
-        </p>
       </Card>
     </div>
   )

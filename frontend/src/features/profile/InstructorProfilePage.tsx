@@ -13,6 +13,7 @@ import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../..
 import { Pager } from '../../shell/Pager'
 import { StatTile } from '../../shell/StatTile'
 import { useDocumentTitle } from '../../shell/useDocumentTitle'
+import { daysPerWeek } from './daysPerWeek'
 import { PAGES_PER_SESSION_MIN, pagesPerSession } from './pagesPerSession'
 import './Profile.css'
 
@@ -117,6 +118,9 @@ export function InstructorProfilePage() {
   const daysTaught = instructor.days_taught.length
   const rosterSize = instructor.students.length
   const perDay = daysTaught ? instructor.total_sessions_taught / daysTaught : 0
+  // How often they work, as against how much -- see daysPerWeek for why long absences come
+  // out of the denominator.
+  const pace = daysPerWeek(instructor.days_taught)
   const unfinalizedShare = instructor.total_sessions_taught
     ? (100 * instructor.unfinalized_sessions) / instructor.total_sessions_taught
     : 0
@@ -185,6 +189,32 @@ export function InstructorProfilePage() {
           full-width row saying very little. */}
       <CardRow>
         <Card title="Days taught by month" flush>
+          {/* How often, above how much. The months below say when they worked; this says
+              at what pace, which the monthly counts cannot show -- a month with eight days
+              reads the same whether it was every week or one busy fortnight. */}
+          <p className="card-lead-stat">
+            {pace.rate === null ? (
+              // Four instructors span less than two weeks. A weekly rate over that is
+              // noise, so say the thing that is actually known.
+              <>
+                {formatNumber(pace.daysTaught)}{' '}
+                {pace.daysTaught === 1 ? 'day' : 'days'} taught, over less than two weeks
+              </>
+            ) : (
+              <>
+                <strong>{pace.rate.toFixed(1)} days a week</strong> on average
+                {pace.weeksExcluded > 0 && (
+                  // Shown because the number is adjusted: a reader who cannot see that a
+                  // break was taken out has no way to check it.
+                  <span className="muted">
+                    {' '}
+                    · {formatNumber(pace.weeksExcluded)} weeks off excluded
+                  </span>
+                )}
+              </>
+            )}
+          </p>
+
           <AsyncBoundary
             loading={false}
             error={null}

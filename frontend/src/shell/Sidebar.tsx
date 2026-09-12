@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 
 import {
+  CentersIcon,
   DashboardIcon,
   InstructorsIcon,
   PlusIcon,
@@ -17,6 +18,7 @@ const NAV = [
   { to: '/instructors', label: 'Instructors', icon: InstructorsIcon, end: false },
   { to: '/topics', label: 'Topics', icon: TopicsIcon, end: false },
   { to: '/reports', label: 'Reports', icon: ReportsIcon, end: false },
+  { to: '/center-metrics', label: 'Center Metrics', icon: CentersIcon, end: false },
 ]
 
 /** Fixed left rail: wordmark, primary action, nav, settings pinned to the bottom. */

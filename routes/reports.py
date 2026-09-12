@@ -29,7 +29,7 @@ def get_reports():
     """A page of session reports, in the same envelope /api/students returns.
 
     Newest first, and the order is total -- see LIST_SORT in models/dwp_report.py. This is
-    the one list route whose collection has no natural key, so a partial order here would
+    the one list route whose collection has no *unique* key, so a partial order here would
     repeat and drop rows across page boundaries rather than merely look untidy.
 
     student_notes is not in the response, by projection rather than by omission here --

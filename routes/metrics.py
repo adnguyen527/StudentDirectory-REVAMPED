@@ -1,5 +1,5 @@
-from flask import Blueprint, jsonify
-from models import Student, Instructor, DigitalWorkoutPlan, Attendance
+from flask import Blueprint, jsonify, request
+from models import Student, Instructor, DigitalWorkoutPlan, Attendance, Center
 from routes.serialization import serialize
 
 metrics_bp = Blueprint('metrics', __name__, url_prefix='/api')
@@ -20,6 +20,39 @@ def get_centers():
     names = Student.center_names() | Instructor.center_names()
     # Sorted so the checkboxes hold still between requests; a set has no order.
     return jsonify({'centers': sorted(names)}), 200
+
+
+@metrics_bp.route('/centers/metrics', methods=['GET'])
+def get_center_metrics():
+    """What one manager's centers add up to, for the center dashboard's stat tiles.
+
+    ?center= is repeatable and the several names are a union, as on every list route --
+    the page offers a combined view of the centers a manager can reach rather than one at
+    a time. None given means every center, which is the same query `center_criteria`
+    already builds for an absent filter.
+
+    An unrecognised name answers zeroes with a 200. "Nothing happened at Xyz" is a correct
+    answer to a filter, where `sort=bogus` has none -- see models/filters.py. Do not turn
+    this into a 400.
+
+    The figures come from `dwp_reports`, not from summing the built per-center aggregates.
+    models/center.py says why: co-taught sessions credit each instructor the full page
+    count, so instructor pages overshoot a center total by about ten percent.
+
+    Not wrapped in a try/except that reports str(e). get_metrics below does, and it is the
+    only route here that does; a database fault should reach the client as a 500 with
+    nothing in it about the cluster.
+    """
+    centers = request.args.getlist('center')
+    totals = Center.summary(centers)
+
+    return jsonify({
+        # Echoed so the client can tell which selection produced these figures -- the
+        # response outlives the request that asked for it in a cache or a screenshot.
+        # Blank values are dropped here exactly as center_criteria drops them.
+        'centers': sorted({name for name in centers if name}),
+        'totals': serialize(totals),
+    }), 200
 
 
 @metrics_bp.route('/metrics', methods=['GET'])

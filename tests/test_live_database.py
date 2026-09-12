@@ -348,6 +348,40 @@ def test_topic_sessions_account_for_every_status(students):
     assert not drifted, f'{len(drifted)} topic(s) with unaccounted sessions, e.g. {drifted[:5]}'
 
 
+def test_the_page_pace_median_is_the_same_on_every_topic(live_db):
+    """⚠️ It is program-wide but stored on all 771 documents, which is the failure this
+    shape invites: a partial rebuild would leave two versions of one number, and the page
+    reads whichever document it happened to load. One value is the whole contract."""
+    medians = live_db['topics'].distinct('session_pages_ratio_median')
+    assert len(medians) == 1, f'{len(medians)} different medians stored: {medians[:5]}'
+
+
+def test_a_page_ratio_is_only_stored_where_it_has_enough_sessions(live_db):
+    """Below the threshold the ratio is null and only the basis is kept. A figure off a
+    handful of sessions is noise, and the page has nothing to gate on if the builder
+    stores one anyway."""
+    from ingestion.build_topics import SESSION_PAGES_MIN
+
+    wrong = list(live_db['topics'].find(
+        {'session_pages_ratio': {'$ne': None},
+         'session_pages_ratio_basis': {'$lt': SESSION_PAGES_MIN}},
+        {'topic_id': 1, 'session_pages_ratio_basis': 1},
+    ).limit(5))
+    assert not wrong, f'ratios stored under {SESSION_PAGES_MIN} sessions: {wrong}'
+
+
+def test_the_stored_median_is_the_median_of_the_stored_ratios(live_db):
+    """Holds the denormalised constant to the documents it summarises -- if the topics are
+    rebuilt and the median is not, or the threshold moves, this is what notices."""
+    from statistics import median
+
+    ratios = [d['session_pages_ratio'] for d in live_db['topics'].find(
+        {'session_pages_ratio': {'$ne': None}}, {'session_pages_ratio': 1})]
+    stored = live_db['topics'].find_one({}, {'session_pages_ratio_median': 1})
+    assert ratios, 'no topic carries a page ratio'
+    assert abs(median(ratios) - stored['session_pages_ratio_median']) < 1e-9
+
+
 def test_topics_reconcile_to_dwp_reports(live_db, students):
     """Every (student, topic) pair on a session must appear in that student's topics[],
     with the same number of sessions behind it, and nothing may appear that no session

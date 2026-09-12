@@ -343,6 +343,35 @@ export interface TopicRollupBase {
   total_reassignments: number
   /** Null when nobody has finished it -- an answer, not a missing field. */
   median_sessions_to_finish: number | null
+  /** Beside the median, not instead of it. Program-wide the mean days to finish is 26.7
+   *  against a median of 13, with a 393-day tail -- a mean alone describes almost nobody. */
+  mean_sessions_to_finish: number | null
+  /** Elapsed days from first sight to the finishing session. A different question from
+   *  sessions: a topic can take four sessions spread over two months. Median 13 across the
+   *  9,189 finished (student, topic) pairs; 662 topics carry one. */
+  median_days_to_finish: number | null
+  /**
+   * What a session carrying this topic does to its page count, against the student's own
+   * pace -- 0.70x to 2.23x across the 283 topics that qualify.
+   *
+   * ⚠️ A comparison, never an attribution: the numerator is the *whole session's* pages.
+   * A session carries 2.17 topics on average, so a per-topic share does not exist.
+   *
+   * Null below the builder's 50-session threshold, where the figure would be noise.
+   */
+  session_pages_ratio: number | null
+  /** Finalized sessions the ratio rests on, kept even when the ratio is null so the page
+   *  can say what it is worth -- or why there is none. */
+  session_pages_ratio_basis: number
+  /**
+   * ⚠️ The line a topic's ratio is read against, and it is **not 1.0**: a session's pages
+   * count once for every topic on it, so centred on 1.0 some 223 of 283 topics read as
+   * speeding students up. 1.21 on the current data, with half the topics each side.
+   *
+   * Program-wide and identical on every document -- see build_topics.py for why it is
+   * denormalised rather than served separately.
+   */
+  session_pages_ratio_median: number | null
   first_taught: ExtDate | null
   last_taught: ExtDate | null
   last_modified: ExtDate
@@ -374,6 +403,35 @@ export interface TopicDetailResponse {
 /** The center names the two list routes can be filtered by -- routes/metrics.py. */
 export interface CentersResponse {
   centers: string[]
+}
+
+/**
+ * What a selection of centers adds up to, all-time.
+ *
+ * ⚠️ Every figure here is counted from `dwp_reports`, not summed from the built student and
+ * instructor aggregates. Co-taught sessions credit each instructor the full page count, so
+ * adding up instructor pages overshoots a center's real total by about ten percent -- 168,623
+ * against the 153,360 pages actually recorded. models/center.py carries the long version.
+ */
+export interface CenterTotals {
+  sessions: number
+  /** Distinct students, counted by (account_id, student_name) -- an account is a household. */
+  students: number
+  /** Distinct instructors. One who works at two of the selected centers counts once. */
+  instructors: number
+  pages_completed: number
+  /** Reports still not finalized: the only figure here a manager can act on today. */
+  unfinalized: number
+  /** Distinct days with a session, which is not the session count -- a day can hold two. */
+  days: number
+  first_session: ExtDate | null
+  last_session: ExtDate | null
+}
+
+export interface CenterMetricsResponse {
+  /** The selection these totals answer, echoed back with blank values dropped. */
+  centers: string[]
+  totals: CenterTotals
 }
 
 /**
