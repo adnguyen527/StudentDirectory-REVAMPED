@@ -1,14 +1,18 @@
 import { Link } from 'react-router-dom'
 
-import { getReport } from '../../api/endpoints'
-import type { ReportDetailResponse } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
-import { AsyncBoundary } from '../../shell/AsyncBoundary'
-import { Modal } from '../../shell/Modal'
-import { ReportChips, ReportDetailBody } from '../profile/ReportDetailBody'
+import { getReport } from '../api/endpoints'
+import type { ReportDetailResponse } from '../api/types'
+import { useApi } from '../hooks/useApi'
+import { AsyncBoundary } from '../shell/AsyncBoundary'
+import { Modal } from '../shell/Modal'
+import { ReportChips, ReportDetailBody } from './profile/ReportDetailBody'
 
 /**
- * One session opened over the dashboard that listed it.
+ * One session opened over whatever listed it -- the reports list, a student's session
+ * history, or the metrics dashboard.
+ *
+ * At the features/ root rather than inside one of them, beside the other things all three
+ * share: ReportsTable, timeRange, DateRangeFilter.
  *
  * ⚠️ It fetches the report again rather than reusing the row the table already has. The
  * list route withholds `student_notes` by projection -- models/dwp_report.py -- so a modal

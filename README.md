@@ -115,10 +115,10 @@ the Vite dev server attaches `X-API-Key` on the way through to Flask, reading `A
 `HOST` and `PORT` straight out of the **root** `.env` — the same file `app.py` reads. So
 the key never enters the bundle, and CORS is never exercised in development.
 
-This is a development-only bridge. A browser cannot hold the shared key (`auth.py` says
-why: anything in the bundle is readable in DevTools), so a deployed frontend is blocked on
-the session authenticator under **TODO → API**. `npm run build` produces a `dist/` that is
-not yet servable for that reason.
+This API-key proxy is development-only. A browser cannot safely hold the shared key (`auth.py`
+says why: anything in the bundle is readable in DevTools), so deployed builds use the session
+cookie from `/api/auth/login` instead. `npm run build` produces a `dist/` that can be served
+behind a web server or reverse proxy that routes `/api/*` to Flask.
 
 ---
 
@@ -398,7 +398,7 @@ inserting so a bad build fails ahead of the write.
 
 ### Migrations
 
-One-time scripts, both dry-run by default and committed with `--apply`:
+One-time scripts, all dry-run by default and committed with `--apply`:
 
 ```bash
 python ingestion/migrations/backfill_row_hash.py --apply               # hash pre-idempotency rows
@@ -442,8 +442,8 @@ stored document — or more than one row within a single file, disagreeing on co
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 549 offline tests -- no network, no credentials (~3s)
-pytest --integration    # + 93 read-only checks against the real cluster
+pytest                  # 670 offline tests -- no network, no credentials
+pytest --integration    # + 99 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -468,7 +468,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 356 tests, Vitest + Testing Library (~20s)
+npm test                # 364 tests, Vitest + Testing Library
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -630,8 +630,8 @@ pipeline = [
 Metrics page. `?center=` is repeatable and the names are a union, as on every list route;
 none given means every center.
 
-**Computed per request, not built.** The choice the TODO left open. Measured against the
-live cluster, the largest center over nine months aggregates in ~120ms and the whole
+**Computed per request, not built.** This resolves the former TODO decision. Measured against
+the live cluster, the largest center over nine months aggregates in ~120ms and the whole
 summary in ~400ms across its three queries — a fifth collection to rebuild and to go stale
 would buy a tenth of a second. `models/center.py` holds it.
 

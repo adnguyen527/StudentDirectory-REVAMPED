@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 
 import { formatDate, formatNumber } from '../api/bson'
 import type { ReportListItem } from '../api/types'
+import { OpenReportLink } from './OpenReportLink'
 import { Note } from './profile/SessionHistoryCard'
+import { ReportModal } from './ReportModal'
 import { ColumnHeader } from './SortHeader'
 import { timeRange } from './timeRange'
 import './profile/Profile.css'
@@ -35,6 +37,7 @@ interface ReportsTableProps {
  */
 export function ReportsTable({ reports, sortable }: ReportsTableProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [openReportId, setOpenReportId] = useState<string | null>(null)
 
   // A row expanded on the page you just left must not reopen when you come back to it,
   // having scrolled somewhere unrelated in between -- SessionHistoryCard clears the same
@@ -156,19 +159,14 @@ export function ReportsTable({ reports, sortable }: ReportsTableProps) {
                   <td>
                     {/* On every row, not only the ones with something to expand: 7% of
                         reports have no topics, summary or assessment, and those are
-                        exactly the rows the expander leaves inert. stopPropagation
-                        because the row toggles that expander -- without it, leaving the
-                        page also opens a panel on the row behind you. The date is in the
-                        accessible name: fifty buttons all called "Open" are fifty
-                        identical items in a screen reader's list. */}
-                    <Link
-                      className="button button-row"
-                      to={`/reports/${id}`}
-                      aria-label={`Open the ${formatDate(report.date)} report`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      Open
-                    </Link>
+                        exactly the rows the expander leaves inert. A plain click opens the
+                        modal below; a ctrl/middle-click still reaches /reports/:id in a new
+                        tab -- see OpenReportLink for why it stays an anchor. */}
+                    <OpenReportLink
+                      reportId={id}
+                      label={`Open the ${formatDate(report.date)} report`}
+                      onOpen={setOpenReportId}
+                    />
                   </td>
                 </tr>
 
@@ -197,6 +195,12 @@ export function ReportsTable({ reports, sortable }: ReportsTableProps) {
           })}
         </tbody>
       </table>
+
+      {/* One dialog for the table, not one per row. It portals to the body, so rendering
+          it inside .table-scroll does not clip it. */}
+      {openReportId && (
+        <ReportModal reportId={openReportId} onClose={() => setOpenReportId(null)} />
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { formatDate, isoDay, toDate } from '../api/bson'
+import { formatDate, isoDay, todayLocal, toDate } from '../api/bson'
 import { getMetrics } from '../api/endpoints'
 import type { Metrics } from '../api/types'
 import { useApi } from '../hooks/useApi'
@@ -54,12 +54,11 @@ function dateSummary(from: string, to: string) {
 /**
  * A date window on the Last session column.
  *
- * ⚠️ The presets count back from the **newest session in the data**, not from today. The
- * imported data ends 2025-09-17, so "the last 30 days" read off the calendar would match
- * nobody and read as a broken filter rather than an empty answer. Each preset is labelled
+ * ⚠️ The **Last N days** presets count back from the newest session in the data, not from
+ * today. The imported data ends 2025-09-17, so those read off the calendar would match
+ * nobody and would look like a broken filter rather than an empty answer. Each is labelled
  * with the date it actually resolves to, so nothing has to be taken on trust -- and until
- * that anchor has loaded, the panel offers the two date boxes alone rather than a window
- * it cannot honestly name.
+ * that anchor has loaded they are not offered at all, rather than named dishonestly.
  */
 export function DateRangeFilter({ column, label, standalone, range }: DateRangeFilterProps) {
   // Always called, ignored when the caller brought its own -- see NumberRangeFilter.
@@ -83,6 +82,8 @@ export function DateRangeFilter({ column, label, standalone, range }: DateRangeF
   // toDate, not new Date(): $date has three spellings and only one of them is a
   // string a Date constructor accepts.
   const anchor = toDate(data?.latest_session_date)
+  // The reader's calendar, not the data's newest session -- see todayLocal.
+  const today = todayLocal()
 
   return (
     <FilterPopover
@@ -99,9 +100,18 @@ export function DateRangeFilter({ column, label, standalone, range }: DateRangeF
           apply(from, to)
         }}
       >
-        {anchor && (
-          <div className="column-filter-presets">
-            {PRESETS.map((days) => {
+        <div className="column-filter-presets">
+          <button
+            type="button"
+            className="column-filter-preset"
+            onClick={() => apply(today, today)}
+          >
+            <span>Today</span>
+            <span className="muted">{formatDate({ $date: `${today}T00:00:00Z` })}</span>
+          </button>
+
+          {anchor &&
+            PRESETS.map((days) => {
               const start = daysBefore(anchor, days)
               return (
                 <button
@@ -111,14 +121,11 @@ export function DateRangeFilter({ column, label, standalone, range }: DateRangeF
                   onClick={() => apply(start, '')}
                 >
                   <span>Last {days} days</span>
-                  {/* The resolved date, because "last 30 days" of data that ended a year
-                      ago is not what the words normally promise. */}
                   <span className="muted">from {formatDate({ $date: `${start}T00:00:00Z` })}</span>
                 </button>
-              )
-            })}
-          </div>
-        )}
+                )
+              })}
+        </div>
 
         <label className="column-filter-field">
           <span>From</span>

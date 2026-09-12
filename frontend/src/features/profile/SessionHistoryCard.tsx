@@ -6,7 +6,9 @@ import { decodeEntities } from '../../api/text'
 import type { DwpReport } from '../../api/types'
 import { Card } from '../../shell/Card'
 import { DateRangeFilter } from '../DateRangeFilter'
+import { OpenReportLink } from '../OpenReportLink'
 import { useCardRange } from '../ranges'
+import { ReportModal } from '../ReportModal'
 import { timeRange } from '../timeRange'
 import { Pager } from '../../shell/Pager'
 import './Profile.css'
@@ -46,6 +48,7 @@ interface SessionHistoryCardProps {
 export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
   const [offset, setOffset] = useState(0)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [openReportId, setOpenReportId] = useState<string | null>(null)
   // Local rather than the URL: every session is already in hand, so this narrows what is
   // on screen and has no request to make. Same hook the instructor columns above use.
   const period = useCardRange()
@@ -179,17 +182,11 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                           )}
                         </td>
                         <td>
-                          {/* The same button the reports list carries, so one report has
-                              one page reached the same way from either table. On every
-                              row, including the ones with nothing to expand. */}
-                          <Link
-                            className="button button-row"
-                            to={`/reports/${id}`}
-                            aria-label={`Open the ${formatDate(report.date)} report`}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            Open
-                          </Link>
+                          <OpenReportLink
+                            reportId={id}
+                            label={`Open the ${formatDate(report.date)} report`}
+                            onOpen={setOpenReportId}
+                          />
                         </td>
                       </tr>
 
@@ -240,6 +237,9 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
             }}
           />
         </>
+      )}
+      {openReportId && (
+        <ReportModal reportId={openReportId} onClose={() => setOpenReportId(null)} />
       )}
     </Card>
   )

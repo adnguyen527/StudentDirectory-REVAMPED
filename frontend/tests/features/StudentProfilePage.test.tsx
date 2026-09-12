@@ -489,8 +489,8 @@ describe('student profile', () => {
   })
 
   it('opens a session from the history, the same way the reports list does', async () => {
-    // One report, one page, reached the same way from either table. ANTHONY_REPORTS[0] is
-    // the 3/14 session, which is also RICH_REPORT on the reports list.
+    // One report, reached the same way from either table: a plain click opens the dialog.
+    // ANTHONY_REPORTS[0] is the 3/14 session, which is also RICH_REPORT on the reports list.
     const { user } = renderApp(PROFILE)
 
     const history = await card(/Session history/)
@@ -498,10 +498,21 @@ describe('student profile', () => {
       within(history).getByRole('link', { name: /open the mar 14, 2026 report/i }),
     )
 
-    await waitFor(() =>
-      expect(currentLocation()).toBe(`/reports/${ANTHONY_REPORTS[0]._id.$oid}`),
-    )
-    expect(await screen.findByRole('heading', { name: 'Session details' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Session details')).toBeInTheDocument()
+    // The profile is still underneath, and still the current page.
+    expect(currentLocation()).toBe(PROFILE)
+  })
+
+  it('keeps the report page one modified click away', async () => {
+    // ⚠️ An anchor on purpose -- ctrl/cmd and middle clicks still reach /reports/:id in a
+    // new tab, which is how several sessions get opened side by side.
+    renderApp(PROFILE)
+
+    const history = await card(/Session history/)
+    expect(
+      within(history).getByRole('link', { name: /open the mar 14, 2026 report/i }),
+    ).toHaveAttribute('href', `/reports/${ANTHONY_REPORTS[0]._id.$oid}`)
   })
 
   it('offers that button on every session, expandable or not', async () => {

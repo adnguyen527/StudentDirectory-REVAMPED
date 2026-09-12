@@ -12,7 +12,8 @@ import { Pager } from '../../shell/Pager'
 import { DateRangeFilter } from '../DateRangeFilter'
 import { useCardRange } from '../ranges'
 import { durationMinutes, timeRange } from '../timeRange'
-import { ReportModal } from './ReportModal'
+import { OpenReportLink } from '../OpenReportLink'
+import { ReportModal } from '../ReportModal'
 import './Centers.css'
 
 /** Fewer than the 50 a list page shows: this is one card among several, not the page. */
@@ -166,6 +167,7 @@ export function CenterSessionsCard({
                       >
                         {report.student_name}
                       </Link>
+                      <div className="row-sub">{report.centers[0]}</div>
                     </td>
                     <td>
                       {report.instructors?.length ? (
@@ -205,16 +207,11 @@ export function CenterSessionsCard({
                       )}
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        className="button button-row"
-                        // Named, not just "Open": a screen reader hears six of these in a
-                        // row and the date is what tells them apart.
-                        aria-label={`Open the ${formatDate(report.date)} session for ${report.student_name}`}
-                        onClick={() => setOpenReportId(id)}
-                      >
-                        Open
-                      </button>
+                      <OpenReportLink
+                        reportId={id}
+                        label={`Open the ${formatDate(report.date)} session for ${report.student_name}`}
+                        onOpen={setOpenReportId}
+                      />
                     </td>
                   </tr>
                 )

@@ -207,6 +207,28 @@ describe('center metrics page', () => {
     ).toBeInTheDocument()
   })
 
+  it('names the center each session happened at, under the student', async () => {
+    /**
+     * The combined view interleaves centers, and Date/Student/Instructor says nothing
+     * about where. Scoped to the row: "Westside" is also a pill in the center bar and a
+     * sub-line in the two cards below, so an unscoped lookup matches four things.
+     */
+    renderApp('/center-metrics')
+
+    await waitFor(() => expect(sessionRows()).toHaveLength(2))
+    expect(sessionRow(/Anthony Nguyen/).getByText('Westside')).toBeInTheDocument()
+    expect(sessionRow(/Chloe Tan/).getByText('Eastside')).toBeInTheDocument()
+  })
+
+  it('keeps naming it when a single center is selected', async () => {
+    // The case where it looks redundant and is not: a reader arriving on a shared link
+    // should not have to consult the pills to know what they are looking at.
+    renderApp('/center-metrics?center=Westside')
+
+    await waitFor(() => expect(sessionRows()).toHaveLength(1))
+    expect(sessionRow(/Anthony Nguyen/).getByText('Westside')).toBeInTheDocument()
+  })
+
   it('links the student and the instructors to their profiles', async () => {
     // Every other table in the app links a person's name. This is the one a manager is
     // most likely to want to jump from, so plain text here read as a bug.
@@ -285,7 +307,7 @@ describe('center metrics page', () => {
      */
     const { user } = renderApp('/center-metrics')
 
-    const open = await screen.findByRole('button', {
+    const open = await screen.findByRole('link', {
       name: /open the mar 14, 2026 session for anthony nguyen/i,
     })
     await user.click(open)
@@ -300,7 +322,7 @@ describe('center metrics page', () => {
   it('closes the dialog on Escape and puts focus back on the row that opened it', async () => {
     const { user } = renderApp('/center-metrics')
 
-    const open = await screen.findByRole('button', {
+    const open = await screen.findByRole('link', {
       name: /open the mar 14, 2026 session for anthony nguyen/i,
     })
     await user.click(open)
@@ -311,7 +333,7 @@ describe('center metrics page', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     // Without this the reader is dropped on <body> and restarts from the top of the page.
     expect(
-      screen.getByRole('button', { name: /open the mar 14, 2026 session for anthony nguyen/i }),
+      screen.getByRole('link', { name: /open the mar 14, 2026 session for anthony nguyen/i }),
     ).toHaveFocus()
   })
 
@@ -319,7 +341,7 @@ describe('center metrics page', () => {
     const { user } = renderApp('/center-metrics')
 
     await user.click(
-      await screen.findByRole('button', {
+      await screen.findByRole('link', {
         name: /open the mar 14, 2026 session for anthony nguyen/i,
       }),
     )

@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import { screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { currentLocation, renderApp } from '../support/renderApp'
 import { ANTHONY_KEY, BARE_REPORT, REPORTS, RICH_REPORT } from '../support/sampleData'
@@ -119,6 +119,52 @@ describe('reports page', () => {
     expect(
       screen.getByRole('button', { name: /filter by session date: since mar 14, 2026/i }),
     ).toBeInTheDocument()
+  })
+
+  it('offers Today, counted from the calendar rather than from the data', async () => {
+    /**
+     * ⚠️ Every other preset counts back from the newest session in the data, because the
+     * import ends long before the clock does. Today is the exception and is deliberately
+     * the calendar's: on this data it selects a day with nothing in it, which is the
+     * correct answer for a service that stopped running -- and the window a live database
+     * would be read through most.
+     */
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2026-09-12T15:00:00Z'))
+
+    try {
+      const { user } = renderApp('/reports')
+      await screen.findAllByRole('row', { name: /Anthony Nguyen/ })
+
+      await user.click(screen.getByRole('button', { name: /filter by session date: any time/i }))
+      const today = await screen.findByRole('button', { name: /^today/i })
+      expect(today).toHaveTextContent('Sep 12, 2026')
+
+      await user.click(today)
+
+      // Both bounds, so it is one day rather than everything since this morning.
+      await waitFor(() =>
+        expect(currentLocation()).toBe('/reports?date_from=2026-09-12&date_to=2026-09-12'),
+      )
+      expect(await screen.findByText(/No reports match/)).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('names that single day as a date rather than a range from itself to itself', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2026-09-12T15:00:00Z'))
+
+    try {
+      renderApp('/reports?date_from=2026-09-12&date_to=2026-09-12')
+
+      expect(
+        await screen.findByRole('button', { name: 'Filter by session date: Sep 12, 2026' }),
+      ).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('sets the date window from a labelled pill, not a header glyph', async () => {
@@ -251,13 +297,33 @@ describe('reports page', () => {
     expect(screen.queryByText(/Prefers worked examples first/)).not.toBeInTheDocument()
   })
 
-  it('opens a report from its own button', async () => {
+  it('opens a report in a dialog, over the list rather than instead of it', async () => {
     const { user } = renderApp('/reports')
     const rows = await screen.findAllByRole('row', { name: /Anthony Nguyen/ })
 
     await user.click(within(rows[0]).getByRole('link', { name: /open the mar 14, 2026 report/i }))
 
-    await waitFor(() => expect(currentLocation()).toBe(`/reports/${RICH_REPORT._id.$oid}`))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Session details')).toBeInTheDocument()
+    // ⚠️ student_notes is withheld by the list route's projection, so its presence here is
+    // the proof the dialog refetched the report rather than dressing up the row in hand.
+    expect(await within(dialog).findByText(/Prefers worked examples first/)).toBeInTheDocument()
+    // The reader never left the list.
+    expect(currentLocation()).toBe('/reports')
+  })
+
+  it('keeps a real href behind that control, so it can be opened in a new tab', async () => {
+    /**
+     * ⚠️ The control is an anchor on purpose. A plain click is intercepted for the dialog,
+     * but ctrl/cmd and middle clicks are handed back to the browser -- which is how several
+     * reports get opened side by side, and what a <button> would have quietly removed.
+     */
+    renderApp('/reports')
+    const rows = await screen.findAllByRole('row', { name: /Anthony Nguyen/ })
+
+    expect(
+      within(rows[0]).getByRole('link', { name: /open the mar 14, 2026 report/i }),
+    ).toHaveAttribute('href', `/reports/${RICH_REPORT._id.$oid}`)
   })
 
   it('offers that button on every row, including one with nothing to expand', async () => {
@@ -277,19 +343,30 @@ describe('reports page', () => {
     )
   })
 
-  it('leaves the list for the report, rather than expanding in place', async () => {
-    // The button and the expander answer different questions from the same row, so the
-    // one that navigates has to actually navigate. (The click also carries
-    // stopPropagation, without which it would set expander state on the outgoing page --
-    // not observable from here, since the table unmounts either way.)
+  it('opens the report without expanding the row underneath it', async () => {
+    // The control and the expander answer different questions from the same row. The click
+    // carries stopPropagation so that opening one does not also toggle the other -- now
+    // observable, since the table stays mounted behind the dialog.
     const { user } = renderApp('/reports')
     const rows = await screen.findAllByRole('row', { name: /Anthony Nguyen/ })
 
     await user.click(within(rows[0]).getByRole('link', { name: /open the mar 14, 2026 report/i }))
+    await screen.findByRole('dialog')
 
-    await waitFor(() => expect(currentLocation()).toBe(`/reports/${RICH_REPORT._id.$oid}`))
-    expect(await screen.findByRole('heading', { name: 'Session details' })).toBeInTheDocument()
-    expect(screen.queryByRole('searchbox', { name: /search reports/i })).not.toBeInTheDocument()
+    expect(rows[0]).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes the dialog and leaves the list where it was', async () => {
+    const { user } = renderApp('/reports')
+    const rows = await screen.findAllByRole('row', { name: /Anthony Nguyen/ })
+
+    await user.click(within(rows[0]).getByRole('link', { name: /open the mar 14, 2026 report/i }))
+    await screen.findByRole('dialog')
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('searchbox', { name: /search reports/i })).toBeInTheDocument()
+    expect(currentLocation()).toBe('/reports')
   })
 
   it('opens a student from their name in the list', async () => {

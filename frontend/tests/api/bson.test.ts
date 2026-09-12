@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { formatDate, formatNumber, formatTime, toDate, toId } from '../../src/api/bson'
+import { formatDate, formatNumber, formatTime, isoDay, todayLocal, toDate, toId } from '../../src/api/bson'
 
 /**
  * The regression these guard is a bug that shipped: dates rendered a day early and
@@ -98,5 +98,43 @@ describe('formatNumber', () => {
     expect(formatNumber(0)).toBe('0')
     expect(formatNumber(null)).toBe('—')
     expect(formatNumber(undefined)).toBe('—')
+  })
+})
+
+describe('todayLocal', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /**
+   * ⚠️ The one helper in bson.ts that reads local rather than UTC, and the reason it has
+   * its own test: 11:30pm on March 14 in Central time is already 4:30am on March 15 in UTC.
+   * A Today button built on toISOString() would select tomorrow every evening and be right
+   * again by morning -- the kind of bug that is never reproducible when someone looks.
+   */
+  it('is the calendar day where the reader is, not in UTC', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T04:30:00Z'))
+
+    expect(todayLocal()).toBe('2026-03-14')
+    // Says what the UTC reading would have been, so the assertion above cannot be read as
+    // a coincidence -- the same convention the tests at the top of this file use.
+    expect(isoDay(new Date())).toBe('2026-03-15')
+  })
+
+  it('pads single-digit months and days, so the string is always sortable', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-05T18:00:00Z'))
+
+    expect(todayLocal()).toBe('2026-01-05')
+  })
+
+  it('agrees with UTC during the middle of the day', () => {
+    // Not every hour is a trap; the helper must not "fix" the date when nothing is wrong.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-10T15:00:00Z'))
+
+    expect(todayLocal()).toBe('2026-06-10')
+    expect(isoDay(new Date())).toBe('2026-06-10')
   })
 })

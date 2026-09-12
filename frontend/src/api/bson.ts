@@ -98,6 +98,19 @@ export function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
+/**
+ * Today, as the reader's own calendar has it. 'YYYY-MM-DD'.
+ *
+ * ⚠️ **Local parts, and deliberately not `isoDay(new Date())`** -- the one place in this
+ * file that does not read in UTC, which is exactly why it sits next to the rule it breaks.
+ */
+export function todayLocal(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
 /** Thousands separators, so 29,382 does not read as 29382 in a stat tile. */
 export function formatNumber(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—'
