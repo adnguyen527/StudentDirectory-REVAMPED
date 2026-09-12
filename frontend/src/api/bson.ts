@@ -85,6 +85,19 @@ export function formatTime(value: unknown): string {
   })
 }
 
+/**
+ * 'YYYY-MM-DD', which is what `<input type="date">` and every date bound on the API speak.
+ *
+ * ⚠️ UTC, for the reason above and not by accident: a stored date sits at midnight, so
+ * reading it with the local getters lands on the day before anywhere west of Greenwich --
+ * and the test suite pins TZ to America/Chicago precisely so that mistake cannot pass.
+ *
+ * Takes a Date rather than an ExtDate because both callers already hold one from `toDate`.
+ */
+export function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
 /** Thousands separators, so 29,382 does not read as 29382 in a stat tile. */
 export function formatNumber(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—'

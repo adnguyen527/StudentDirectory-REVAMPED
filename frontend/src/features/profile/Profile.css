@@ -268,6 +268,19 @@
   font-size: var(--font-size-sm);
 }
 
+/* A caveat is not a footnote. The note above it says what the figure rests on and can be
+   skipped without reading the number wrongly; this one says what the number is *not*, and
+   skipping it is how a comparison gets read as an attribution. So it takes the muted ink
+   rather than the faint one -- a step up from the note, still a step below the figure --
+   and a rule to separate it from the basis line it sits under. */
+.topic-field-caveat {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
 /* --- Attendance panel --------------------------------------------------- */
 
 /* ⚠️ Wraps unconditionally rather than under a viewport media query. This row of two date

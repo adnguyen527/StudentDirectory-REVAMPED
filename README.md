@@ -468,7 +468,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 205 tests, Vitest + Testing Library (~13s)
+npm test                # 356 tests, Vitest + Testing Library (~20s)
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -511,6 +511,7 @@ proving nothing.
 | GET | `/api/health` | liveness |
 | GET | `/api/metrics` | collection counts and averages, plus `latest_session_date` — the newest session in the data, which the date filter's presets count back from |
 | GET | `/api/centers` | the center names the list filters offer |
+| GET | `/api/centers/metrics` | all-time totals across `?center=` (repeatable): sessions, students, instructors, pages, unfinalized, days, and the span. Counted from `dwp_reports`; an unknown center is zeroes, not a `400` |
 | GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings, `?center=` (repeatable), `?sessions_min=`/`_max`, `?finished_min=`/`_max`, `?on_plan_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
@@ -623,6 +624,60 @@ pipeline = [
 
 ---
 
+## Center-wide metrics
+
+`GET /api/centers/metrics` answers what a selection of centers comes to, and backs the
+Metrics page. `?center=` is repeatable and the names are a union, as on every list route;
+none given means every center.
+
+**Computed per request, not built.** The choice the TODO left open. Measured against the
+live cluster, the largest center over nine months aggregates in ~120ms and the whole
+summary in ~400ms across its three queries — a fifth collection to rebuild and to go stale
+would buy a tenth of a second. `models/center.py` holds it.
+
+⚠️ **It reads `dwp_reports`, never the built aggregates, and that is the point.** Summing
+`instructors.total_pages_completed` across a center gives 168,623 pages against the 153,360
+actually recorded, because a co-taught session credits its pages to each instructor in
+full. `students.total_*` is wrong a second way: all-time, so it cannot answer a period.
+Sessions are the only place a figure is counted once.
+
+Three notions of distinct, which is why the summary is three queries rather than one
+`$facet`:
+
+- **A student is a pair.** Grouped by `(account_id, student_name)` — an account is a
+  household, and 191 carry two to five siblings.
+- **An instructor is an array element.** `distinct('instructors', …)` flattens and dedupes,
+  so one of the 11 who work at two centers counts once across a selection of both.
+- **A day is a scalar**, and is not the session count: 29,382 sessions fall on 29,311
+  student-days.
+
+`$reduce`/`$setUnion` would fold these into one pipeline, and mongomock — which backs the
+tests — does not implement them.
+
+**`totals.last_session` is what the Sessions card opens on.** Against a live database that
+card would open on today; the imported data ends 2025-09-17, so it opens on the newest
+session date instead — 155 sessions across the four centers, 14 to 66 each. It is the
+*selection's* newest session and not the dataset's, so a center that closes or lags an
+import opens on its own last day rather than on an empty one. Widening it is one click and
+Clear means Any time.
+
+**What the page can and cannot narrow.** Every student figure is center-exact, since no
+student in the data attends two. Instructors are not: `instructors.centers[]` records
+`{name, sessions}`, so the Sessions column sums the selected centers exactly, but there is
+no per-center page count, and Pages and Pages/session are therefore all-time across
+everywhere that instructor works. The instructor card labels both columns and carries a
+footnote whenever a multi-center instructor is on screen. See the TODO for the fix.
+
+⚠️ **`center_orgs` is not a property of a center.** The four locations carry three
+organisations between them — Mann Mathematics (26,617 sessions), Math Made Simple (1,290)
+and @Home Classroom 1 (37) — and they cross-cut: every center has sessions under both of
+the first two, because every location rebranded on 2025-09-05 (`parse_center` in
+`ingestion/import_reports.py`). So an organisation is a property of a *session*, and
+"the centers under my organisation" is not expressible against this data as it stands.
+Scoping a manager to their own centers waits on that decision; it is on the TODO.
+
+---
+
 ## Known Issues
 
 - **The Topics card on a student profile collapses when its search matches nothing.**
@@ -730,6 +785,10 @@ Items remain in priority order within each group.
       stale they are. This is moot until something writes.
 - [ ] `P3` **Add a partial unique index** on `(account_id, student_name, date, session_start)`
       where `finalized: true`, after resolving the duplicate natural key under Known Issues.
+- [ ] `P3` **Add `pages_completed` to `instructors.centers[]`** in
+      `ingestion/build_instructors.py`, so the Metrics page's instructor rows can narrow
+      Pages and Pages/session to the selected centers instead of labelling them all-time.
+      Affects the 11 instructors who work at more than one center; needs a rebuild.
 - [ ] `P3` **Add a rename map for centers** so future rebrands merge into one identity without
       requiring a parser change and backfill.
 - [ ] `P3` **Check anonymization mappings** for other placeholders created from blank fields;
@@ -744,10 +803,15 @@ Items remain in priority order within each group.
       `users` and one scoping layer through which model queries are made.
 - [ ] `P2` **Add report write endpoints** for create, update, and finalize, with validation.
       Decide whether drafts remain in `dwp_reports` as `finalized: false` or use a separate
-      collection.
-- [ ] `P2` **Add center-wide metrics** for sessions, students, pages, and instructors.
-      Decide between a built `centers` collection and per-request computation; co-taught
-      pages must not be double-counted.
+      collection. The Metrics page's report modal is the second caller waiting on these.
+- [x] `P2` Added center-wide metrics for sessions, students, pages, and instructors,
+      computed per request from `dwp_reports` rather than from a built `centers`
+      collection; co-taught pages are counted once.
+- [ ] `P2` **Decide how an organisation scopes access.** A manager should see only the
+      centers under their organisation, but `center_orgs` cross-cuts centers and changes
+      over time — every location rebranded on 2025-09-05 — so an organisation is currently
+      a property of a session, not of a center. Needs a decision before the permissions
+      work above can express "my centers".
 - [x] `P2` Added topic statistics, list filtering/sorting, the reports list route, and the
       related API contracts.
 - [ ] `P3` **Add instructor and `finalized` filters to the reports list.** The finalized
@@ -783,8 +847,12 @@ Items remain in priority order within each group.
       count column.
 - [ ] `P2` **Build the report entry page** with drafts, reopen, and finalize flows. It depends
       on the report write endpoints and development database.
-- [ ] `P2` **Build a center metrics page** showing sessions, students, pages, and instructors
-      by location, using the center-wide metrics API.
+- [x] `P2` Built the center metrics page: a multi-select center bar, stat tiles from the
+      center-wide metrics API, a sessions card with its own date range, and student and
+      instructor cards. Sessions open in a modal — the app's first — which renders the same
+      `ReportDetailBody` as `/reports/:id`.
+- [ ] `P2` **Edit a report from the metrics modal.** Read-only today; depends on the report
+      write endpoints and the development database.
 - [ ] `P3` **Add pinned stats to the Home page.** Decide which stats qualify and whether each
       user's layout belongs in `users` or browser storage.
 - [ ] `P3` **Add a separate spreadsheet upload page** for incoming `.xlsx` reports; the

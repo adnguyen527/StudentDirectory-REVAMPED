@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
+import { CenterMetricsPage } from './features/centers/CenterMetricsPage'
 import { HomePage } from './features/HomePage'
 import { InstructorsPage } from './features/InstructorsPage'
 import { ReportsPage } from './features/ReportsPage'
@@ -28,6 +29,9 @@ export default function App() {
         <Route path="topics" element={<TopicsPage />} />
         {/* topic_id, e.g. PK-3121-00 -- URL-safe as stored, encoded anyway. */}
         <Route path="topics/:topicId" element={<TopicProfilePage />} />
+        {/* The center selection rides in ?center=, repeated -- so a link to this page
+            carries which centers it was showing. */}
+        <Route path="metrics" element={<CenterMetricsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         {/* _id, the only unique field on dwp_reports -- its natural key is shared by four
             student-days. A malformed one answers 404 rather than 500; see find_by_id in

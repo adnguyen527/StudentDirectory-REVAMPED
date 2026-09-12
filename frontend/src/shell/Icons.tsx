@@ -90,6 +90,21 @@ export function ReportsIcon({ size = 19, className }: IconProps) {
   )
 }
 
+/** A building, for the centers the metrics page aggregates -- a place, not a document. */
+export function CentersIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M4 20.5V6.2a1 1 0 0 1 .7-.95l7-2.2a1 1 0 0 1 1.3.95V20.5" />
+      <path d="M13 10.5h6.3a1 1 0 0 1 1 1v9" />
+      <path d="M2.5 20.5h19" />
+      <path d="M7.2 9.2h2.6" />
+      <path d="M7.2 13h2.6" />
+      <path d="M7.2 16.8h2.6" />
+      <path d="M16 14.3h1.4" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ size = 19, className }: IconProps) {
   return (
     <svg {...base(size, className)}>

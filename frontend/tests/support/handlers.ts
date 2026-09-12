@@ -288,6 +288,39 @@ export const handlers = [
   // routes/metrics.py: the union across both collections, sorted.
   http.get('/api/centers', () => HttpResponse.json({ centers: ['Eastside', 'Westside'] })),
 
+  /**
+   * routes/metrics.py and models/center.py, counted from the reports rather than returned
+   * as a fixed body -- for the same reason the sort and search rules are reimplemented
+   * here. The figures this page shows are the whole point of it, and a fake that answered
+   * a constant could not fail when the page adds them up wrongly.
+   *
+   * ⚠️ Counted off REPORTS, never summed from INSTRUCTORS. Anthony's Mar 14 session is
+   * co-taught, so its pages belong to both instructors and to one session.
+   */
+  http.get('/api/centers/metrics', ({ request }) => {
+    const url = new URL(request.url)
+    const rows = atCenterNames(REPORTS, url)
+    const dates = rows.map((report) => report.date.$date as string)
+
+    // A pair, not the account: an account is a household and the siblings on it are two.
+    const students = new Set(rows.map((r) => `${r.account_id}|${r.student_name}`))
+    const instructors = new Set(rows.flatMap((r) => r.instructors))
+
+    return HttpResponse.json({
+      centers: [...new Set(url.searchParams.getAll('center').filter(Boolean))].sort(),
+      totals: {
+        sessions: rows.length,
+        students: students.size,
+        instructors: instructors.size,
+        pages_completed: rows.reduce((sum, r) => sum + (r.pages_completed ?? 0), 0),
+        unfinalized: rows.filter((r) => !r.finalized).length,
+        days: new Set(dates).size,
+        first_session: rows.length ? { $date: dates.slice().sort()[0] } : null,
+        last_session: rows.length ? { $date: dates.slice().sort().at(-1) as string } : null,
+      },
+    })
+  }),
+
   // --- Students ---
 
   http.get('/api/students', ({ request }) => {

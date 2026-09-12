@@ -406,6 +406,35 @@ export interface CentersResponse {
 }
 
 /**
+ * What a selection of centers adds up to, all-time.
+ *
+ * ⚠️ Every figure here is counted from `dwp_reports`, not summed from the built student and
+ * instructor aggregates. Co-taught sessions credit each instructor the full page count, so
+ * adding up instructor pages overshoots a center's real total by about ten percent -- 168,623
+ * against the 153,360 pages actually recorded. models/center.py carries the long version.
+ */
+export interface CenterTotals {
+  sessions: number
+  /** Distinct students, counted by (account_id, student_name) -- an account is a household. */
+  students: number
+  /** Distinct instructors. One who works at two of the selected centers counts once. */
+  instructors: number
+  pages_completed: number
+  /** Reports still not finalized: the only figure here a manager can act on today. */
+  unfinalized: number
+  /** Distinct days with a session, which is not the session count -- a day can hold two. */
+  days: number
+  first_session: ExtDate | null
+  last_session: ExtDate | null
+}
+
+export interface CenterMetricsResponse {
+  /** The selection these totals answer, echoed back with blank values dropped. */
+  centers: string[]
+  totals: CenterTotals
+}
+
+/**
  * A report as the list route returns it.
  *
  * The profile's shape minus student_notes, which /api/reports does not send -- reading one
