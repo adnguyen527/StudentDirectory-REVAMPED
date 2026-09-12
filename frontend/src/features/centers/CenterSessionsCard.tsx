@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { formatDate, formatNumber, isoDay, toDate, toId } from '../../api/bson'
 import type { ExtDate } from '../../api/bson'
@@ -10,7 +11,7 @@ import { Card } from '../../shell/Card'
 import { Pager } from '../../shell/Pager'
 import { DateRangeFilter } from '../DateRangeFilter'
 import { useCardRange } from '../ranges'
-import { timeRange } from '../timeRange'
+import { durationMinutes, timeRange } from '../timeRange'
 import { ReportModal } from './ReportModal'
 import './Centers.css'
 
@@ -139,6 +140,7 @@ export function CenterSessionsCard({
                 <th>Student</th>
                 <th>Instructor</th>
                 <th className="numeric">Pages</th>
+                <th className="numeric">Length</th>
                 <th>Status</th>
                 {/* Unlabelled, as on the reports list: the column holds an action. */}
                 <th />
@@ -147,15 +149,54 @@ export function CenterSessionsCard({
             <tbody>
               {data?.reports.map((report) => {
                 const id = toId(report._id) ?? ''
+                const minutes = durationMinutes(report)
                 return (
                   <tr key={id}>
                     <td>
                       {formatDate(report.date)}
                       <div className="row-sub">{timeRange(report)}</div>
                     </td>
-                    <td className="primary-name">{report.student_name}</td>
-                    <td>{report.instructors.join(', ') || <span className="muted">—</span>}</td>
+                    {/* Linked as on every other table in the app. No stopPropagation
+                        here, unlike ReportsTable: that row is itself a click target that
+                        toggles an expander, and these rows are inert. */}
+                    <td className="primary-name">
+                      <Link
+                        className="row-link"
+                        to={`/students/${encodeURIComponent(report.student_key)}`}
+                      >
+                        {report.student_name}
+                      </Link>
+                    </td>
+                    <td>
+                      {report.instructors?.length ? (
+                        report.instructors.map((name, index) => (
+                          <Fragment key={name}>
+                            {index > 0 && ', '}
+                            <Link
+                              className="row-link"
+                              to={`/instructors/${encodeURIComponent(name)}`}
+                            >
+                              {name}
+                            </Link>
+                          </Fragment>
+                        ))
+                      ) : (
+                        // Not a gap so much as a fact about the row: 73 sessions named an
+                        // instructor who does not exist, and ingestion drops the name
+                        // rather than inventing a person -- see PLACEHOLDER_INSTRUCTORS.
+                        <span className="muted">—</span>
+                      )}
+                    </td>
                     <td className="numeric">{formatNumber(report.pages_completed)}</td>
+                    <td className="numeric">
+                      {minutes === null ? (
+                        // A start with no end is 0.7% of sessions. A zero would read as a
+                        // session that took no time rather than one nobody timed.
+                        <span className="muted">—</span>
+                      ) : (
+                        `${formatNumber(minutes)} min`
+                      )}
+                    </td>
                     <td>
                       {report.finalized ? (
                         <span className="muted">Finalized</span>

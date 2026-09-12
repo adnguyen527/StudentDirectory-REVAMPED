@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { formatDate, formatNumber, formatTime } from '../../api/bson'
 import { decodeEntities } from '../../api/text'
 import type { ReportDetail } from '../../api/types'
-import { timeRange } from '../timeRange'
+import { durationMinutes, timeRange } from '../timeRange'
 import { Card } from '../../shell/Card'
 import { CardRow } from '../../shell/CardRow'
 import { DashboardIcon, StudentsIcon, TopicsIcon } from '../../shell/Icons'
@@ -112,15 +112,6 @@ function ordinal(n: number | null) {
   const tens = n % 100
   if (tens >= 11 && tens <= 13) return `${n}th`
   return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`
-}
-
-/** The session's own length, which is not stored -- only its two ends are. */
-function durationMinutes(report: ReportDetail) {
-  if (!report.session_start || !report.session_end) return null
-  const start = Date.parse(report.session_start.$date as string)
-  const end = Date.parse(report.session_end.$date as string)
-  if (Number.isNaN(start) || Number.isNaN(end)) return null
-  return Math.round((end - start) / 60000)
 }
 
 /**

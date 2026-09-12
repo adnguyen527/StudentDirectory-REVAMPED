@@ -3,6 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { currentLocation, renderApp } from '../support/renderApp'
+import { ANTHONY_KEY, DANA, MARCUS } from '../support/sampleData'
 import { server } from '../support/server'
 
 /**
@@ -22,6 +23,11 @@ function sessionRows() {
   return within(sessionsCard()).getAllByRole('row').slice(1)
 }
 
+/** The session row for this student, which is how every assertion below finds one. */
+function sessionRow(name: RegExp) {
+  return within(within(sessionsCard()).getByRole('row', { name }))
+}
+
 function studentsCard() {
   return screen
     .getByRole('heading', { name: /Students · all-time/ })
@@ -30,7 +36,7 @@ function studentsCard() {
 
 describe('center metrics page', () => {
   it('opens on every center, with the totals counted from the sessions', async () => {
-    renderApp('/metrics')
+    renderApp('/center-metrics')
 
     // Four reports across both centers, two students, and Marcus teaches at both.
     expect(within(await tile('Sessions')).getByText('4')).toBeInTheDocument()
@@ -42,16 +48,16 @@ describe('center metrics page', () => {
   it('says how many days those sessions fall on, which is the smaller number', async () => {
     // 70 student-days in the real data carry more than one session. A tile reading
     // "4 sessions" over "3 days" is the difference stated rather than left to be assumed.
-    renderApp('/metrics')
+    renderApp('/center-metrics')
     expect(within(await tile('Sessions')).getByText('across 3 days')).toBeInTheDocument()
   })
 
   it('puts the chosen center in the URL and narrows every figure to it', async () => {
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     await user.click(await screen.findByRole('button', { name: 'Westside' }))
 
-    await waitFor(() => expect(currentLocation()).toBe('/metrics?center=Westside'))
+    await waitFor(() => expect(currentLocation()).toBe('/center-metrics?center=Westside'))
     await waitFor(async () =>
       expect(within(await tile('Sessions')).getByText('2')).toBeInTheDocument(),
     )
@@ -64,7 +70,7 @@ describe('center metrics page', () => {
      * him, so the per-center counts are 2 and 1 -- and the union is 2, not 3. The center
      * filter is a union and not a partition; 11 of 103 instructors are in this position.
      */
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     await user.click(await screen.findByRole('button', { name: 'Westside' }))
     await waitFor(async () =>
@@ -73,17 +79,17 @@ describe('center metrics page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Eastside' }))
     await waitFor(() =>
-      expect(currentLocation()).toBe('/metrics?center=Westside&center=Eastside'),
+      expect(currentLocation()).toBe('/center-metrics?center=Westside&center=Eastside'),
     )
     expect(within(await tile('Instructors')).getByText('2')).toBeInTheDocument()
   })
 
   it('goes back to every center when the selection is cleared', async () => {
-    const { user } = renderApp('/metrics?center=Westside')
+    const { user } = renderApp('/center-metrics?center=Westside')
 
     await user.click(await screen.findByRole('button', { name: 'All centers' }))
 
-    await waitFor(() => expect(currentLocation()).toBe('/metrics'))
+    await waitFor(() => expect(currentLocation()).toBe('/center-metrics'))
     expect(within(await tile('Sessions')).getByText('4')).toBeInTheDocument()
   })
 
@@ -94,7 +100,7 @@ describe('center metrics page', () => {
      * so the equivalent is its newest session date. Opening on Any time buries the day a
      * manager actually came to look at under a year of history.
      */
-    renderApp('/metrics')
+    renderApp('/center-metrics')
 
     // Both of the Mar 14 sessions, and neither the Mar 10 nor the Jan 5 one.
     await waitFor(() => expect(sessionRows()).toHaveLength(2))
@@ -105,7 +111,7 @@ describe('center metrics page', () => {
   it('names that day as a date, not as a range from itself to itself', async () => {
     // The pill is the only thing saying the card holds one day and not the lot, so it has
     // to read like a date. "Mar 14, 2026 to Mar 14, 2026" is the same fact said twice.
-    renderApp('/metrics')
+    renderApp('/center-metrics')
 
     expect(
       await screen.findByRole('button', { name: 'Filter by session date: Mar 14, 2026' }),
@@ -131,7 +137,7 @@ describe('center metrics page', () => {
         }),
       ),
     )
-    renderApp('/metrics?center=Eastside')
+    renderApp('/center-metrics?center=Eastside')
 
     expect(
       await screen.findByRole('button', { name: 'Filter by session date: Jan 5, 2026' }),
@@ -146,7 +152,7 @@ describe('center metrics page', () => {
      * and instructor cards read all-time aggregates that cannot answer a period, and a
      * control that appeared to narrow them would be claiming something untrue.
      */
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     await waitFor(() => expect(sessionRows()).toHaveLength(2))
     const studentRowsBefore = within(studentsCard()).getAllByRole('row').length
@@ -165,13 +171,13 @@ describe('center metrics page', () => {
     expect(within(studentsCard()).getAllByRole('row')).toHaveLength(studentRowsBefore)
     expect(within(await tile('Sessions')).getByText('4')).toBeInTheDocument()
     // The card owns the range, so it never reaches the address bar.
-    expect(currentLocation()).toBe('/metrics')
+    expect(currentLocation()).toBe('/center-metrics')
   })
 
   it('shows every session once the filter is cleared', async () => {
     // Clear means Any time here as it does on every other filter -- the way back out of
     // the default, rather than a control that returns to it.
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     await waitFor(() => expect(sessionRows()).toHaveLength(2))
     await user.click(
@@ -193,12 +199,82 @@ describe('center metrics page', () => {
         HttpResponse.json({ error: 'Server error' }, { status: 500 }),
       ),
     )
-    renderApp('/metrics')
+    renderApp('/center-metrics')
 
     await waitFor(() => expect(sessionRows()).toHaveLength(4))
     expect(
       screen.getByRole('button', { name: /filter by session date: any time/i }),
     ).toBeInTheDocument()
+  })
+
+  it('links the student and the instructors to their profiles', async () => {
+    // Every other table in the app links a person's name. This is the one a manager is
+    // most likely to want to jump from, so plain text here read as a bug.
+    renderApp('/center-metrics')
+
+    await waitFor(() => expect(sessionRows()).toHaveLength(2))
+    const row = sessionRow(/Anthony Nguyen/)
+
+    expect(row.getByRole('link', { name: 'Anthony Nguyen' })).toHaveAttribute(
+      'href',
+      `/students/${encodeURIComponent(ANTHONY_KEY)}`,
+    )
+    // Co-taught, so both names are links rather than one joined string.
+    expect(row.getByRole('link', { name: DANA })).toHaveAttribute(
+      'href',
+      `/instructors/${encodeURIComponent(DANA)}`,
+    )
+    expect(row.getByRole('link', { name: MARCUS })).toBeInTheDocument()
+  })
+
+  it('follows the student link out of the card', async () => {
+    const { user } = renderApp('/center-metrics')
+
+    await waitFor(() => expect(sessionRows()).toHaveLength(2))
+    await user.click(sessionRow(/Anthony Nguyen/).getByRole('link', { name: 'Anthony Nguyen' }))
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(`/students/${encodeURIComponent(ANTHONY_KEY)}`),
+    )
+  })
+
+  it('carries how long the session ran', async () => {
+    // 5:53 PM to 6:53 PM. The time range beside it says when; this says for how long.
+    renderApp('/center-metrics')
+
+    await waitFor(() => expect(sessionRows()).toHaveLength(2))
+    expect(sessionRow(/Anthony Nguyen/).getByText('60 min')).toBeInTheDocument()
+  })
+
+  it('dashes a length it cannot know and an instructor nobody named', async () => {
+    /**
+     * ⚠️ Two different absences, both of which must read as absences rather than as zero
+     * or as an empty cell. 0.7% of sessions record a start and no end, so there is nothing
+     * to subtract; and 73 sessions name an instructor who does not exist, where ingestion
+     * drops the name rather than inventing a person.
+     */
+    const { user } = renderApp('/center-metrics')
+
+    await waitFor(() => expect(sessionRows()).toHaveLength(2))
+    await user.click(
+      screen.getByRole('button', { name: 'Filter by session date: Mar 14, 2026' }),
+    )
+    await user.click(await screen.findByRole('button', { name: /^clear$/i }))
+    await waitFor(() => expect(sessionRows()).toHaveLength(4))
+
+    // Anchors the two negatives below: the column is present in this same rendering, so
+    // "no minutes here" means a dash rather than a column that quietly went missing.
+    expect(sessionRow(/Mar 14, 2026.*Anthony Nguyen/).getByText('60 min')).toBeInTheDocument()
+
+    // Mar 10: an instructor, a start, no end.
+    const noEnd = sessionRow(/Mar 10, 2026/)
+    expect(noEnd.getByRole('link', { name: DANA })).toBeInTheDocument()
+    expect(noEnd.queryByText(/min$/)).not.toBeInTheDocument()
+
+    // Jan 5: no instructor, and neither end of the clock.
+    const bare = sessionRow(/Jan 5, 2026/)
+    expect(bare.queryByRole('link', { name: /Reyes|Webb/ })).not.toBeInTheDocument()
+    expect(bare.queryByText(/min$/)).not.toBeInTheDocument()
   })
 
   it('opens a session in a dialog carrying the notes the list withholds', async () => {
@@ -207,7 +283,7 @@ describe('center metrics page', () => {
      * by projection, so a dialog built from the row in hand would render that block empty
      * and read as a child with nothing recorded.
      */
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     const open = await screen.findByRole('button', {
       name: /open the mar 14, 2026 session for anthony nguyen/i,
@@ -222,7 +298,7 @@ describe('center metrics page', () => {
   })
 
   it('closes the dialog on Escape and puts focus back on the row that opened it', async () => {
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     const open = await screen.findByRole('button', {
       name: /open the mar 14, 2026 session for anthony nguyen/i,
@@ -240,7 +316,7 @@ describe('center metrics page', () => {
   })
 
   it('closes the dialog from its own button', async () => {
-    const { user } = renderApp('/metrics')
+    const { user } = renderApp('/center-metrics')
 
     await user.click(
       await screen.findByRole('button', {
@@ -262,18 +338,44 @@ describe('center metrics page', () => {
         ),
       ),
     )
-    renderApp('/metrics')
+    renderApp('/center-metrics')
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Error 500')
     expect(screen.queryByTestId('tile-row')).not.toBeInTheDocument()
   })
 
-  it('is reachable from the sidebar', async () => {
+  it('still answers to the old /metrics address', async () => {
+    // The page was renamed after it shipped. A saved link should land on it rather than
+    // falling through the catch-all to Home.
     renderApp('/metrics')
 
-    const nav = await screen.findByRole('link', { name: 'Metrics' })
-    expect(nav).toHaveAttribute('href', '/metrics')
+    await waitFor(() => expect(currentLocation()).toBe('/center-metrics'))
+    expect(screen.getByRole('heading', { level: 1, name: 'Center Metrics' })).toBeInTheDocument()
+  })
+
+  it('carries the centers across that redirect', async () => {
+    /**
+     * ⚠️ The selection lives entirely in ?center=, so a redirect that dropped the query
+     * would reopen a two-center link on all four -- a wrong answer rather than a missing
+     * one, and the kind that reads as correct.
+     */
+    renderApp('/metrics?center=Westside&center=Eastside')
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe('/center-metrics?center=Westside&center=Eastside'),
+    )
+    expect(await screen.findByRole('button', { name: 'Westside' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('is reachable from the sidebar', async () => {
+    renderApp('/center-metrics')
+
+    const nav = await screen.findByRole('link', { name: 'Center Metrics' })
+    expect(nav).toHaveAttribute('href', '/center-metrics')
     expect(nav).toHaveClass('nav-item-active')
   })
 })

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { CenterMetricsPage } from './features/centers/CenterMetricsPage'
 import { HomePage } from './features/HomePage'
@@ -11,6 +11,20 @@ import { InstructorProfilePage } from './features/profile/InstructorProfilePage'
 import { StudentProfilePage } from './features/profile/StudentProfilePage'
 import { TopicProfilePage } from './features/profile/TopicProfilePage'
 import { AppShell } from './shell/AppShell'
+
+/**
+ * The page's old address, kept working after the rename to /center-metrics.
+ *
+ * ⚠️ It carries the query string across. A bare `<Navigate to="/center-metrics">` drops it,
+ * and the centers this page shows live entirely in `?center=` -- so a saved link to two
+ * centers would silently reopen on all of them, which is a wrong answer rather than a
+ * missing one. `replace` so Back returns to wherever the reader came from instead of
+ * bouncing through the redirect.
+ */
+function CenterMetricsRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/center-metrics${search}`} replace />
+}
 
 export default function App() {
   return (
@@ -31,7 +45,10 @@ export default function App() {
         <Route path="topics/:topicId" element={<TopicProfilePage />} />
         {/* The center selection rides in ?center=, repeated -- so a link to this page
             carries which centers it was showing. */}
-        <Route path="metrics" element={<CenterMetricsPage />} />
+        <Route path="center-metrics" element={<CenterMetricsPage />} />
+        {/* The page answered to /metrics before the rename. Declared above the catch-all,
+            which would otherwise send a saved link to Home. */}
+        <Route path="metrics" element={<CenterMetricsRedirect />} />
         <Route path="reports" element={<ReportsPage />} />
         {/* _id, the only unique field on dwp_reports -- its natural key is shared by four
             student-days. A malformed one answers 404 rather than 500; see find_by_id in

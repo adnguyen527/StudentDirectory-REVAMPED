@@ -33,7 +33,7 @@ import './Centers.css'
  * version of why this page reads from two places on purpose.
  */
 export function CenterMetricsPage() {
-  useDocumentTitle('Metrics')
+  useDocumentTitle('Center Metrics')
   const [params] = useSearchParams()
   const centers = params.getAll('center').filter(Boolean)
   const centerKey = centers.join('|')
@@ -55,7 +55,7 @@ export function CenterMetricsPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Metrics</h1>
+        <h1>Center Metrics</h1>
         <p>
           {heading}
           {totals ? ` · ${formatNumber(totals.sessions)} sessions all-time.` : '.'}
