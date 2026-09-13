@@ -807,6 +807,31 @@ Items remain in priority order within each group.
 - [x] `P2` Added center-wide metrics for sessions, students, pages, and instructors,
       computed per request from `dwp_reports` rather than from a built `centers`
       collection; co-taught pages are counted once.
+- [ ] `P2` **Expose center distributions for the list-page charts.** The API must return
+      student and instructor counts grouped by center, using the same center names and
+      filtering rules as the list routes. Decide whether this extends `/api/centers/metrics`
+      or uses a dedicated endpoint; multi-center people may appear in more than one center,
+      so the counting rule must be explicit.
+- [ ] `P2` **Expose report session distributions by date range.** Add an aggregation for the
+      reports chart that accepts the existing inclusive date bounds and returns ordered daily,
+      weekly, or monthly buckets. The default range must be the latest 30 days represented in
+      the data, not the wall-clock month, using the same latest-session anchor as `/api/metrics`.
+- [ ] `P2` **Expose monthly home activity trends.** Return sessions, distinct students,
+      pages completed, and finalized/unfinalized reports by month. The initial default is one
+      month-sized view; support extending it to three months without changing the response
+      contract. Distinct students must use `(account_id, student_name)`, not `account_id` alone.
+- [ ] `P2` **Expose instructor workload trends.** Return time-bucketed sessions, distinct
+      students, and pages for the instructor chart, with optional instructor and center
+      filters. Pages must be labelled carefully because co-taught sessions credit full pages
+      to every instructor.
+- [ ] `P2` **Define data-quality monitoring aggregates.** Identify and count missing topics,
+      page counts, dates, session times, unfinalized reports, ambiguous natural keys, and
+      other actionable import anomalies. Decide which findings need persisted import history
+      because the current ambiguous-key output is console-only.
+- [ ] `P3` **Expose topic progression events.** Provide the session/date/status observations
+      needed for an all-topics student timeline, while distinguishing observed transitions
+      from inferred continuous progress. The initial all-topic view may need pagination or a
+      selected date range if the response becomes too large.
 - [ ] `P2` **Decide how an organisation scopes access.** A manager should see only the
       centers under their organisation, but `center_orgs` cross-cuts centers and changes
       over time — every location rebranded on 2025-09-05 — so an organisation is currently
@@ -842,6 +867,39 @@ Items remain in priority order within each group.
       response if a student's history becomes large.
 - [x] `P2` Built instructor search/list/profile, topic list/detail, center filters, and the
       report browser/detail pages.
+- [ ] `P2` **Add a toggleable center-distribution bar chart above the student and instructor
+      lists.** The button should open and close the chart without replacing the paged table,
+      reuse the active center/search/filter state, label counts clearly, and provide an
+      accessible table or equivalent text summary. Depends on the grouped distribution API
+      data and a decision on how people associated with multiple centers are counted.
+- [ ] `P2` **Add a toggleable report-volume bar chart above the reports list.** It should be
+      open by default, show sessions grouped over the selected date range, and update when the
+      existing date filters change. Default to the latest 30 days of imported sessions rather
+      than today's calendar month; preserve the table's paging and keep the bucket interval
+      readable as the range expands. Depends on a date-bucket aggregation endpoint.
+- [ ] `P2` **Add Home activity trend charts.** Start with monthly sessions, distinct students,
+      pages, and finalized/unfinalized reports; allow the initial range to expand from one to
+      three months. Include loading, empty, error, tooltip, and accessible table states.
+- [ ] `P2` **Add center comparison charts.** Show student and instructor distributions by
+      center above the relevant list pages, with each person counted once for every center
+      they appear in. Keep the chart toggleable and preserve the paged list; label the result
+      as center appearances rather than program-wide unique people.
+- [ ] `P2` **Add a student attendance heatmap.** Use a GitHub-contribution-style calendar where
+      cell intensity represents sessions per day over a selectable period. Use
+      `attendance_reports` for the day axis, preserve the distinction between days and sessions,
+      and provide exact session counts in tooltips and an accessible table summary.
+- [ ] `P2` **Add instructor workload charts.** Provide a toggle between sessions, distinct
+      students, and pages, with an eventual option to compare all three trends. Support time
+      ranges and center/instructor filters; clearly label page totals where co-teaching causes
+      full-credit duplication.
+- [ ] `P3` **Add data-quality monitoring.** Provide warning cards and a drill-down table for
+      missing or anomalous report data, unfinalized reports, and ambiguous imports. It should
+      link to affected reports where possible and distinguish current-state checks from a
+      historical import audit.
+- [ ] `P3` **Add an all-topics student progression timeline.** Start with every topic and its
+      observed status/date events, but keep the presentation replaceable with a selected-topic
+      or filtered view if the all-topic timeline becomes unreadable or too large. Do not imply
+      progress between sessions that the source data does not record.
 - [ ] `P3` **Reassess the topics list's columns and layout.** Keep topic IDs visible because
       names are not unique; either reserve space for the topic column or remove a derived
       count column.
@@ -857,6 +915,16 @@ Items remain in priority order within each group.
       user's layout belongs in `users` or browser storage.
 - [ ] `P3` **Add a separate spreadsheet upload page** for incoming `.xlsx` reports; the
       command-line import already works.
+
+### Visualization implementation order
+
+1. Center comparison charts, using the existing center metrics foundation.
+2. Report-volume chart and the supporting date-bucket aggregation.
+3. Unfinalized-report follow-up and data-quality monitoring foundations.
+4. Student attendance heatmap using sessions per day.
+5. Instructor workload charts with metric toggles.
+6. Home activity trends, initially monthly with a possible three-month range.
+7. Student topic progression timeline, initially showing all topics.
 
 ### Completed milestones
 
