@@ -772,8 +772,14 @@ Items remain in priority order within each group.
 
 ### Data integrity
 
-- [x] `P2` Added completed topics and most-taught topics to the student and instructor
-      aggregates, including per-status counts and instructor/topic reconciliation.
+- [x] `P2` Added completed topics to the student aggregates, including per-status counts and
+      instructor/topic reconciliation on the completed side.
+- [ ] `P2` **Add most-taught topics to instructors.** Build a ranked `topics[]` array in
+      `ingestion/build_instructors.py` with `{topic_id, name, sessions}`, expose it in the
+      instructor detail response and frontend types, and rebuild the collection. The list
+      projection should continue excluding the large array. The profile card currently shows
+      an unavailable-state placeholder; add linked topic rows, a clear ranking/tie rule, empty
+      and loading states, and frontend/integration coverage.
 - [x] `P2` Added topic completion and page-pace statistics used by the topic detail page.
 - [x] `P2` Switched report imports to the natural key with in-place replacement, retaining
       `_id` values; ambiguous keys are reported and skipped.
@@ -865,8 +871,13 @@ Items remain in priority order within each group.
 - [x] `P1` Built the app shell, data path, student search/list/profile, and session panel.
 - [ ] `P3` **Page the detail route's `dwp_reports`** instead of returning every session in one
       response if a student's history becomes large.
-- [x] `P2` Built instructor search/list/profile, topic list/detail, center filters, and the
-      report browser/detail pages.
+- [x] `P2` Built instructor search/list/profile, plus topic list/detail, center filters, and
+      the report browser/detail pages.
+- [ ] `P2` **Finish the instructor profile's Most-taught topics card** after the instructor
+      aggregate exposes `topics[]`. Show ranked topic links and session counts, define how ties
+      are ordered, handle instructors with no topic history, and replace the current explanatory
+      placeholder with loading, empty, and error states. Depends on the instructor builder/API
+      work above and a rebuild of the `instructors` collection.
 - [ ] `P2` **Add a toggleable center-distribution bar chart above the student and instructor
       lists.** The button should open and close the chart without replacing the paged table,
       reuse the active center/search/filter state, label counts clearly, and provide an
