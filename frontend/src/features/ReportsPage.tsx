@@ -15,6 +15,7 @@ import { ListFilter } from './ListFilter'
 import { orderPhrase, type OrderPhrase } from './orderPhrase'
 import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 import { ReportsTable } from './ReportsTable'
+import { ReportVolumeCard } from './ReportVolumeCard'
 
 // The columns this list can be bounded by -- the same declaration models/dwp_report.py
 // makes as FILTERABLE, and the URL's names are the API's.
@@ -88,6 +89,10 @@ export function ReportsPage() {
             : 'Newest first.'}
         </p>
       </div>
+
+      {/* Above the table and open on arrival: this is the one list entered with a
+          period already in mind, so the shape of that period leads. */}
+      <ReportVolumeCard />
 
       {/* No title: the <h1> above already says Reports. The placeholder says what the box
           matches -- the student, not the instructor, who is a column you read rather than

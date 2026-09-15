@@ -468,7 +468,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 364 tests, Vitest + Testing Library
+npm test                # 467 tests, Vitest + Testing Library
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -825,6 +825,95 @@ round trips measured ~870ms against ~540ms for one, because the cost is latency 
 the server's work. The trade-off, so nobody rediscovers it — a `$facet` branch cannot use
 an index, but the scoping `$match` runs before the facet and does.
 
+### Drawing them
+
+The charts are **HTML and CSS, not SVG and not a library**. A bar is a `<div>` at
+`width: 42%`, a column one at `height: 42%`, the attendance calendar a CSS grid, and the
+topic marks are positioned with `left: %`.
+
+That is settled by the test environment rather than by taste. In this project's jsdom,
+`ResizeObserver` is `undefined`, every width reads `0`, `SVGElement.getBBox` does not exist,
+and `vitest.config.ts` sets `css: false`. So anything that **measures** is out: a
+ResizeObserver needs a polyfill in `setup.ts` just to stop tests crashing, and the usual
+escape hatch -- a fixed `viewBox` with `preserveAspectRatio="none"` -- stretches strokes
+and rounded corners non-uniformly, which breaks the mark spec it was meant to serve. A
+percentage needs no measurement at all, so the same markup is right at any container width
+and in a 0x0 jsdom. It also keeps every colour a token, so dark mode stays a token override
+and no rule is written twice.
+
+The consequence worth stating: **there are no line charts.** Everything here is bars, cells
+or event marks. A line would want SVG with `vector-effect="non-scaling-stroke"` -- workable
+without measuring, but nothing has asked for one.
+
+**Every chart renders an `.sr-only` table beside its marks**, captioned, always present.
+That one element does three jobs: it is the chart as far as assistive tech is concerned
+(the marks are `aria-hidden`), it is the guarantee that a tooltip never gates a value, and
+it is the only thing the tests assert on -- geometry is unobservable here and, by this
+project's convention, unasserted. Pages therefore hold two tables, so tests scope with
+`getByRole('table', { name: ... })`; the twins are the captioned ones.
+
+⚠️ **The axis is terse; the hover and the twin carry the dates.** A weekly axis reads
+`W25` because fifty bands share one row -- and `W25` on its own answers "which week is
+that?" with nothing, which is the whole of reading a timeline. So every time bucket also
+carries the days it covers (`16–22 Jun 2025`, or `26 Jan – 1 Feb 2026` where it straddles
+two months), and that is what the tooltip says and what the table twin labels its rows
+with. Only as much date as the bucket needs: a week inside one month repeats neither the
+month nor the year. The twin gets it too, or the reader who cannot hover would be the only
+one left without the "when".
+
+⚠️ **A zero draws no mark at all.** `min-width: 2px` keeps a small bar visible and applies
+just as happily to a zero, so leaving the element in place renders 0 as a sliver that looks
+like a small value -- which made "no date: 0" on the data-quality page read as a finding
+rather than as the good news. Caught by looking at the rendered page; jsdom parses no CSS,
+so no test could have seen it.
+
+⚠️ **An open-ended window still has a width.** The date filter's presets set only a start
+-- "Since 18 Aug" -- and the route resolves the other end to the newest session. A chart that
+read the missing bound as "window of unknown width" asked for monthly buckets and drew a
+single bar for what was actually a month of daily activity. Both time charts stand the
+resolved end in before picking a bucket width: the workload chart from the instructor's own
+last session, the report-volume chart from `/api/metrics`.
+
+### The chart palette
+
+Almost none. Every chart here draws **one series**, so bars and columns take `--accent`,
+which the contrast test already covers, and no legend is needed anywhere -- the card's title
+names what is plotted. The four centres all take the same colour: shading them by value
+would re-encode bar length as hue and spend the only free channel on what the bar already
+shows.
+
+Only the heatmap encodes magnitude as colour, on `--chart-ramp-1..5`. Those are a sequential
+ramp on the app's own accent, validated as an ordinal ramp in **both** themes -- monotone
+lightness, adjacent gaps clear of 0.06, a single hue, and the step nearest the surface
+clearing 2:1 (2.15:1 on white, 2.27:1 on the dark surface). The dark steps are re-chosen
+rather than the light ones reversed, because on a dark surface the step that has to stay
+legible is the darkest one.
+
+The ramp is deliberately **not** in the contrast test's `PAIRS`, for the mirror of the
+reason `Modal.css`'s scrim is not a token: every pair there is an ink read against a ground,
+and these cells carry no text at all. Putting a count inside a cell would change that and
+would need a pair per step.
+
+⚠️ The washes are **not** a series palette. `StatTile` documents them as decorative variety
+cycled by position, "not a colour code", and a chart reading them as one would claim a
+meaning the tiles deny.
+
+### Considered and set aside: Power BI
+
+Embedding Power BI was weighed for these charts and rejected, for reasons specific to what
+these are. They are UI bound to live app state -- the centre chart redraws as someone types
+in the search box -- not reports a manager opens, so each keystroke would round-trip through
+an iframe to a remote capacity where a local endpoint answers in ~120ms. It would re-derive
+in DAX the rules the six endpoints already encode, starting from raw collections where the
+obvious query gives 168,623 pages against the 153,360 recorded. And a semantic model over
+`dwp_reports` pulls `student_notes` about named children into a cloud cache, which the
+backend's projections exist to prevent.
+
+None of that argues against Power BI for the job it is good at -- ad-hoc slicing nobody
+pre-built a page for, which this app does not do. That is a separate track: Power BI Desktop
+against the Atlas SQL Interface, no embedding and no capacity cost. *Assumed here: no
+existing Fabric capacity or Power BI Pro seats.*
+
 ### Measured
 
 Against the live cluster, and worth re-checking if these grow. Every interval reconciles
@@ -999,10 +1088,10 @@ Items remain in priority order within each group.
       file, counts, and the keys it skipped — is console-only and unrecoverable afterwards.
       `/api/reports/quality` answers current state; this is the audit it cannot reconstruct,
       and what the data-quality page needs to tell a new problem from a long-standing one.
-- [ ] `P3` **Expose topic progression events.** Provide the session/date/status observations
-      needed for an all-topics student timeline, while distinguishing observed transitions
-      from inferred continuous progress. The initial all-topic view may need pagination or a
-      selected date range if the response becomes too large.
+- [x] `P3` Topic progression events turned out to need no endpoint. `/api/students/<key>`
+      already returns every session unpaged, each carrying `topics[] {id, name, status}` --
+      exactly the session/date/status observations the timeline wanted. Closed as unnecessary
+      rather than built.
 - [ ] `P2` **Decide how an organisation scopes access.** A manager should see only the
       centers under their organisation, but `center_orgs` cross-cuts centers and changes
       over time — every location rebranded on 2025-09-05 — so an organisation is currently
@@ -1044,45 +1133,63 @@ Items remain in priority order within each group.
       are ordered, handle instructors with no topic history, and replace the current explanatory
       placeholder with loading, empty, and error states. Depends on the instructor builder/API
       work above and a rebuild of the `instructors` collection.
-- [ ] `P2` **Add a toggleable center-distribution bar chart above the student and instructor
-      lists.** The button should open and close the chart without replacing the paged table,
-      reuse the active center/search/filter state, label counts clearly, and provide an
-      accessible table or equivalent text summary. The API is ready:
-      `/api/students/distribution` and `/api/instructors/distribution` take the list's own
-      filter state unchanged. Label `counted` against `total` — an instructor at two centers
-      is one person and two bars.
-- [ ] `P2` **Add a toggleable report-volume bar chart above the reports list.** It should be
-      open by default, show sessions grouped over the selected date range, and update when the
-      existing date filters change. `/api/reports/trends` is ready and defaults to the latest
-      30 days of imported sessions; pass `?interval=week|month` as the range widens, and dim
-      or annotate the buckets it marks `partial`. Preserve the table's paging.
-- [ ] `P2` **Add Home activity trend charts** on `/api/home/trends`. Monthly sessions,
-      distinct students, pages and unfinalized reports; expanding one month to three is a
-      `?date_from=`. Include loading, empty, error, tooltip, and accessible table states.
-      ⚠️ Do not total the students column — it is distinct per bucket, not across them.
-- [ ] `P2` **Add center comparison charts.** Show student and instructor distributions by
-      center above the relevant list pages, with each person counted once for every center
-      they appear in. Keep the chart toggleable and preserve the paged list; label the result
-      as center appearances rather than program-wide unique people — the response carries
-      both `counted` and `total` so the difference can be shown rather than hidden.
-- [ ] `P2` **Add a student attendance heatmap.** Use a GitHub-contribution-style calendar where
-      cell intensity represents sessions per day over a selectable period. Use
-      `attendance_reports` for the day axis, preserve the distinction between days and sessions,
-      and provide exact session counts in tooltips and an accessible table summary.
-- [ ] `P2` **Add instructor workload charts** on `/api/instructors/trends`. Toggle between
-      sessions, distinct students and pages, with an eventual option to compare all three.
-      ⚠️ Label the pages column: a co-taught session credits its pages in full to each
-      instructor, so the figure answers "work in sessions I ran" and is not summable across
-      people. Comparing several instructors as separate series needs a different endpoint.
-- [ ] `P3` **Add data-quality monitoring** on `/api/reports/quality`. Warning cards per
-      check, and a drill-down that links into the reports list once it has a `finalized`
-      filter — the endpoint returns counts only, deliberately, because every row behind them
-      is about a named child. Every check there is current state; the historical import audit
-      waits on `import_runs`.
-- [ ] `P3` **Add an all-topics student progression timeline.** Start with every topic and its
-      observed status/date events, but keep the presentation replaceable with a selected-topic
-      or filtered view if the all-topic timeline becomes unreadable or too large. Do not imply
-      progress between sessions that the source data does not record.
+- [x] `P2` Added the centre-distribution bar chart above the student and instructor lists —
+      the same item as *center comparison charts* below, built once. Collapsed by default and
+      mounted only when open, so a closed chart costs no request; reuses the list's own query,
+      centre and range filters while deliberately ignoring paging and sorting. The instructor
+      card states `counted` against `total` in words, because 120 appearances across 103
+      people otherwise reads as an error.
+- [x] `P2` Added the report-volume chart above the reports list, open on arrival. Reads the
+      list's own `?date_from=`/`?date_to=` and widens the bucket from day to week to month as
+      the window grows, so the axis stays under ~70 bars. Buckets the API marks `partial` are
+      dimmed and named in the chart's note, so a short edge bar reads as a short window.
+- [x] `P2` Added the Home activity trends as **four small multiples**, one measure per card
+      with its own y-axis. Not one chart: pages run ~8,500 a month against 46 unfinalized, so a
+      shared axis would flatten two of the four into the baseline, and a second y-axis invents
+      a correlation the data does not have. The students card reports its busiest month rather
+      than a total, because a distinct count does not sum across months.
+- [x] `P2` Centre comparison charts — the same work as the centre-distribution item above,
+      which is why this is one entry's worth of code and two ticks.
+- [x] `P2` Added the student attendance heatmap inside the existing *Sessions in a period*
+      card, drawn from the `visits[]` that card already fetches -- no new request, and no second
+      date control on the page.
+      ⚠️ **Intensity is pages, not sessions**, against what this item originally asked for.
+      Measured first: of 29,311 attended days, 29,241 hold exactly one session, so a ramp keyed
+      on sessions would paint every cell the same shade except seventy -- spending the whole
+      colour channel to say "attended", which the cell's presence already says. Pages vary
+      properly (quartiles 2 / 4 / 7, max 65). Days and sessions stay separate wherever they are
+      counted: the card's totals, each cell's tooltip and the table twin all report both.
+- [x] `P2` Added the instructor workload chart with a sessions / students / pages toggle and
+      its own date range, opening on **the three months ending at that instructor's last
+      session** -- not today, which the imported data ends well before, and not the dataset's
+      newest session, which would open an instructor who left in March on an empty summer.
+      Three months lands on weekly bars; the bucket width follows the window.
+      One response carries all three measures, so switching measure is a client-side
+      projection rather than a refetch, while changing the window is not -- a period is a
+      question only the route can answer. The pages option carries its warning in the chart's
+      own note: a co-taught session's pages count in full for each instructor on it, so the
+      figure answers "work in sessions I ran" and cannot be added across people.
+- [ ] `P2` **Replace default chart tooltips with a shared custom hover card.** Hovering a dot
+       or bar should show the label, metric name, and exact value in a compact custom card;
+       hovering a designated table cell or indicator should use the same card rather than
+       applying this behavior to every row. Make the interaction available through keyboard
+       focus, click, and touch as well as mouse hover, and keep the equivalent information in
+       the chart/table accessible summary.
+- [x] `P3` Added the data-quality page at `/data-quality`: a card per check with its
+      denominator, one bar chart of all seven, and the ambiguous natural keys named in full.
+      Checks reading zero are shown too -- a zero is the good news, and hiding it makes the
+      page look like it only finds problems. **Drill-down is deferred and the page says so**
+      rather than faking it: the reports list filters by student, centre and date, so there is
+      no view to link "1,068 unfinalized" to until the `P3` finalized filter lands.
+- [x] `P3` Added the topic progression view on the student profile, computed entirely from
+      the sessions already on the page. Measured before designing it: the widest student has
+      125 topics but only **346 observations**, because a topic appears in a handful of
+      sessions rather than all of them -- so volume was never the problem, row count was.
+      Topics *currently on plan* are a median of 3 and never more than 7, which is the default
+      view; a button opens the whole history.
+      ⚠️ **The marks are discrete and nothing joins them.** The source writes one status on the
+      sessions a topic was worked and records nothing between, so a connecting line would draw
+      progress that was never observed. The card says so in visible text, not a footnote.
 - [ ] `P3` **Reassess the topics list's columns and layout.** Keep topic IDs visible because
       names are not unique; either reserve space for the topic column or remove a derived
       count column.
@@ -1101,10 +1208,14 @@ Items remain in priority order within each group.
 
 ### Visualization implementation order
 
-**The API side of all of these is built** — see *Chart data*. What remains below is the
-frontend, which has no charting library yet: three runtime dependencies, and the only SVG
-in the codebase is `shell/Icons.tsx`. Picking hand-rolled SVG or a dependency is the first
-decision, and `tests/styles/contrast.test.ts` needs a line for any new colour pairing.
+**All seven are built**, API and frontend — see *Chart data* for how they draw and why
+there is still no charting library. The order below is the one they were built in, kept as
+the record of it.
+
+- [ ] `P2` **Evaluate replacing the HTML/CSS charts with SVG.** Compare hand-rolled SVG
+      against the current implementation for responsiveness, accessibility, custom hover-card
+      interactions, touch and keyboard support, animation, and maintenance before choosing a
+      charting approach. Keep simple charts in HTML/CSS if SVG does not provide a clear benefit.
 
 1. Center comparison charts, on `/api/{students,instructors}/distribution`.
 2. Report-volume chart, on `/api/reports/trends`.

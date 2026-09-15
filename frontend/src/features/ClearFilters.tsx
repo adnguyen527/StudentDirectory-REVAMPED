@@ -1,5 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
 
+import { CHART_PARAM } from './useChartToggle'
+
 /**
  * The URL params that position the list rather than narrow it.
  *
@@ -9,7 +11,7 @@ import { useSearchParams } from 'react-router-dom'
  * would put the burden on the wrong side, which is how ticking a center came to filter the
  * list with nothing on screen offering to undo it.
  */
-const VIEW_PARAMS = new Set(['offset', 'sort', 'direction'])
+const VIEW_PARAMS = new Set(['offset', 'sort', 'direction', CHART_PARAM])
 
 /** The names of the params narrowing the list right now. */
 function activeFilters(params: URLSearchParams) {

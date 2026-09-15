@@ -189,3 +189,20 @@ export function FunnelIcon({ size = 13, className }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * Data quality: a triangle with a bar and a dot -- the warning glyph.
+ *
+ * Deliberately not a plain exclamation mark or a circle: the sidebar already carries a
+ * round Settings gear and a square Dashboard, and at 19px a bare circle reads as neither
+ * warning nor anything else.
+ */
+export function QualityIcon({ size = 19, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20.2h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+      <path d="M12 9.5v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  )
+}

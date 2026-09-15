@@ -16,8 +16,16 @@ function manyReports(count: number) {
   }))
 }
 
+/**
+ * The list's rows.
+ *
+ * ⚠️ Scoped by name. The report-volume chart above this table renders its own table -- the
+ * accessible reading of the bars -- and it is open on arrival, so an unscoped
+ * getByRole('table') is ambiguous from the first render. The chart's twin is the one with a
+ * caption; the list has none. StudentProfilePage.test.tsx documents the same trap.
+ */
 function tableRows() {
-  return within(screen.getByRole('table')).getAllByRole('row').slice(1)
+  return within(screen.getByRole('table', { name: '' })).getAllByRole('row').slice(1)
 }
 
 /** The Date column of each row, in the order served -- which is what a sort changes. */
@@ -426,7 +434,10 @@ describe('reports page', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Error 500')
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    // The *list's* table is gone. The chart above it is a separate request against a
+    // separate route, and it having survived is right -- one failure should not blank a
+    // panel that loaded fine.
+    expect(screen.queryByRole('table', { name: '' })).not.toBeInTheDocument()
   })
 
   it('reaches the list from the sidebar', async () => {

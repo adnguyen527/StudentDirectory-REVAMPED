@@ -1,0 +1,242 @@
+/*
+ * Chart marks.
+ *
+ * Every length here is a percentage handed in from React as the --mark custom property, the
+ * idiom CardRow.tsx established for passing a number into CSS. Nothing measures anything:
+ * no ResizeObserver, no viewBox, no getBBox -- all three are absent or zero in jsdom, and a
+ * percentage is already right at every container width.
+ *
+ * Every colour is a token, so dark mode is the token override in tokens.css and no rule
+ * here is written twice.
+ */
+
+.chart {
+  margin: 0;
+  container-type: inline-size;
+}
+
+/* The marks. aria-hidden in ChartFigure -- the table twin is the readable copy. */
+.chart-plot {
+  position: relative;
+}
+
+.chart-note {
+  margin-top: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* A hairline, one step off the surface. Solid: a dashed grid reads as a projection. */
+.chart-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--at);
+  height: 1px;
+  background: var(--border);
+}
+
+/*
+ * Reserves the chart's resting height rather than collapsing to a line, so the card does
+ * not jump when data lands -- the same reasoning, and the same shimmer, as .stat-skeleton.
+ */
+.chart-skeleton {
+  height: 180px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--border) 25%,
+    var(--surface-sunken) 50%,
+    var(--border) 75%
+  );
+  background-size: 200% 100%;
+  animation: chart-shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes chart-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-skeleton {
+    animation: none;
+  }
+}
+
+/* The twin is present for assistive tech and for tests; .sr-only hides it visually. */
+.chart-twin caption {
+  text-align: left;
+}
+
+/* --- Horizontal bars ------------------------------------------------------------- */
+
+/*
+ * The 2px separation between marks is a gap in the surface, never a stroke around them:
+ * a border adds ink that is not data, and neighbours read as distinct because of the space.
+ */
+.bar-list {
+  display: grid;
+  gap: 2px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 25%) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  /* Capped rather than filling the row: the leftover is air, by the mark spec. */
+  height: 24px;
+}
+
+.bar-label,
+.bar-value {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.bar-track {
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  width: var(--mark);
+  /* A non-zero value always draws something; a zero draws nothing at all. */
+  min-width: 2px;
+  background: var(--accent);
+  /* Rounded data-end, square at the baseline. */
+  border-radius: 0 4px 4px 0;
+}
+
+/* Opacity rather than a token: it is theme-independent, so it needs no dark override and
+   cannot drift from the accent the way a second colour token would. */
+.bar-fill-partial {
+  opacity: 0.45;
+}
+
+/* --- Columns over time ----------------------------------------------------------- */
+
+.column-chart {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'axis plot'
+    '.    bands';
+  gap: var(--space-2);
+}
+
+.column-chart-compact {
+  grid-template-columns: 1fr;
+  grid-template-areas: 'plot';
+}
+
+.column-axis {
+  grid-area: axis;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  height: 160px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.column-plot {
+  grid-area: plot;
+  position: relative;
+  height: 160px;
+}
+
+.column-chart-compact .column-plot {
+  height: 64px;
+}
+
+.column-list {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+}
+
+.column-slot {
+  flex: 1 1 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  /* Cap the mark and let the rest of the slot be air, rather than filling the band. */
+  max-width: 24px;
+  margin: 0 auto;
+}
+
+.column-fill {
+  display: block;
+  width: 100%;
+  height: var(--mark);
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 4px 4px 0 0;
+}
+
+.column-fill-partial {
+  opacity: 0.45;
+}
+
+.column-bands {
+  grid-area: bands;
+  display: flex;
+  gap: 2px;
+}
+
+.column-band {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+}
+
+.column-band-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Thin the axis rather than let labels collide.
+ *
+ * ⚠️ CSS hides them; the DOM keeps them. Every label stays in the markup at every width, so
+ * the table twin and the tests -- which parse no CSS at all -- always see a complete axis,
+ * while a real browser never draws two labels on top of each other. visibility, not
+ * display, so the band keeps its width and the columns stay aligned.
+ */
+@container (max-width: 520px) {
+  .column-band:nth-child(even) .column-band-label {
+    visibility: hidden;
+  }
+}
+
+@container (max-width: 300px) {
+  .column-band:not(:first-child):not(:last-child) .column-band-label {
+    visibility: hidden;
+  }
+}

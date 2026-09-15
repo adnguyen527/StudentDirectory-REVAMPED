@@ -362,3 +362,153 @@
 .report-field-value {
   overflow-wrap: anywhere;
 }
+
+/*
+ * Attendance heatmap -- a calendar of squares, weeks as columns.
+ *
+ * A CSS grid rather than an SVG: equal cells flowing down then across is what
+ * grid-auto-flow: column already means, so nothing has to be measured, and each cell stays
+ * a real DOM node that can carry a title and a focus ring.
+ */
+.heat-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 1fr);
+  gap: 3px;
+  /* The weekday gutter, then as many week columns as the period holds. */
+  grid-auto-columns: 12px;
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.heat-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  /* ⚠️ Level 0 is a day nobody attended, and wears the hairline grey rather than the
+     ramp's lightest step: absence is not a low value, and in dark mode the first ramp
+     step is a mid violet that would read as a quiet day. */
+  background: var(--border);
+}
+
+.heat-cell[data-level='1'] { background: var(--chart-ramp-1); }
+.heat-cell[data-level='2'] { background: var(--chart-ramp-2); }
+.heat-cell[data-level='3'] { background: var(--chart-ramp-3); }
+.heat-cell[data-level='4'] { background: var(--chart-ramp-4); }
+.heat-cell[data-level='5'] { background: var(--chart-ramp-5); }
+
+/* Leading blanks so the first column starts on the right weekday. Invisible rather than
+   absent, so the grid keeps its shape -- the same reserve-don't-hide rule as the pager. */
+.heat-cell-pad {
+  background: transparent;
+}
+
+.heat-weekday {
+  grid-column: 1;
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  /* Out of the flow of auto-placed cells: this column is the gutter, not a week. */
+  padding-right: var(--space-2);
+}
+
+.heat-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+.heat-key-cell {
+  width: 10px;
+  height: 10px;
+}
+
+/*
+ * Topics over time -- one row per topic, marks at the sessions that recorded it.
+ *
+ * Positioned by percentage along the student's own session span, so the row needs no
+ * measuring and stays correct at any card width. ⚠️ There is deliberately no line or bar
+ * joining the marks: the source records a status on the sessions a topic was worked and
+ * nothing in between, so a connector would draw progress that was never observed.
+ */
+.topic-track-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.topic-track-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 30%) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.topic-track-name {
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.topic-track {
+  position: relative;
+  height: 18px;
+  /* A hairline the marks sit on -- the axis, not a connector between them. */
+  background: linear-gradient(var(--border), var(--border)) left center / 100% 1px no-repeat;
+}
+
+.topic-mark {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--chart-ramp-2);
+  /* A ring in the surface colour, so two sessions a day apart stay two marks. */
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* The ladder, darkening as a topic is carried further. Not three unrelated hues: the
+   statuses are ordered, so the colour is ordered too. */
+.topic-mark[data-status='Completed'] { background: var(--chart-ramp-3); }
+.topic-mark[data-status='Mastered'] { background: var(--chart-ramp-5); }
+
+.topic-now {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.topic-track-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The metric/view switch in a card header -- one control, several positions. */
+.metric-switch {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+/*
+ * Two controls in one card header.
+ *
+ * Wraps unconditionally rather than under a viewport media query -- the same reasoning as
+ * .period above: a media query reports "plenty of room" on a wide screen while this card's
+ * own header crowds.
+ */
+.card-controls-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

@@ -7,6 +7,7 @@ import { Card } from '../shell/Card'
 import { DashboardIcon, InstructorsIcon, StudentsIcon } from '../shell/Icons'
 import { StatTile } from '../shell/StatTile'
 import { useDocumentTitle } from '../shell/useDocumentTitle'
+import { HomeTrendsRow } from './HomeTrendsRow'
 import { StudentsTable } from './StudentsTable'
 
 const PREVIEW_ROWS = 8
@@ -78,6 +79,10 @@ export function HomePage() {
           />
         </div>
       )}
+
+      {/* Under the tiles: those are all-time totals, these are the same programme month
+          by month. Four charts rather than four series -- HomeTrendsRow says why. */}
+      <HomeTrendsRow />
 
       {/* "First" and not "recent": /api/students sorts by name, so this is the top of the
           alphabet, not the latest activity. Calling it recent would be a lie the data

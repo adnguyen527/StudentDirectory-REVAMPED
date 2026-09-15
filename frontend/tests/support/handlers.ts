@@ -280,7 +280,254 @@ const TOPIC_DETAILS: Record<string, TopicDetail> = {
   [DECIMALS_TWO_DETAIL.topic_id]: DECIMALS_TWO_DETAIL,
 }
 
+
+/* --- Chart data ------------------------------------------------------------------- */
+
+/**
+ * models/distribution.py, reimplemented over the fixtures.
+ *
+ * Computed from the same rows the list handler would return, through the same filters --
+ * which is the only way a test can prove the chart reuses the list's filter state. A fake
+ * answering a fixed body would make that claim untestable.
+ *
+ * ⚠️ The $unwind trap is reproduced faithfully: a person at two centres contributes a count
+ * to *each*, so `counted` runs above `total`, and when `?center=` narrows the selection only
+ * the requested centres appear. A fake that filtered documents but not their centres would
+ * hide the exact bug the route's second $match exists to prevent.
+ */
+function distribution<T extends { centers: { name: string }[] }>(rows: T[], url: URL) {
+  const wanted = url.searchParams.getAll('center').filter(Boolean)
+  const counts = new Map<string, number>()
+  let noCenter = 0
+
+  for (const row of rows) {
+    const names = row.centers.map((c) => c.name).filter((name) => !wanted.length || wanted.includes(name))
+    if (row.centers.length === 0) {
+      noCenter += 1
+      continue
+    }
+    for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+
+  const bars = [...counts].map(([center, count]) => ({ center, count }))
+  // Most first, then by name -- a stable order the chart can hold between requests.
+  bars.sort((a, b) => b.count - a.count || a.center.localeCompare(b.center))
+
+  return {
+    centers: [...new Set(wanted)].sort(),
+    total: rows.length,
+    counted: bars.reduce((sum, bar) => sum + bar.count, 0),
+    no_center: noCenter,
+    distribution: bars,
+  }
+}
+
+/** 'YYYY-MM-DD' in UTC -- the spelling every bucket key is built from. */
+function isoDayOf(value: { $date: unknown }): string {
+  return new Date(value.$date as string).toISOString().slice(0, 10)
+}
+
+/** The ISO week-year and week of a UTC date, as `$dateToString`'s '%G-W%V' spells it. */
+function isoWeekKey(date: Date): string {
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+  // Thursday decides the ISO week-year, so step onto this week's Thursday first.
+  target.setUTCDate(target.getUTCDate() + 3 - ((target.getUTCDay() + 6) % 7))
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4))
+  firstThursday.setUTCDate(firstThursday.getUTCDate() + 3 - ((firstThursday.getUTCDay() + 6) % 7))
+  const week = 1 + Math.round((target.getTime() - firstThursday.getTime()) / (7 * 86_400_000))
+  return `${target.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+function bucketKeyOf(day: string, interval: string): string {
+  if (interval === 'month') return day.slice(0, 7)
+  if (interval === 'week') return isoWeekKey(new Date(`${day}T00:00:00Z`))
+  return day
+}
+
+/**
+ * models/trends.py over the fixtures: match, bucket, and fill the gaps.
+ *
+ * ⚠️ Distinct students are the (account_id, student_name) PAIR, per bucket. Counting by
+ * account alone would call the two Nguyen siblings one student, which is the trap the whole
+ * backend is written around -- and a fake that got it wrong would let the UI ship with it.
+ *
+ * Buckets are emitted for every interval in the window, including the empty ones, so a
+ * quiet week reads as a zero rather than a hole.
+ */
+function trends(url: URL, metrics: readonly string[]) {
+  const interval = url.searchParams.get('interval') ?? 'month'
+  const wantedCenters = url.searchParams.getAll('center').filter(Boolean)
+  const wantedInstructors = url.searchParams.getAll('instructor').filter(Boolean)
+  const query = url.searchParams.get('query')
+  const from = url.searchParams.get('date_from')
+  const to = url.searchParams.get('date_to')
+
+  let rows = REPORTS
+  if (wantedCenters.length) rows = rows.filter((r) => r.centers.some((c) => wantedCenters.includes(c)))
+  if (wantedInstructors.length) {
+    rows = rows.filter((r) => r.instructors.some((name) => wantedInstructors.includes(name)))
+  }
+  if (query) rows = rows.filter((r) => r.student_name.toLowerCase().includes(query.toLowerCase()))
+  if (from) rows = rows.filter((r) => isoDayOf(r.date) >= from)
+  if (to) rows = rows.filter((r) => isoDayOf(r.date) <= to)
+
+  const byBucket = new Map<string, typeof rows>()
+  for (const row of rows) {
+    const key = bucketKeyOf(isoDayOf(row.date), interval)
+    byBucket.set(key, [...(byBucket.get(key) ?? []), row])
+  }
+
+  // Every bucket between the first and last that matched, so the axis has no holes. The
+  // real route fills from the resolved window; over fixtures the matched span is the same
+  // thing and keeps the handler honest without reimplementing resolve_range.
+  // ⚠️ The axis follows the requested window, not the buckets that happened to match --
+  // which is the whole reason a quiet week renders as a zero rather than as a hole. Only
+  // when no window was given does the matched span stand in for it.
+  const keys = [...byBucket.keys()].sort()
+  const spanned =
+    from && to
+      ? fillBuckets(bucketKeyOf(from, interval), bucketKeyOf(to, interval), interval)
+      : keys.length
+        ? fillBuckets(keys[0], keys[keys.length - 1], interval)
+        : []
+
+  const buckets = spanned.map((key) => {
+    const found = byBucket.get(key) ?? []
+    const bucket: Record<string, unknown> = {
+      key,
+      start: { $date: `${bucketStartOf(key, interval)}T00:00:00Z` },
+      end: { $date: `${bucketStartOf(key, interval)}T00:00:00Z` },
+      partial: false,
+      sessions: found.length,
+    }
+    if (metrics.includes('students')) {
+      bucket.students = new Set(found.map((r) => `${r.account_id}|${r.student_name}`)).size
+    }
+    if (metrics.includes('pages_completed')) {
+      bucket.pages_completed = found.reduce((sum, r) => sum + (r.pages_completed ?? 0), 0)
+    }
+    if (metrics.includes('unfinalized')) {
+      bucket.unfinalized = found.filter((r) => r.finalized !== true).length
+    }
+    return bucket
+  })
+
+  return {
+    interval,
+    range: buckets.length
+      ? { start: buckets[0].start, end: buckets[buckets.length - 1].end }
+      : null,
+    centers: [...new Set(wantedCenters)].sort(),
+    instructors: [...new Set(wantedInstructors)].sort(),
+    buckets,
+  }
+}
+
+/** The first day of a bucket, from its key. */
+function bucketStartOf(key: string, interval: string): string {
+  if (interval === 'month') return `${key}-01`
+  if (interval === 'week') {
+    const [year, week] = key.split('-W')
+    const jan4 = new Date(Date.UTC(Number(year), 0, 4))
+    const monday = new Date(jan4)
+    monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7) + (Number(week) - 1) * 7)
+    return monday.toISOString().slice(0, 10)
+  }
+  return key
+}
+
+/** Every bucket key from `first` to `last` inclusive, so the axis is gapless. */
+function fillBuckets(first: string, last: string, interval: string): string[] {
+  const keys: string[] = []
+  const cursor = new Date(`${bucketStartOf(first, interval)}T00:00:00Z`)
+  const end = new Date(`${bucketStartOf(last, interval)}T00:00:00Z`)
+  while (cursor <= end) {
+    keys.push(bucketKeyOf(cursor.toISOString().slice(0, 10), interval))
+    if (interval === 'month') cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+    else if (interval === 'week') cursor.setUTCDate(cursor.getUTCDate() + 7)
+    else cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return keys
+}
+
+
+/**
+ * The chart routes, kept ahead of everything else in the array below.
+ *
+ * ⚠️ MSW matches in array order, first one wins -- it has no rule that a literal path beats
+ * a parameterised one. So `/api/students/:studentKey` happily swallows
+ * `/api/students/distribution` and answers 404 "Student not found", which looks exactly
+ * like a broken chart. Flask does not have this problem (Werkzeug ranks static rules above
+ * converter rules regardless of registration order), so the bug exists only here, and only
+ * as a silent 404. Declare these first.
+ */
+const chartHandlers = [
+  /* --- Chart data ---------------------------------------------------------------- */
+
+  http.get('/api/students/distribution', ({ request }) => {
+    const url = new URL(request.url)
+    // The same pipeline the list handler runs, so the bars and the table agree.
+    const rows = withinRanges(
+      atCenters(matching(STUDENTS, url.searchParams.get('query'), (s) => s.student_name), url),
+      url,
+      STUDENT_RANGES,
+    )
+    return HttpResponse.json(distribution(rows, url))
+  }),
+
+  http.get('/api/instructors/distribution', ({ request }) => {
+    const url = new URL(request.url)
+    const rows = withinRanges(
+      atCenters(
+        matching(INSTRUCTORS, url.searchParams.get('query'), (i) => i.instructor_name),
+        url,
+      ),
+      url,
+      INSTRUCTOR_RANGES,
+    )
+    return HttpResponse.json(distribution(rows, url))
+  }),
+
+  http.get('/api/reports/trends', ({ request }) => {
+    const url = new URL(request.url)
+    // Sessions alone: pages and students have readers on the other two routes.
+    return HttpResponse.json(trends(url, []))
+  }),
+
+  http.get('/api/home/trends', ({ request }) => {
+    const url = new URL(request.url)
+    return HttpResponse.json(trends(url, ['students', 'pages_completed', 'unfinalized']))
+  }),
+
+  http.get('/api/instructors/trends', ({ request }) => {
+    const url = new URL(request.url)
+    return HttpResponse.json(trends(url, ['students', 'pages_completed']))
+  }),
+
+  http.get('/api/reports/quality', ({ request }) => {
+    const url = new URL(request.url)
+    const rows = atCenterNames(REPORTS, url)
+    const has = (value: unknown) => value !== null && value !== undefined
+    return HttpResponse.json({
+      centers: [...new Set(url.searchParams.getAll('center').filter(Boolean))].sort(),
+      total: rows.length,
+      // The same predicates models/quality.py uses, so a zero here means a real zero.
+      checks: [
+        { key: 'no_topics', count: rows.filter((r) => !r.topics || r.topics.length === 0).length },
+        { key: 'missing_pages', count: rows.filter((r) => !has(r.pages_completed)).length },
+        { key: 'missing_session_end', count: rows.filter((r) => !has(r.session_end)).length },
+        { key: 'no_instructor', count: rows.filter((r) => r.instructors.length === 0).length },
+        { key: 'unfinalized', count: rows.filter((r) => r.finalized !== true).length },
+        { key: 'missing_date', count: rows.filter((r) => !has(r.date)).length },
+        { key: 'missing_session_start', count: rows.filter((r) => !has(r.session_start)).length },
+      ],
+      ambiguous_keys: [],
+    })
+  })
+]
+
 export const handlers = [
+  ...chartHandlers,
   http.get('/api/health', () => HttpResponse.json({ status: 'ok', message: 'Backend is running' })),
 
   http.get('/api/metrics', () => HttpResponse.json(METRICS)),
@@ -465,5 +712,5 @@ export const handlers = [
       return HttpResponse.json({ error: 'Report not found' }, { status: 404 })
     }
     return HttpResponse.json({ report: detail })
-  }),
+  })
 ]

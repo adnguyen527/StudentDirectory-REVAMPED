@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { CenterMetricsPage } from './features/centers/CenterMetricsPage'
+import { DataQualityPage } from './features/quality/DataQualityPage'
 import { HomePage } from './features/HomePage'
 import { InstructorsPage } from './features/InstructorsPage'
 import { ReportsPage } from './features/ReportsPage'
@@ -54,6 +55,8 @@ export default function App() {
             student-days. A malformed one answers 404 rather than 500; see find_by_id in
             models/dwp_report.py. */}
         <Route path="reports/:reportId" element={<ReportDetailPage />} />
+        {/* Scoped by ?center= like the metrics page, so a manager can link to their own. */}
+        <Route path="data-quality" element={<DataQualityPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

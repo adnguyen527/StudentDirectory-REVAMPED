@@ -7,6 +7,7 @@ import type { AttendanceResponse } from '../../api/types'
 import { useApi } from '../../hooks/useApi'
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
+import { AttendanceHeatmap } from './AttendanceHeatmap'
 import './Profile.css'
 
 /** 'YYYY-MM-DD' in UTC, which is what <input type="date"> and the route both speak. */
@@ -106,6 +107,12 @@ export function AttendancePanel({ studentKey, lastSessionDate }: AttendancePanel
               <div className="muted">months attended</div>
             </div>
           </div>
+
+          {/* Inside this card, and inside this AsyncBoundary: the calendar is drawn from
+              the `visits` already fetched here, so it costs no request, holds no state of
+              its own, and is scoped by the period control in this card's header rather
+              than adding a second date picker to the page. */}
+          {data && <AttendanceHeatmap visits={data.visits} period={data.period} />}
 
           <table className="table attendance-months">
             <thead>

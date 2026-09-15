@@ -8,6 +8,7 @@ import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
 import { useDocumentTitle } from '../shell/useDocumentTitle'
+import { CenterDistributionCard } from './CenterDistributionCard'
 import { CenterFilter } from './CenterFilter'
 import { ClearFilters } from './ClearFilters'
 import { ListFilter } from './ListFilter'
@@ -93,6 +94,10 @@ export function StudentsPage() {
             : 'Sorted by name.'}
         </p>
       </div>
+
+      {/* Above the table rather than inside it: .page is a flex column with its
+          own gap, so this needs no layout of its own. */}
+      <CenterDistributionCard kind="students" filterColumns={FILTER_COLUMNS} />
 
       {/* No title: the <h1> above already says Students. */}
       <Card

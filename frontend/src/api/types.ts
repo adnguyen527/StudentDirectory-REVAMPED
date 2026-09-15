@@ -508,3 +508,99 @@ export type StudentsResponse = Paged<'students', StudentListItem>
 export type InstructorsResponse = Paged<'instructors', InstructorListItem>
 export type TopicsResponse = Paged<'topics', TopicListItem>
 export type ReportsResponse = Paged<'reports', ReportListItem>
+
+/* --- Chart data ------------------------------------------------------------------- */
+
+export interface CenterCountRow {
+  center: string
+  count: number
+}
+
+/**
+ * How a filtered list divides across centres -- models/distribution.py.
+ *
+ * ⚠️ `total` and `counted` are different numbers and both are wanted. `total` is the rows
+ * the list would show; `counted` is the sum of the bars. They are equal on students, where
+ * a student belongs to exactly one centre, and `counted` is larger on instructors, where 11
+ * of 103 work at two or more and appear under each. One person, two bars -- the page has to
+ * label that rather than let the arithmetic look broken.
+ */
+export interface DistributionResponse {
+  /** The selection these figures answer, echoed back with blank values dropped. */
+  centers: string[]
+  total: number
+  counted: number
+  /** Rows carrying no centre at all. 0 on both collections today, reported rather than assumed. */
+  no_center: number
+  distribution: CenterCountRow[]
+}
+
+/**
+ * One time bucket -- models/trends.py.
+ *
+ * Which figures are present depends on the route: /api/reports/trends carries `sessions`
+ * alone, /api/instructors/trends adds `students` and `pages_completed`, and
+ * /api/home/trends adds `unfinalized` as well. Optional here rather than three near-identical
+ * interfaces, because the shape of a bucket is the same question answered at three widths.
+ *
+ * ⚠️ `students` is distinct *within* a bucket and does NOT sum across them -- someone who
+ * came in February and in March is counted in both. That is what a trend line means, and it
+ * is wrong for anyone totalling the column.
+ *
+ * There is deliberately no `finalized`: it is `sessions - unfinalized`, and two figures that
+ * must sum to a third are two figures that can disagree.
+ */
+export interface TrendBucket {
+  /** '2025-09-17', '2025-W38' or '2025-09'. Fixed width, so it sorts chronologically. */
+  key: string
+  start: ExtDate
+  /** The bucket's last day at midnight -- inclusive, as every date bound here is. */
+  end: ExtDate
+  /** The window covers only part of this bucket, so the bar is short because the window is. */
+  partial: boolean
+  sessions: number
+  students?: number
+  pages_completed?: number
+  unfinalized?: number
+}
+
+export interface TrendsResponse {
+  interval: 'day' | 'week' | 'month'
+  /** Null on an empty collection: there is no anchor to measure back from, and today is not one. */
+  range: { start: ExtDate; end: ExtDate } | null
+  centers?: string[]
+  instructors?: string[]
+  buckets: TrendBucket[]
+}
+
+/** One data-quality check and how many reports currently fail it -- models/quality.py. */
+export interface QualityCheck {
+  key: string
+  count: number
+}
+
+/**
+ * A natural key more than one stored document shares -- the rows an import can no longer
+ * update, because `_upsert` refuses to guess which one a source row means.
+ */
+export interface AmbiguousKey {
+  account_id: string
+  student_name: string
+  date: ExtDate
+  session_start: ExtDate | null
+  documents: number
+}
+
+/**
+ * What is missing or contradictory in the reports right now.
+ *
+ * ⚠️ Current state, not an import audit. These say what is wrong with the collection today,
+ * which is what can be acted on; what a given import run skipped is not recorded anywhere.
+ * Counts only -- every row behind these numbers is about a named child.
+ */
+export interface QualityResponse {
+  centers: string[]
+  total: number
+  checks: QualityCheck[]
+  ambiguous_keys: AmbiguousKey[]
+}

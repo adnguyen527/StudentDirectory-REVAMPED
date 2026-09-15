@@ -51,7 +51,12 @@ describe('home page', () => {
     renderApp('/')
 
     await screen.findByRole('row', { name: /Anthony Nguyen/ })
-    const sessions = screen.getByRole('columnheader', { name: /sessions/i })
+    // Scoped to the preview table. The trend charts above it each render their own table --
+    // the accessible reading of the bars -- and one of them has a Sessions column too, so
+    // an unscoped columnheader query is ambiguous. The twins are the captioned tables; the
+    // preview has no caption.
+    const preview = screen.getByRole('table', { name: '' })
+    const sessions = within(preview).getByRole('columnheader', { name: /sessions/i })
     expect(within(sessions).queryByRole('button')).not.toBeInTheDocument()
     expect(sessions).not.toHaveAttribute('aria-sort')
   })

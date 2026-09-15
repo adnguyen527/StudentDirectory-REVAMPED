@@ -241,3 +241,45 @@ button:disabled {
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: var(--font-size-sm);
 }
+
+/*
+ * Data quality cards.
+ *
+ * A grid rather than a CardRow: seven cards of one number each want to pack tighter than
+ * the 360px a CardRow defaults to, and closer to the stat tiles they read like.
+ */
+.quality-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.quality-figure {
+  font-size: var(--font-size-stat);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A zero is the good news, so it reads as settled rather than as another warning. */
+.quality-clear {
+  color: var(--success);
+}
+
+.quality-of {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+.quality-detail {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+/* Prose inside a flush card, which otherwise meets the card's edge. */
+.table-inset {
+  padding: 0 var(--space-5) var(--space-3);
+}

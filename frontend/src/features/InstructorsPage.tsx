@@ -9,6 +9,7 @@ import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
 import { useDocumentTitle } from '../shell/useDocumentTitle'
 import { InstructorsTable } from './InstructorsTable'
+import { CenterDistributionCard } from './CenterDistributionCard'
 import { CenterFilter } from './CenterFilter'
 import { ClearFilters } from './ClearFilters'
 import { ListFilter } from './ListFilter'
@@ -90,6 +91,10 @@ export function InstructorsPage() {
             : 'Sorted by name.'}
         </p>
       </div>
+
+      {/* Above the table rather than inside it: .page is a flex column with its
+          own gap, so this needs no layout of its own. */}
+      <CenterDistributionCard kind="instructors" filterColumns={FILTER_COLUMNS} />
 
       {/* No title: the <h1> above already says Instructors. */}
       <Card

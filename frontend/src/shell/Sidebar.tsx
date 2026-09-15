@@ -6,6 +6,7 @@ import {
   InstructorsIcon,
   PlusIcon,
   ReportsIcon,
+  QualityIcon,
   SettingsIcon,
   StudentsIcon,
   TopicsIcon,
@@ -19,6 +20,7 @@ const NAV = [
   { to: '/topics', label: 'Topics', icon: TopicsIcon, end: false },
   { to: '/reports', label: 'Reports', icon: ReportsIcon, end: false },
   { to: '/center-metrics', label: 'Center Metrics', icon: CentersIcon, end: false },
+  { to: '/data-quality', label: 'Data Quality', icon: QualityIcon, end: false },
 ]
 
 /** Fixed left rail: wordmark, primary action, nav, settings pinned to the bottom. */

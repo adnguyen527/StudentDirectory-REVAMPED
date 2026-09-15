@@ -8,6 +8,7 @@ import type { InstructorDetailResponse, InstructorRosterEntry } from '../../api/
 import { useApi } from '../../hooks/useApi'
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
+import { InstructorWorkloadCard } from './InstructorWorkloadCard'
 import { CardRow } from '../../shell/CardRow'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { Pager } from '../../shell/Pager'
@@ -304,6 +305,13 @@ export function InstructorProfilePage() {
           )}
         </Card>
       </CardRow>
+
+      {/* Full width rather than a third card in the row above: a year of monthly bars
+          in half a content width is the crowding CenterMetricsPage stacked to avoid. */}
+      <InstructorWorkloadCard
+        instructorName={instructor.instructor_name}
+        lastSessionDate={instructor.last_session_date}
+      />
 
       {/* Named in the README's profile spec but not buildable: the instructors collection
           carries no topic data, so there is nothing to rank. See the P2 data-integrity

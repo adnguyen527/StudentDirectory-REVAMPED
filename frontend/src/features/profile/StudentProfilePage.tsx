@@ -17,6 +17,7 @@ import { StatTile } from '../../shell/StatTile'
 import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { AttendancePanel } from './AttendancePanel'
 import { SessionHistoryCard } from './SessionHistoryCard'
+import { TopicProgressCard } from './TopicProgressCard'
 import { TopicsCard } from './TopicsCard'
 import { PAGES_PER_SESSION_MIN, pagesPerSession } from './pagesPerSession'
 import './Profile.css'
@@ -237,6 +238,10 @@ export function StudentProfilePage() {
 
         <TopicsCard topics={student.topics} />
       </CardRow>
+
+      {/* Full width below the two panels: a row per topic against the student's own
+          session span needs the width, and the card owns which topics it shows. */}
+      <TopicProgressCard reports={dwp_reports} topics={student.topics} />
 
       <Card title="Instructors" flush>
         <div className="table-scroll">

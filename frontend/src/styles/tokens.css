@@ -44,6 +44,30 @@
   --wash-3-ink: #aa5709;
   --wash-4-ink: #c11574;
 
+  /*
+   * Chart ramp -- magnitude as colour, light to dark. The attendance heatmap is its only
+   * use; every other chart draws one series and takes --accent.
+   *
+   * Built on the accent rather than the washes: StatTile documents those as decorative
+   * variety cycled by position, "not a colour code", and a chart reading them as one would
+   * claim a meaning the tiles deny.
+   *
+   * Not in the contrast test's PAIRS, deliberately -- as Modal.css's scrim is not a token
+   * for the mirror-image reason. Every pair there is an ink read against a ground; these
+   * cells carry no text at all (the count lives in the cell's title and in the chart's
+   * table twin), so there is no combination to check. Adding text inside a cell would
+   * change that and would need a pair per step.
+   *
+   * Validated as an ordinal ramp against the surface it sits on: monotone lightness,
+   * adjacent lightness gaps clear of 0.06, a single hue, and the step nearest the surface
+   * clearing 2:1 -- 2.15:1 here on white.
+   */
+  --chart-ramp-1: #bda5ed;
+  --chart-ramp-2: #a684e6;
+  --chart-ramp-3: #8459dd;
+  --chart-ramp-4: #6d28d9;
+  --chart-ramp-5: #55219f;
+
   /* Spacing */
   --space-1: 4px;
   --space-2: 8px;
@@ -111,6 +135,20 @@
     --wash-2-ink: #7cc0ff;
     --wash-3-ink: #f5b167;
     --wash-4-ink: #f38bbd;
+
+    /*
+     * ⚠️ Re-stepped, not the light ramp reversed.
+     *
+     * A sequential ramp anchors its lightest end at the surface, so on a dark surface the
+     * step that has to stay legible is the *darkest* one -- and the light ramp's darkest
+     * step sits at 1.3:1 against #1c1e27, which disappears. These are re-chosen on the same
+     * hue and re-validated against the dark surface, where ramp-1 clears 2:1 at 2.27:1.
+     */
+    --chart-ramp-1: #6340ad;
+    --chart-ramp-2: #7f5ad6;
+    --chart-ramp-3: #9b7cf0;
+    --chart-ramp-4: #b49bf5;
+    --chart-ramp-5: #cfc0fb;
 
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.24);
     --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.5);

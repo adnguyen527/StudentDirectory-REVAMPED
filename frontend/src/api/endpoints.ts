@@ -3,15 +3,18 @@
 import { request } from './client'
 import type {
   AttendanceResponse,
+  DistributionResponse,
   CenterMetricsResponse,
   CentersResponse,
   InstructorDetailResponse,
   InstructorsResponse,
   Metrics,
+  QualityResponse,
   ReportDetailResponse,
   ReportsResponse,
   StudentDetailResponse,
   StudentsResponse,
+  TrendsResponse,
   TopicDetailResponse,
   TopicsResponse,
 } from './types'
@@ -192,4 +195,69 @@ export function searchStudents(q: string, limit = 10, signal?: AbortSignal) {
 /** The same, over instructors. Same `q` spelling, same envelope, same 2-character floor. */
 export function searchInstructors(q: string, limit = 10, signal?: AbortSignal) {
   return request<InstructorsResponse>('/instructors/search', { q, limit }, signal)
+}
+
+/* --- Chart data ------------------------------------------------------------------- */
+
+/**
+ * How the students this list would show divide across centres.
+ *
+ * Takes the list's own parameters, unchanged -- which is the whole point. The chart sits
+ * above the table and is read as a picture of it, and that only holds while both ask the
+ * same question. `listQuery` is reused rather than a second spelling for the same reason.
+ *
+ * ⚠️ Paging is deliberately not passed. `offset`, `sort` and `direction` position the list
+ * without narrowing it, so turning a page or re-sorting cannot change these bars -- sending
+ * them would refetch an identical answer.
+ */
+export function getStudentDistribution(params: ListParams = {}, signal?: AbortSignal) {
+  return request<DistributionResponse>('/students/distribution', listQuery(params), signal)
+}
+
+/** The same, over instructors -- where the bars sum to more than the roster. */
+export function getInstructorDistribution(params: ListParams = {}, signal?: AbortSignal) {
+  return request<DistributionResponse>('/instructors/distribution', listQuery(params), signal)
+}
+
+/** Which bucket width a trend route should answer in. */
+export interface TrendParams extends ListParams {
+  interval?: 'day' | 'week' | 'month'
+  /** Repeated `instructor` params, as `centers` is repeated `center`. */
+  instructors?: string[]
+}
+
+function trendQuery({ instructors, ...rest }: TrendParams) {
+  return { ...listQuery(rest), instructor: instructors }
+}
+
+/**
+ * Sessions per bucket, for the chart above the reports list.
+ *
+ * Omitting both date bounds is allowed and means the API's own default window, anchored on
+ * the newest session in the data rather than on today -- the imported reports end well
+ * before the calendar does.
+ */
+export function getReportTrends(params: TrendParams = {}, signal?: AbortSignal) {
+  return request<TrendsResponse>('/reports/trends', trendQuery(params), signal)
+}
+
+/** Monthly sessions, distinct students, pages and unfinalized reports, for Home. */
+export function getHomeTrends(params: TrendParams = {}, signal?: AbortSignal) {
+  return request<TrendsResponse>('/home/trends', trendQuery(params), signal)
+}
+
+/**
+ * One instructor's workload over time.
+ *
+ * ⚠️ `pages_completed` here is credited, not split: a co-taught session counts its pages in
+ * full for each instructor on it. It answers "work in sessions I ran" and must not be summed
+ * across people -- the chart labels that rather than leaving it to be discovered.
+ */
+export function getInstructorTrends(params: TrendParams = {}, signal?: AbortSignal) {
+  return request<TrendsResponse>('/instructors/trends', trendQuery(params), signal)
+}
+
+/** Counts of what is missing or contradictory in the reports, for the monitoring page. */
+export function getReportQuality(params: ListParams = {}, signal?: AbortSignal) {
+  return request<QualityResponse>('/reports/quality', listQuery(params), signal)
 }
