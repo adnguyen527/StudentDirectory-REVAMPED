@@ -15,8 +15,14 @@ students are keyed by account_id + name (see util.make_student_key), so a name
 collision only merges students who are also on the same household account.
 """
 
+from datetime import datetime
+
 import pytest
 
+from models import quality, trends
+from models.dwp_report import DigitalWorkoutPlan
+from models.distribution import by_center
+from models.filters import center_criteria
 from util import make_student_key, split_student_key
 
 pytestmark = pytest.mark.integration
@@ -1340,3 +1346,158 @@ def test_topic_sessions_reconcile_to_dwp_reports(topics, dwp_topic_rollup):
         f'{len(drifted)} topic(s) whose sessions disagree with dwp_reports '
         f'(document, source): {drifted[:5]}'
     )
+
+
+# --- Chart aggregates -------------------------------------------------------------
+#
+# These run the real pipelines against the real collection rather than reimplementing
+# them, which is the point: the offline tests prove the arithmetic on four fixture rows,
+# and these prove it still reconciles across 29,382. `by_center` already takes its
+# collection as an argument; trends and quality read the module-level one, so it is
+# pointed at the live handle for the duration of the check.
+
+
+@pytest.fixture
+def live_reports(live_db, monkeypatch):
+    """The real dwp_reports, wired under models that normally read the global handle."""
+    monkeypatch.setattr(trends, '_collection', lambda: live_db['dwp_reports'])
+    monkeypatch.setattr(quality, '_collection', lambda: live_db['dwp_reports'])
+    return live_db['dwp_reports']
+
+
+def test_trend_buckets_account_for_every_session(live_reports):
+    """⚠️ The reconciliation the whole trends module rests on.
+
+    Every session falls in exactly one bucket, so the buckets have to add up to the
+    collection. If this drifts, a chart is quietly dropping or double-counting sessions --
+    which is exactly what reading the built per-instructor aggregate would do.
+    """
+    anchor = max(live_reports.distinct('date'))
+    first = min(live_reports.distinct('date'))
+    buckets = trends.series({}, first, anchor, 'month')
+
+    assert sum(bucket['sessions'] for bucket in buckets) == live_reports.count_documents({})
+
+
+def test_trend_pages_are_the_pages_recorded(live_reports):
+    """Not the pages credited. Summing instructors.total_pages_completed gives ~168,623."""
+    anchor = max(live_reports.distinct('date'))
+    first = min(live_reports.distinct('date'))
+    buckets = trends.series({}, first, anchor, 'month')
+
+    recorded = next(live_reports.aggregate([
+        {'$group': {'_id': None, 'pages': {'$sum': '$pages_completed'}}},
+    ]))['pages']
+    assert sum(bucket['pages_completed'] for bucket in buckets) == recorded
+
+
+def test_a_students_trend_count_never_exceeds_its_sessions(live_reports):
+    """A bucket cannot hold more distinct students than sessions -- one session, one student."""
+    anchor = max(live_reports.distinct('date'))
+    for bucket in trends.series({}, trends.shift(anchor, 'month', -11), anchor, 'month'):
+        assert bucket['students'] <= bucket['sessions']
+
+
+def test_the_trend_anchor_is_the_newest_report(live_reports):
+    """Not students.last_session_date -- a built collection that lags an import."""
+    assert DigitalWorkoutPlan.latest_session_date is not None
+    newest = max(live_reports.distinct('date'))
+    start, end, error = trends.resolve_range(None, None, 'month', newest)
+    assert error is None and end == newest
+    assert len(trends.axis(start, end, 'month')) == 12
+
+
+def test_the_student_distribution_accounts_for_every_student(live_db):
+    """Students partition: every student belongs to exactly one center, so the bars add up."""
+    payload = by_center(live_db['students'], {})
+    assert payload['total'] == live_db['students'].count_documents({})
+    assert payload['counted'] + payload['no_center'] == payload['total']
+
+
+def test_the_instructor_distribution_counts_a_shared_instructor_under_each_center(live_db):
+    """⚠️ Instructors do NOT partition, and the page has to say so.
+
+    11 of 103 work at more than one center, so the bars deliberately come to more than the
+    roster. A run where these were equal would mean the multi-center instructors had gone.
+    """
+    payload = by_center(live_db['instructors'], {})
+    assert payload['total'] == live_db['instructors'].count_documents({})
+    assert payload['counted'] > payload['total']
+
+
+def test_a_filtered_distribution_shows_only_the_centers_asked_for(live_db):
+    """The $unwind trap, against real multi-center instructors rather than one fixture."""
+    names = sorted(live_db['instructors'].distinct('centers.name'))
+    wanted = names[:1]
+    payload = by_center(live_db['instructors'], center_criteria(wanted), wanted)
+
+    assert [row['center'] for row in payload['distribution']] == wanted
+
+
+def test_every_distribution_bar_names_a_real_center(live_db):
+    """The bars and the filter's checkboxes have to offer the same names."""
+    offered = set(live_db['students'].distinct('centers.name'))
+    drawn = {row['center'] for row in by_center(live_db['students'], {})['distribution']}
+    assert drawn <= offered
+
+
+def test_the_quality_checks_stay_within_the_collection(live_reports):
+    """A count above the total would mean a criterion matching something it should not."""
+    payload = quality.summary()
+    assert payload['total'] == live_reports.count_documents({})
+    assert all(0 <= row['count'] <= payload['total'] for row in payload['checks'])
+
+
+def test_every_declared_quality_check_is_reported(live_reports):
+    """A check that quietly stopped being computed would read as a clean collection."""
+    reported = {row['key'] for row in quality.summary()['checks']}
+    assert reported == set(quality.CHECKS)
+
+
+def test_the_ambiguous_keys_are_the_known_collisions(live_reports):
+    """The four student-days under Known Issues -- the rows an import can no longer update.
+
+    Found by grouping on NATURAL_KEY, with no record of the imports that let them in: the
+    colliding documents are still stored, so the condition is current state. If this grows,
+    an import has landed a new collision; if it shrinks, one was resolved.
+    """
+    found = quality.ambiguous_keys()
+    assert all(row['documents'] > 1 for row in found)
+    assert {row['student_name'] for row in found} == {
+        'Kimberly Thomas', 'Michael Evans', 'Laura Scott', 'Elizabeth Burch',
+    }
+
+
+def test_unfinalized_reports_are_the_ones_without_page_counts(live_reports):
+    """They coincide today -- the source leaves pages blank until a report is finalized.
+
+    Two checks rather than one because they answer different questions and nothing holds
+    them together; this records that they currently agree, so a divergence is visible
+    rather than silent.
+    """
+    counts = {row['key']: row['count'] for row in quality.summary()['checks']}
+    assert counts['unfinalized'] == counts['missing_pages']
+
+
+def test_the_bucket_cap_clears_the_datasets_own_span(live_reports):
+    """⚠️ The guard must refuse absurd ranges, not the whole dataset at day granularity.
+
+    The first MAX_BUCKETS was 400 against a span of 405 daily buckets, so "all time, daily"
+    answered 400 -- a legitimate question refused by a guard meant for ?date_from=2000-01-01.
+    This fails the moment the data outgrows the constant again, which is the point: it is
+    the only place the two numbers are compared.
+    """
+    first = min(live_reports.distinct('date'))
+    last = max(live_reports.distinct('date'))
+
+    for interval in ('day', 'week', 'month'):
+        start, end, error = trends.resolve_range(first, last, interval, last)
+        assert error is None, f'{interval}: {error}'
+        assert start == first and end == last
+
+
+def test_a_range_far_beyond_the_data_is_still_refused(live_reports):
+    """The guard still does its job -- ~9,600 buckets of mostly zeroes."""
+    last = max(live_reports.distinct('date'))
+    _, _, error = trends.resolve_range(datetime(2000, 1, 1), last, 'day', last)
+    assert error and str(trends.MAX_BUCKETS) in error

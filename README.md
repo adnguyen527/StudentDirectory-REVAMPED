@@ -442,8 +442,8 @@ stored document — or more than one row within a single file, disagreeing on co
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                  # 670 offline tests -- no network, no credentials
-pytest --integration    # + 99 read-only checks against the real cluster
+pytest                  # 759 offline tests -- no network, no credentials
+pytest --integration    # + 113 read-only checks against the real cluster
 ```
 
 **Offline.** Runs against `mongomock`. `tests/conftest.py` reads the real `MONGODB_URI`,
@@ -512,17 +512,23 @@ proving nothing.
 | GET | `/api/metrics` | collection counts and averages, plus `latest_session_date` — the newest session in the data, which the date filter's presets count back from |
 | GET | `/api/centers` | the center names the list filters offer |
 | GET | `/api/centers/metrics` | all-time totals across `?center=` (repeatable): sessions, students, instructors, pages, unfinalized, days, and the span. Counted from `dwp_reports`; an unknown center is zeroes, not a `400` |
+| GET | `/api/home/trends` | monthly sessions, distinct students, pages and unfinalized reports, for the Home charts; `?interval=`, `?center=`, `?date_from=`/`_to` |
 | GET | `/api/students` | a page of students; `?query=` to search, `?account_id=` for one household's siblings, `?center=` (repeatable), `?sessions_min=`/`_max`, `?finished_min=`/`_max`, `?on_plan_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
+| GET | `/api/students/distribution` | students per center, under the list's own filters — the bar chart above it |
 | GET | `/api/students/search?q=` | name search, minimum 2 characters |
 | GET | `/api/students/<student_key>` | one student plus their sessions |
 | GET | `/api/students/<student_key>/attendance` | sessions attended in a period; `?start=` and `?end=` required, `YYYY-MM-DD`, both inclusive |
 | GET | `/api/instructors` | a page of instructors; `?query=`, `?center=` (repeatable), `?sessions_min=`/`_max`, `?unfinalized_min=`/`_max`, `?last_session_from=`/`_to`, `?sort=`+`?direction=` |
+| GET | `/api/instructors/distribution` | instructors per center, under the list's own filters. The bars sum to **more** than the roster |
+| GET | `/api/instructors/trends` | time-bucketed sessions, distinct students and pages; `?instructor=` (repeatable), `?center=`, `?interval=`, `?date_from=`/`_to` |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
 | GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
 | GET | `/api/topics` | a page of topics, most worked first; `?query=` to search name, former names or id, a `_min`/`_max` pair per count column, `?sort=`+`?direction=` |
 | GET | `/api/topics/search?q=` | search, minimum 2 characters — matches `name`, `also_known_as` and `topic_id` |
 | GET | `/api/topics/<topic_id>` | one topic, with its ranked instructors |
-| GET | `/api/reports` | a page of session reports, newest first; `?query=` matches the student, `?center=` (repeatable), `?date_from=`/`_to`, `?sort=date\|student`+`?direction=`. Withholds `student_notes` |
+| GET | `/api/reports` | a page of session reports, newest first; `?query=` matches the student, `?center=` (repeatable), `?instructor=` (repeatable), `?date_from=`/`_to`, `?sort=date\|student`+`?direction=`. Withholds `student_notes` |
+| GET | `/api/reports/trends` | sessions per bucket for the report-volume chart; the list's filters plus `?interval=day\|week\|month` |
+| GET | `/api/reports/quality` | counts of missing or contradictory report data, and the ambiguous natural keys; `?center=`, `?date_from=`/`_to` |
 | GET | `/api/reports/<report_id>` | one report, whole — **including `student_notes`**, which the list withholds. `_id` is the key; a malformed one is a `404`, not a `500` |
 
 `/api/metrics` reports `total_attendance_records` and `avg_attendance_per_student` from
@@ -678,6 +684,161 @@ Scoping a manager to their own centers waits on that decision; it is on the TODO
 
 ---
 
+## Chart data
+
+Six endpoints feed the frontend's charts. All of them read `dwp_reports` or the same
+collection the list beneath them reads, and never a built aggregate for anything
+date-scoped — `models/center.py` says why, and every rule below is a consequence.
+
+### Distributions — `/api/students/distribution`, `/api/instructors/distribution`
+
+Students or instructors per center, for the bar chart above each list. They take **that
+list's own parameters**, spelled identically (`?query=`, repeatable `?center=`, and the
+list's `FILTERABLE` ranges), and read **that list's own collection** — so the bars and the
+table are one population counted once. That is the reason they are not a slice of
+`/api/centers/metrics`, which counts `dwp_reports` over a period and answers a different
+question: a bar drawn from one collection above a table drawn from another disagrees the
+moment either is filtered.
+
+Each model exposes a single `criteria()` that the list, the count and the distribution all
+share. A second spelling would agree today and diverge the first time a column is added to
+`FILTERABLE`, with nothing failing to say so.
+
+⚠️ **`total` and `counted` are different numbers, and the page must label which it shows.**
+`total` is the rows the list would show; `counted` is the sum of the bars.
+
+| | `total` | `counted` | why |
+|---|---|---|---|
+| students | 893 | 893 | a student belongs to exactly one center |
+| instructors | 103 | 120 | 11 work at two or more and appear under each |
+
+`no_center` counts rows with no center at all — 0 on both collections today, and reported
+rather than assumed so a build that changed it would be visible. `counted + no_center ==
+total` holds for students by construction, and is asserted.
+
+**Headcount, never sessions-weighted**, although `centers[]` carries `{name, sessions}`.
+That count is all-time, so weighting by it would show all-time work under a date-filtered
+table — and it does not reconcile: a fixture instructor carries an Eastside session that
+`dwp_reports` has no record of.
+
+⚠️ **The one line that looks redundant and is not.** `center_criteria` matches a *document*
+if any of its centers matches; `$unwind` then emits *every* center on that document. So the
+pipeline matches **again** after the unwind. Without it, filtering to one center still
+draws bars for the other centers of anyone who works at several. There is a regression test
+for exactly this, and removing the second `$match` fails it.
+
+### Trends — `/api/reports/trends`, `/api/home/trends`, `/api/instructors/trends`
+
+Three routes over one query in `models/trends.py`, because the three charts differ in what
+they filter by and what they draw, but not at all in how they bucket. Each returns only the
+series its chart reads; the rest is computed by the same pass and dropped.
+
+**One pipeline, where `Center.summary` needs three.** That one needs three incompatible
+notions of distinct at once. This needs exactly one — the student pair — and every other
+figure is additive *through* it, so the groups nest. That holds only while nothing here
+counts distinct **instructors** or distinct **days** per bucket; either would need its own
+pass.
+
+**Bucket keys are built in the query, and the operator choice is not free.** mongomock
+implements `$dateToString` but **not** `$dateTrunc`, `$isoWeek` or `$isoWeekYear`. So the
+ISO week is spelled `%G-W%V` through `$dateToString`, which both engines support. Anyone
+"simplifying" this into `$dateTrunc` will pass review and break every offline test.
+
+| interval | key | default window |
+|---|---|---|
+| `day` | `2025-09-17` | 30 buckets |
+| `week` | `2025-W38` (ISO, Monday-based) | 12 buckets |
+| `month` | `2025-09` | 12 buckets |
+
+All three are zero-padded and fixed width, so **lexicographic order is chronological
+order** — load-bearing, since buckets are matched to the axis by this key. `%G` is the ISO
+week-year and not the calendar year: 2025-12-29 is in `2026-W01`.
+
+The default window is **per interval** rather than one flat "latest 30 days", which would
+give the monthly chart two bars and push the anchor arithmetic into the frontend as well.
+It ends at the newest session in `dwp_reports` — **not** `Student.latest_session_date()`,
+which reads the built `students` collection and lags between an import and a rebuild. The
+two methods look like duplicates and are not; a test inserts a report newer than any
+student's rollup to hold them apart.
+
+**Buckets are contiguous, including the empty ones**, so a quiet week reads as a zero
+rather than a hole. The axis is driven by the resolved range and not by the data, because
+an aggregation cannot return rows for dates that have none.
+
+**The range is used exactly as asked and never snapped outward** to bucket boundaries.
+Widening it silently would count sessions the table below excludes. Edge buckets therefore
+carry `partial: true`, which is how a chart can say a bar is short because the window is.
+Both ends are inclusive, and a bucket's `end` is its **last day at midnight**, following
+the convention `range_criteria` already states.
+
+⚠️ **`students` is distinct within a bucket and does not sum across them.** Someone active
+in February and March is counted in both. That is what a trend line means, and it is wrong
+for anyone totalling the column.
+
+⚠️ **`pages_completed` under `?instructor=` is credited, not split.** A co-taught session's
+pages count in full for each instructor on it, so two single-instructor requests added
+together overshoot: in the fixtures Dana reports 16 and Marcus 7 against the 16 actually
+recorded. Asking for *both at once* is a union and correctly gives 16 — the filter widens
+the match, it does not add answers. Label the column; do not total it.
+
+No `finalized` count anywhere: it is `sessions - unfinalized`, and two stored figures that
+must sum to a third are two figures that can disagree.
+
+**A range too wide to chart is refused, not truncated** — `MAX_BUCKETS` is 750, and a
+truncated time series reads as a real decline where a truncated page reads as a page.
+⚠️ The limit has to stay clear of the dataset's own span at day granularity: the data is
+405 daily buckets today, and the first version of this constant was 400, which refused
+"all time, daily". A live test compares the two so it fails rather than surprises.
+An unknown `?interval=` is a `400` as `?sort=` is; an unknown `?center=` or `?instructor=`
+stays a `200` with zeroes.
+
+### Data quality — `/api/reports/quality`
+
+Counts of what is missing or contradictory, for the monitoring cards, scoped by the same
+`?center=` and date filters. Measured against the live collection:
+
+| check | count | |
+|---|---|---|
+| `no_topics` | 5,945 | not always a fault — a session can be spent on schoolwork |
+| `missing_pages` | 1,068 | the source leaves pages blank until a report is finalized |
+| `unfinalized` | 1,068 | the actionable one; coincides with the above today |
+| `missing_session_end` | 217 | sessions that cannot be given a duration |
+| `no_instructor` | 73 | unstaffed, and still sessions |
+| `missing_date` | 0 | tripwires: a null `date` would drop out of every chart above |
+| `missing_session_start` | 0 | rather than appear as a gap |
+| `ambiguous_keys` | 4 | the four student-days under *Known Issues* |
+
+**Current state, not an import audit**, and `ambiguous_keys` is the one that looks like
+history and is not: `import_reports.py` reports a collision to the console and skips the
+row, so the *event* is lost — but both colliding documents are still stored, so grouping on
+`NATURAL_KEY` finds the *condition* with no record of the import that allowed it. What
+genuinely needs history is which rows a given run skipped, and that is the `import_runs`
+TODO.
+
+`NATURAL_KEY` now lives in `models/dwp_report.py` beside the collection's other contracts,
+and `ingestion/import_reports.py` imports it — what the importer writes on and what this
+looks for collisions in have to be the same four fields.
+
+**Counts only.** Every row behind these numbers is about a named child, so drilling into
+one is the reports list's job through its own filters. Served by a single `$facet`: nine
+round trips measured ~870ms against ~540ms for one, because the cost is latency rather than
+the server's work. The trade-off, so nobody rediscovers it — a `$facet` branch cannot use
+an index, but the scoping `$match` runs before the facet and does.
+
+### Measured
+
+Against the live cluster, and worth re-checking if these grow. Every interval reconciles
+exactly to **29,382 sessions and 153,360 pages**.
+
+| | |
+|---|---|
+| trends, whole dataset (month / week / day) | ~150 / ~250 / ~350ms |
+| trends, default windows | 150–490ms |
+| distributions | ~120ms each |
+| quality, all checks | ~540ms |
+
+---
+
 ## Known Issues
 
 - **The Topics card on a student profile collapses when its search matches nothing.**
@@ -813,27 +974,31 @@ Items remain in priority order within each group.
 - [x] `P2` Added center-wide metrics for sessions, students, pages, and instructors,
       computed per request from `dwp_reports` rather than from a built `centers`
       collection; co-taught pages are counted once.
-- [ ] `P2` **Expose center distributions for the list-page charts.** The API must return
-      student and instructor counts grouped by center, using the same center names and
-      filtering rules as the list routes. Decide whether this extends `/api/centers/metrics`
-      or uses a dedicated endpoint; multi-center people may appear in more than one center,
-      so the counting rule must be explicit.
-- [ ] `P2` **Expose report session distributions by date range.** Add an aggregation for the
-      reports chart that accepts the existing inclusive date bounds and returns ordered daily,
-      weekly, or monthly buckets. The default range must be the latest 30 days represented in
-      the data, not the wall-clock month, using the same latest-session anchor as `/api/metrics`.
-- [ ] `P2` **Expose monthly home activity trends.** Return sessions, distinct students,
-      pages completed, and finalized/unfinalized reports by month. The initial default is one
-      month-sized view; support extending it to three months without changing the response
-      contract. Distinct students must use `(account_id, student_name)`, not `account_id` alone.
-- [ ] `P2` **Expose instructor workload trends.** Return time-bucketed sessions, distinct
-      students, and pages for the instructor chart, with optional instructor and center
-      filters. Pages must be labelled carefully because co-taught sessions credit full pages
-      to every instructor.
-- [ ] `P2` **Define data-quality monitoring aggregates.** Identify and count missing topics,
-      page counts, dates, session times, unfinalized reports, ambiguous natural keys, and
-      other actionable import anomalies. Decide which findings need persisted import history
-      because the current ambiguous-key output is console-only.
+- [x] `P2` Exposed center distributions for the list-page charts as dedicated
+      `/api/students/distribution` and `/api/instructors/distribution` routes, reading each
+      list's own collection through one shared `criteria()` so the bars reconcile with the
+      table. Counted as one appearance per center per person: students partition, instructors
+      do not (`counted` 120 against a roster of 103).
+- [x] `P2` Exposed report session distributions by date range as `/api/reports/trends`:
+      contiguous day/week/month buckets including the empty ones, anchored on the newest
+      session in `dwp_reports` rather than the wall clock. Edge buckets are marked `partial`
+      rather than snapped outward, and a range too wide to chart is refused.
+- [x] `P2` Exposed monthly home activity trends as `/api/home/trends`. Distinct students are
+      the `(account_id, student_name)` pair and do not sum across buckets; widening from one
+      month to three is a date bound rather than a new contract. No `finalized` count — it is
+      `sessions - unfinalized`.
+- [x] `P2` Exposed instructor workload trends as `/api/instructors/trends`, with repeatable
+      `?instructor=` and `?center=`. Pages are credited in full to each instructor on a
+      co-taught session, so they are not summable across instructors — see *Chart data*.
+      Comparing several instructors as separate series is a different shape and is not built.
+- [x] `P2` Defined the data-quality monitoring aggregates behind `/api/reports/quality`.
+      The ambiguous-key count turned out **not** to need persisted history: the colliding
+      documents are still stored, so grouping on `NATURAL_KEY` finds the condition without
+      the import that caused it.
+- [ ] `P3` **Record import history in an `import_runs` collection.** What a given run did —
+      file, counts, and the keys it skipped — is console-only and unrecoverable afterwards.
+      `/api/reports/quality` answers current state; this is the audit it cannot reconstruct,
+      and what the data-quality page needs to tell a new problem from a long-standing one.
 - [ ] `P3` **Expose topic progression events.** Provide the session/date/status observations
       needed for an all-topics student timeline, while distinguishing observed transitions
       from inferred continuous progress. The initial all-topic view may need pagination or a
@@ -845,8 +1010,9 @@ Items remain in priority order within each group.
       work above can express "my centers".
 - [x] `P2` Added topic statistics, list filtering/sorting, the reports list route, and the
       related API contracts.
-- [ ] `P3` **Add instructor and `finalized` filters to the reports list.** The finalized
-      filter also provides the outstanding-report follow-up view.
+- [ ] `P3` **Add a `finalized` filter to the reports list**, for the outstanding-report
+      follow-up view. `?instructor=` landed with the trends work, so the chart and the table
+      can already be narrowed to the same person.
 - [x] `P2` Decided that `student_notes` are restricted and excluded from the reports list.
 - [ ] `P3` **Build the prompt-driven agent for niche statistics.** It must read only a
       pre-projected, permission-scoped surface and account for domain traps such as a day not
@@ -881,32 +1047,38 @@ Items remain in priority order within each group.
 - [ ] `P2` **Add a toggleable center-distribution bar chart above the student and instructor
       lists.** The button should open and close the chart without replacing the paged table,
       reuse the active center/search/filter state, label counts clearly, and provide an
-      accessible table or equivalent text summary. Depends on the grouped distribution API
-      data and a decision on how people associated with multiple centers are counted.
+      accessible table or equivalent text summary. The API is ready:
+      `/api/students/distribution` and `/api/instructors/distribution` take the list's own
+      filter state unchanged. Label `counted` against `total` — an instructor at two centers
+      is one person and two bars.
 - [ ] `P2` **Add a toggleable report-volume bar chart above the reports list.** It should be
       open by default, show sessions grouped over the selected date range, and update when the
-      existing date filters change. Default to the latest 30 days of imported sessions rather
-      than today's calendar month; preserve the table's paging and keep the bucket interval
-      readable as the range expands. Depends on a date-bucket aggregation endpoint.
-- [ ] `P2` **Add Home activity trend charts.** Start with monthly sessions, distinct students,
-      pages, and finalized/unfinalized reports; allow the initial range to expand from one to
-      three months. Include loading, empty, error, tooltip, and accessible table states.
+      existing date filters change. `/api/reports/trends` is ready and defaults to the latest
+      30 days of imported sessions; pass `?interval=week|month` as the range widens, and dim
+      or annotate the buckets it marks `partial`. Preserve the table's paging.
+- [ ] `P2` **Add Home activity trend charts** on `/api/home/trends`. Monthly sessions,
+      distinct students, pages and unfinalized reports; expanding one month to three is a
+      `?date_from=`. Include loading, empty, error, tooltip, and accessible table states.
+      ⚠️ Do not total the students column — it is distinct per bucket, not across them.
 - [ ] `P2` **Add center comparison charts.** Show student and instructor distributions by
       center above the relevant list pages, with each person counted once for every center
       they appear in. Keep the chart toggleable and preserve the paged list; label the result
-      as center appearances rather than program-wide unique people.
+      as center appearances rather than program-wide unique people — the response carries
+      both `counted` and `total` so the difference can be shown rather than hidden.
 - [ ] `P2` **Add a student attendance heatmap.** Use a GitHub-contribution-style calendar where
       cell intensity represents sessions per day over a selectable period. Use
       `attendance_reports` for the day axis, preserve the distinction between days and sessions,
       and provide exact session counts in tooltips and an accessible table summary.
-- [ ] `P2` **Add instructor workload charts.** Provide a toggle between sessions, distinct
-      students, and pages, with an eventual option to compare all three trends. Support time
-      ranges and center/instructor filters; clearly label page totals where co-teaching causes
-      full-credit duplication.
-- [ ] `P3` **Add data-quality monitoring.** Provide warning cards and a drill-down table for
-      missing or anomalous report data, unfinalized reports, and ambiguous imports. It should
-      link to affected reports where possible and distinguish current-state checks from a
-      historical import audit.
+- [ ] `P2` **Add instructor workload charts** on `/api/instructors/trends`. Toggle between
+      sessions, distinct students and pages, with an eventual option to compare all three.
+      ⚠️ Label the pages column: a co-taught session credits its pages in full to each
+      instructor, so the figure answers "work in sessions I ran" and is not summable across
+      people. Comparing several instructors as separate series needs a different endpoint.
+- [ ] `P3` **Add data-quality monitoring** on `/api/reports/quality`. Warning cards per
+      check, and a drill-down that links into the reports list once it has a `finalized`
+      filter — the endpoint returns counts only, deliberately, because every row behind them
+      is about a named child. Every check there is current state; the historical import audit
+      waits on `import_runs`.
 - [ ] `P3` **Add an all-topics student progression timeline.** Start with every topic and its
       observed status/date events, but keep the presentation replaceable with a selected-topic
       or filtered view if the all-topic timeline becomes unreadable or too large. Do not imply
@@ -929,9 +1101,14 @@ Items remain in priority order within each group.
 
 ### Visualization implementation order
 
-1. Center comparison charts, using the existing center metrics foundation.
-2. Report-volume chart and the supporting date-bucket aggregation.
-3. Unfinalized-report follow-up and data-quality monitoring foundations.
+**The API side of all of these is built** — see *Chart data*. What remains below is the
+frontend, which has no charting library yet: three runtime dependencies, and the only SVG
+in the codebase is `shell/Icons.tsx`. Picking hand-rolled SVG or a dependency is the first
+decision, and `tests/styles/contrast.test.ts` needs a line for any new colour pairing.
+
+1. Center comparison charts, on `/api/{students,instructors}/distribution`.
+2. Report-volume chart, on `/api/reports/trends`.
+3. Unfinalized-report follow-up and data-quality monitoring, on `/api/reports/quality`.
 4. Student attendance heatmap using sessions per day.
 5. Instructor workload charts with metric toggles.
 6. Home activity trends, initially monthly with a possible three-month range.

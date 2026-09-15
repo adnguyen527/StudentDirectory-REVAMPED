@@ -1,8 +1,9 @@
 from flask import Blueprint, jsonify, request
 
-from models import Instructor
+from models import DigitalWorkoutPlan, Instructor
 from models.instructor import FILTERABLE, SORTABLE
-from routes import filtering, pagination, sorting
+from models.trends import series
+from routes import filtering, pagination, sorting, trends
 from routes.serialization import serialize
 
 instructors_bp = Blueprint('instructors', __name__, url_prefix='/api')
@@ -47,6 +48,73 @@ def get_instructors():
     return jsonify(
         pagination.envelope('instructors', instructors, total, limit, offset)
     ), 200
+
+
+@instructors_bp.route('/instructors/trends', methods=['GET'])
+def get_instructor_trends():
+    """Workload over time -- sessions, distinct students and pages per bucket.
+
+    ?instructor= is repeatable and narrows to those people's sessions; ?center= narrows to
+    where the sessions happened. Neither given is the whole program, as on every list route.
+
+    Read from `dwp_reports` rather than the `instructors` aggregate, which is all-time and
+    so cannot answer a period at all.
+
+    ⚠️ **Pages are credited, not split.** A co-taught session's pages count in full for each
+    instructor on it -- 2,563 of 29,382 sessions have more than one. That is the right answer
+    to "how much work happened in sessions I ran", and it means two single-instructor
+    requests added together overshoot the real total: across the program the same arithmetic
+    gives 168,623 pages against the 153,360 recorded. Label the column, do not sum it.
+
+    ⚠️ `students` is distinct within a bucket and does not sum across buckets.
+
+    One instructor over time, or a filtered selection as one line. Comparing several
+    instructors as separate series is a different response shape and is not this endpoint.
+    """
+    interval, start, end, error = trends.parse(
+        request.args, DigitalWorkoutPlan.latest_session_date()
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    centers = request.args.getlist('center')
+    instructors = request.args.getlist('instructor')
+
+    buckets = [] if start is None else series(
+        DigitalWorkoutPlan.criteria(None, centers, instructors, {'date': (start, end)}),
+        start, end, interval,
+    )
+
+    return jsonify(trends.envelope(
+        interval, start, end, buckets, ('sessions', 'students', 'pages_completed'),
+        centers=centers, instructors=instructors,
+    )), 200
+
+
+@instructors_bp.route('/instructors/distribution', methods=['GET'])
+def get_instructor_distribution():
+    """How the instructors this list would show are spread across centers.
+
+    The same collection and the same filters as /api/instructors, so the bars reconcile
+    with the table beneath them -- see /api/students/distribution, which says why this is
+    not a slice of /api/centers/metrics.
+
+    ⚠️ **The bars do not sum to `total`.** 11 of 103 instructors work at more than one
+    center and appear under each: one person, two bars. `counted` is the sum of the bars
+    and `total` is the roster, and the page has to label the difference rather than let it
+    read as an error. On /api/students/distribution the two are equal, because a student
+    belongs to exactly one center -- see models/filters.py.
+    """
+    ranges, error = filtering.parse(request.args, FILTERABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
+    centers = request.args.getlist('center')
+
+    return jsonify({
+        'centers': sorted({name for name in centers if name}),
+        **Instructor.distribution(request.args.get('query'), centers, ranges),
+    }), 200
 
 
 @instructors_bp.route('/instructors/search', methods=['GET'])

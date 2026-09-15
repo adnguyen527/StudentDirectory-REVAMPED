@@ -3,6 +3,7 @@ import re
 from pymongo import ASCENDING, DESCENDING
 
 from database import db
+from models.distribution import by_center
 from models.filters import center_criteria, range_criteria
 from models.sorting import build_order
 
@@ -105,9 +106,26 @@ class Instructor:
         return documents, collection.count_documents(criteria)
 
     @staticmethod
+    def _name_criteria(query):
+        # re.escape: the query reaches $regex directly -- see Student._name_criteria.
+        return {'instructor_name': {'$regex': re.escape(query), '$options': 'i'}}
+
+    @staticmethod
+    def criteria(query=None, centers=None, ranges=None):
+        """The match every view of this collection shares -- as Student.criteria.
+
+        One spelling, because the center bar chart above the list reconciles with the list
+        only while the two match identically.
+        """
+        criteria = {**center_criteria(centers), **range_criteria(ranges, FILTERABLE)}
+        if query:
+            criteria.update(Instructor._name_criteria(query))
+        return criteria
+
+    @staticmethod
     def find_all(limit, offset=0, centers=None, sort=None, direction=None, ranges=None):
         return Instructor._page(
-            {**center_criteria(centers), **range_criteria(ranges, FILTERABLE)},
+            Instructor.criteria(None, centers, ranges),
             limit,
             offset,
             sort_order(sort, direction),
@@ -120,13 +138,25 @@ class Instructor:
 
     @staticmethod
     def search(query, limit, offset=0, centers=None, sort=None, direction=None, ranges=None):
-        # re.escape: the query reaches $regex directly -- see Student._name_criteria.
-        criteria = {
-            'instructor_name': {'$regex': re.escape(query), '$options': 'i'},
-            **center_criteria(centers),
-            **range_criteria(ranges, FILTERABLE),
-        }
-        return Instructor._page(criteria, limit, offset, sort_order(sort, direction))
+        return Instructor._page(
+            Instructor.criteria(query, centers, ranges),
+            limit,
+            offset,
+            sort_order(sort, direction),
+        )
+
+    @staticmethod
+    def distribution(query=None, centers=None, ranges=None):
+        """How the instructors this list would show are spread across centers.
+
+        ⚠️ The bars do not sum to the roster. 11 of 103 instructors work at more than one
+        center and appear under each -- one person counted twice, which is the honest
+        answer to "how many instructors are at each center" and the wrong answer to "how
+        many instructors are there". `counted` against `total` is where the page says so.
+        """
+        return by_center(
+            Instructor._collection(), Instructor.criteria(query, centers, ranges), centers
+        )
 
     @staticmethod
     def center_names():

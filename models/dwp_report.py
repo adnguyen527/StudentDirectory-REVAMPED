@@ -5,7 +5,7 @@ from bson.errors import InvalidId
 from pymongo import ASCENDING, DESCENDING
 
 from database import db
-from models.filters import center_criteria, range_criteria
+from models.filters import center_criteria, instructor_criteria, range_criteria
 from models.sorting import build_order
 
 
@@ -66,6 +66,18 @@ FILTERABLE = {'date': ('date', 'date')}
 # The centers on a report are a bare list of strings, not the [{name, sessions}] students
 # and instructors carry -- see ingestion/import_reports.py, parse_center.
 CENTER_FIELD = 'centers'
+
+# What identifies a session in the source data, and therefore what an import writes on.
+# `row_hash` answers only "did this row change?"; this answers "which row is it".
+#
+# It lives here with the collection's other contracts, and ingestion/import_reports.py
+# imports it rather than spelling it again -- the importer and anything checking its work
+# have to mean the same four fields or the check is of a different key than the one used.
+#
+# ⚠️ Not unique: four student-days carry two rows each. That is why _id stays the handle
+# the URL carries, why it cannot break a sort tie above, and why models/quality.py can find
+# the collisions by grouping on it.
+NATURAL_KEY = ('account_id', 'student_name', 'date', 'session_start')
 
 
 def sort_order(sort=None, direction=None):
@@ -140,26 +152,37 @@ class DigitalWorkoutPlan:
         return {'student_name': {'$regex': re.escape(query), '$options': 'i'}}
 
     @staticmethod
-    def find_all(limit, offset=0, centers=None, sort=None, direction=None, ranges=None):
+    def criteria(query=None, centers=None, instructors=None, ranges=None):
+        """The match every view of this collection shares -- list, count and trends.
+
+        One spelling, as Student.criteria: the report-volume chart sits directly above the
+        reports table and is read as a picture of it, which holds only while both are the
+        same query.
+
+        Different keys, so the criteria merge into one AND -- every filter narrows.
+        """
+        return {
+            **(DigitalWorkoutPlan._name_criteria(query) if query else {}),
+            **center_criteria(centers, CENTER_FIELD),
+            **instructor_criteria(instructors),
+            **range_criteria(ranges, FILTERABLE),
+        }
+
+    @staticmethod
+    def find_all(limit, offset=0, centers=None, sort=None, direction=None, ranges=None,
+                 instructors=None):
         return DigitalWorkoutPlan._page(
-            {
-                **center_criteria(centers, CENTER_FIELD),
-                **range_criteria(ranges, FILTERABLE),
-            },
+            DigitalWorkoutPlan.criteria(None, centers, instructors, ranges),
             limit,
             offset,
             sort_order(sort, direction),
         )
 
     @staticmethod
-    def search(query, limit, offset=0, centers=None, sort=None, direction=None, ranges=None):
-        # Different keys, so the criteria merge into one AND -- every filter narrows.
+    def search(query, limit, offset=0, centers=None, sort=None, direction=None, ranges=None,
+               instructors=None):
         return DigitalWorkoutPlan._page(
-            {
-                **DigitalWorkoutPlan._name_criteria(query),
-                **center_criteria(centers, CENTER_FIELD),
-                **range_criteria(ranges, FILTERABLE),
-            },
+            DigitalWorkoutPlan.criteria(query, centers, instructors, ranges),
             limit,
             offset,
             sort_order(sort, direction),
@@ -168,3 +191,25 @@ class DigitalWorkoutPlan:
     @staticmethod
     def count_all():
         return DigitalWorkoutPlan._collection().count_documents({})
+
+    @staticmethod
+    def latest_session_date():
+        """The newest session in `dwp_reports`, or None on an empty collection.
+
+        ⚠️ Not Student.latest_session_date(), and not a duplicate of it. That one reads
+        `students.last_session_date` and anchors the students list's own date presets; this
+        one anchors a window over `dwp_reports` itself. `students` is a *built* collection,
+        so between an import and a rebuild it lags -- and a chart over `dwp_reports`
+        anchored on the stale figure quietly loses its newest days off the right edge,
+        which is the whole reason nothing date-scoped reads a built aggregate. Each anchors
+        its own collection's date column, and they are allowed to differ.
+
+        One indexed field, read through the `date` index.
+        """
+        newest = list(
+            DigitalWorkoutPlan._collection()
+            .find({}, {'date': 1, '_id': 0})
+            .sort([('date', DESCENDING)])
+            .limit(1)
+        )
+        return newest[0]['date'] if newest else None

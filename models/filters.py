@@ -10,14 +10,39 @@ not, which is what the `field` argument below is for.
 # the criterion has to reach through the array into a subfield.
 CENTER_FIELD = 'centers.name'
 
+# Where the instructor names sit on dwp_reports: a bare list of strings, so the criterion
+# matches the array itself rather than a subfield of it.
+INSTRUCTOR_FIELD = 'instructors'
+
+
+def any_of(values, field):
+    """`{field: {'$in': [...]}}` for a multi-select, or no restriction when none are given.
+
+    The mechanism under every multi-select filter here, extracted because the centers and
+    the instructors filters are the same query with a different field. `$in` against an
+    array field matches if any element does, which is what lets one criterion serve a bare
+    list of strings and a list of subdocuments alike -- only `field` changes.
+
+    Blank values are dropped first, so `?center=` means "no center filter" rather than
+    "centers named empty string". Without that, a truncated URL answers 200 with an empty
+    list, which reads as "no students here" -- and `?query=` already ignores its own empty
+    value, so the two would disagree.
+
+    An unrecognised value simply matches nothing. That looks like the `sort` allowlist the
+    list routes are meant to grow, which answers 400 on a bad value, but it is the opposite
+    case: "no rows at Xyz" is a correct answer to a filter, while `sort=bogus` has no
+    correct answer. Do not "fix" this into a 400.
+    """
+    wanted = [value for value in (values or []) if value]
+    return {field: {'$in': wanted}} if wanted else {}
+
 
 def center_criteria(centers, field=CENTER_FIELD):
     """Rows at any of these centers, or no restriction when none are given.
 
     `field` names where the center lives, because the collections do not agree. Students
     and instructors carry `[{name, sessions}]` and take the default; `dwp_reports` carries
-    a bare list of strings and passes `centers`. The criterion is otherwise identical --
-    `$in` against an array field matches if any element does, either way.
+    a bare list of strings and passes `centers`. The criterion is otherwise identical.
 
     The filter is multi-select, so several names are a union rather than an intersection.
     On students that union is also a partition -- every student belongs to exactly one
@@ -25,18 +50,28 @@ def center_criteria(centers, field=CENTER_FIELD):
     answers two centers without being two people, and the per-center counts deliberately
     sum to more than the roster.
 
-    An unrecognised name simply matches nothing. That looks like the `sort` allowlist the
-    list routes are meant to grow, which answers 400 on a bad value, but it is the opposite
-    case: "no rows at Xyz" is a correct answer to a filter, while `sort=bogus` has no
-    correct answer. Do not "fix" this into a 400.
-
-    Blank values are dropped first, so `?center=` means "no center filter" rather than
-    "centers named empty string". Without that, a truncated URL answers 200 with an empty
-    list, which reads as "no students here" -- and `?query=` already ignores its own empty
-    value, so the two would disagree.
+    ⚠️ This matches a *document* if any of its centers matches, which is not the same as
+    selecting those centers. An aggregation that `$unwind`s `centers` after this has to
+    match again afterwards or it emits the centers the caller filtered out -- see
+    models/distribution.py, which is the one place that matters.
     """
-    wanted = [name for name in (centers or []) if name]
-    return {field: {'$in': wanted}} if wanted else {}
+    return any_of(centers, field)
+
+
+def instructor_criteria(instructors, field=INSTRUCTOR_FIELD):
+    """Sessions taught by any of these instructors.
+
+    The same multi-select shape as the center filter, against `dwp_reports.instructors`.
+    A co-taught session carries several names and matches on any of them.
+
+    ⚠️ There is no index on `instructors`, so this must always ride a bounded `date` --
+    which the trends routes guarantee by resolving a default range before they query.
+
+    ⚠️ Pages are credited, not split. A co-taught session is one session either way, but
+    its pages count in full for each instructor on it, so two single-instructor requests
+    added together overshoot the real total -- models/center.py has the figures.
+    """
+    return any_of(instructors, field)
 
 
 def range_criteria(bounds, filterable):

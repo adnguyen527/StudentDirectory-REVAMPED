@@ -3,6 +3,7 @@ import re
 from pymongo import ASCENDING, DESCENDING
 
 from database import db
+from models.distribution import by_center
 from models.filters import center_criteria, range_criteria
 from models.sorting import build_order
 
@@ -90,9 +91,27 @@ class Student:
         return {'student_name': {'$regex': re.escape(query), '$options': 'i'}}
 
     @staticmethod
+    def criteria(query=None, centers=None, ranges=None):
+        """The match every view of this collection shares -- list, count and distribution.
+
+        One spelling, and that is the point rather than tidiness: the center bar chart
+        above the list exists to reconcile with the list, which holds only while its match
+        is the same match. A second spelling would agree today and diverge the first time
+        a column is added to FILTERABLE, with nothing failing to say so.
+
+        Different keys, so the criteria merge into one AND -- every filter narrows.
+        `_name_criteria` keys on student_name, `center_criteria` on centers.name, and
+        `range_criteria` on the FILTERABLE fields, none of which collide.
+        """
+        criteria = {**center_criteria(centers), **range_criteria(ranges, FILTERABLE)}
+        if query:
+            criteria.update(Student._name_criteria(query))
+        return criteria
+
+    @staticmethod
     def find_all(limit, offset=0, centers=None, sort=None, direction=None, ranges=None):
         return Student._page(
-            {**center_criteria(centers), **range_criteria(ranges, FILTERABLE)},
+            Student.criteria(None, centers, ranges),
             limit,
             offset,
             sort_order(sort, direction),
@@ -111,8 +130,7 @@ class Student:
         return Student._page(
             {
                 'account_id': account_id,
-                **center_criteria(centers),
-                **range_criteria(ranges, FILTERABLE),
+                **Student.criteria(None, centers, ranges),
             },
             limit,
             offset,
@@ -121,16 +139,23 @@ class Student:
 
     @staticmethod
     def search(query, limit, offset=0, centers=None, sort=None, direction=None, ranges=None):
-        # Different keys, so the criteria merge into one AND -- every filter narrows.
         return Student._page(
-            {
-                **Student._name_criteria(query),
-                **center_criteria(centers),
-                **range_criteria(ranges, FILTERABLE),
-            },
+            Student.criteria(query, centers, ranges),
             limit,
             offset,
             sort_order(sort, direction),
+        )
+
+    @staticmethod
+    def distribution(query=None, centers=None, ranges=None):
+        """How the students this list would show are spread across centers.
+
+        Reads `students` and not `dwp_reports`, through the same criteria the list uses,
+        so the bars and the table beneath them are the same population counted the same
+        way. /api/centers/metrics answers a different question off a different collection.
+        """
+        return by_center(
+            Student._collection(), Student.criteria(query, centers, ranges), centers
         )
 
     @staticmethod

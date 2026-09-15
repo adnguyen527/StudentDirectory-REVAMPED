@@ -314,7 +314,10 @@ def row_hash(doc):
 # is two completed reports for one session by two instructors, differing in their notes,
 # assessments and topic statuses. No key built from stable fields separates that last
 # pair, so _upsert refuses to guess between them rather than pretending it can.
-NATURAL_KEY = ('account_id', 'student_name', 'date', 'session_start')
+# Defined in models/dwp_report.py beside the collection's other contracts, and imported
+# rather than spelled again: what this writes on and what models/quality.py looks for
+# collisions in have to be the same four fields.
+from models.dwp_report import NATURAL_KEY  # noqa: E402 -- reads with the note above
 
 
 def _key_fields(collection_name):

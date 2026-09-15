@@ -77,6 +77,40 @@ def get_students():
     ), 200
 
 
+@students_bp.route('/students/distribution', methods=['GET'])
+def get_student_distribution():
+    """How the students this list would show are spread across centers.
+
+    Backs the bar chart above the list, and takes the list's own filters -- ?query=,
+    ?center= and the FILTERABLE ranges, spelled exactly as /api/students spells them -- so
+    the chart and the table are one population counted once. That is why this is not a
+    slice of /api/centers/metrics, whose figures come from `dwp_reports` and answer what
+    happened at a center in a period rather than how these rows divide up.
+
+    Unpaged and unsortable: the row count is bounded by the number of centers, and the
+    order is the name order /api/centers already serves its checkboxes in.
+
+    ?account_id= is deliberately not accepted. The list offers it to show one household's
+    siblings, and a bar chart over two children is noise.
+
+    A static rule beside /api/students/<student_key>, which Werkzeug ranks above the
+    converter rule regardless of registration order -- as /api/students/search already
+    does. Do not "fix" the ordering of these three.
+    """
+    ranges, error = filtering.parse(request.args, FILTERABLE)
+    if error:
+        return jsonify({'error': error}), 400
+
+    centers = request.args.getlist('center')
+
+    return jsonify({
+        # Echoed as /api/centers/metrics echoes its selection: the response outlives the
+        # request that asked for it, in a cache or a screenshot.
+        'centers': sorted({name for name in centers if name}),
+        **Student.distribution(request.args.get('query'), centers, ranges),
+    }), 200
+
+
 @students_bp.route('/students/search', methods=['GET'])
 def search_students():
     query = request.args.get('q', '')

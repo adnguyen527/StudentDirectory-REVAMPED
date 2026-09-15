@@ -1,8 +1,10 @@
 """Query layer: the students, instructors, dwp_reports and attendance_reports collections."""
 
+from datetime import datetime
+
 import pytest
 
-from models import Attendance, DigitalWorkoutPlan, Instructor, Student
+from models import Attendance, DigitalWorkoutPlan, Instructor, Student, trends
 from tests.sample_data import (
     ACCOUNT_NGUYEN,
     ACCOUNT_TAN,
@@ -439,3 +441,102 @@ def test_students_and_reports_agree_on_session_counts(seeded_db):
         assert student['total_pages_completed'] == sum(
             r.get('pages_completed') or 0 for r in reports
         )
+
+
+class TestTrendBuckets:
+    """models/trends.py's calendar arithmetic, with no database anywhere near it.
+
+    These are the rules the aggregation's `$dateToString` keys have to agree with. Pure
+    functions, so a wrong week boundary fails here rather than three layers up as a bar
+    drawn in the wrong place.
+    """
+
+    def test_the_week_key_is_the_iso_week_not_the_calendar_year(self):
+        """2025-12-29 is a Monday in ISO week 1 of 2026, and the key has to say 2026.
+
+        The classic off-by-one: '%Y-W%V' would spell this 2025-W01 and sort it a year
+        early. '%G' is the ISO week-year, which is why the format is not '%Y'.
+        """
+        assert trends.bucket_key(datetime(2025, 12, 29), 'week') == '2026-W01'
+
+    def test_the_week_starts_on_monday(self):
+        """2026-02-01 is a Sunday, so it belongs to the week that began in January."""
+        start = trends.bucket_start(datetime(2026, 2, 1), 'week')
+        assert start == datetime(2026, 1, 26)
+        assert trends.bucket_key(datetime(2026, 2, 1), 'week') == '2026-W05'
+
+    def test_the_week_number_is_padded_so_the_keys_sort(self):
+        """Lexicographic order has to be chronological: buckets are matched by this key."""
+        assert trends.bucket_key(datetime(2026, 1, 29), 'week') == '2026-W05'
+        assert '2026-W05' < '2026-W10' < '2026-W53' < '2027-W01'
+
+    def test_a_bucket_ends_on_its_last_day_not_the_next_one(self):
+        """Inclusive, as every other date bound in this codebase is."""
+        assert trends.bucket_end(datetime(2026, 2, 1), 'month') == datetime(2026, 2, 28)
+        assert trends.bucket_end(datetime(2026, 1, 26), 'week') == datetime(2026, 2, 1)
+        assert trends.bucket_end(datetime(2026, 3, 7), 'day') == datetime(2026, 3, 7)
+
+    def test_months_roll_over_the_year(self):
+        assert trends.shift(datetime(2026, 12, 1), 'month', 1) == datetime(2027, 1, 1)
+        assert trends.shift(datetime(2026, 1, 1), 'month', -1) == datetime(2025, 12, 1)
+
+    def test_the_axis_is_gapless(self):
+        """A day nobody attended is a zero, not a missing bucket -- charts need the point."""
+        axis = trends.axis(datetime(2026, 3, 7), datetime(2026, 3, 14), 'day')
+        assert len(axis) == 8
+        assert [bucket['key'] for bucket in axis] == sorted(bucket['key'] for bucket in axis)
+
+    def test_a_single_day_is_one_bucket(self):
+        axis = trends.axis(datetime(2026, 3, 7), datetime(2026, 3, 7), 'day')
+        assert len(axis) == 1 and axis[0]['partial'] is False
+
+    def test_an_edge_bucket_the_range_only_part_covers_is_marked_partial(self):
+        """The bar is short because the window is, not because the center went quiet."""
+        axis = trends.axis(datetime(2026, 2, 1), datetime(2026, 3, 14), 'week')
+        assert axis[0]['partial'] is True       # the week began 2026-01-26
+        assert axis[-1]['partial'] is True      # 2026-03-14 is a Saturday
+        assert all(not bucket['partial'] for bucket in axis[1:-1])
+
+    def test_the_bucket_count_agrees_with_the_axis_it_describes(self):
+        """It exists to refuse a range without building it, so it must not disagree."""
+        for interval, end in (('day', datetime(2026, 5, 1)),
+                              ('week', datetime(2026, 8, 1)),
+                              ('month', datetime(2028, 1, 1))):
+            start = datetime(2026, 2, 3)
+            assert trends.bucket_count(start, end, interval) == len(
+                trends.axis(start, end, interval)
+            )
+
+    def test_a_range_wider_than_the_cap_is_refused_rather_than_truncated(self):
+        _, _, error = trends.resolve_range(
+            datetime(2000, 1, 1), datetime(2026, 3, 14), 'day', None
+        )
+        assert error and str(trends.MAX_BUCKETS) in error
+
+    def test_the_default_window_is_as_wide_as_the_interval_needs(self):
+        """A flat "last 30 days" would give the monthly chart two bars."""
+        anchor = datetime(2026, 3, 14)
+        for interval, expected in (('day', 30), ('week', 12), ('month', 12)):
+            start, end, error = trends.resolve_range(None, None, interval, anchor)
+            assert error is None and end == anchor
+            assert len(trends.axis(start, end, interval)) == expected
+
+    def test_only_a_low_bound_runs_to_the_anchor(self):
+        start, end, _ = trends.resolve_range(datetime(2026, 3, 1), None, 'day',
+                                             datetime(2026, 3, 14))
+        assert (start, end) == (datetime(2026, 3, 1), datetime(2026, 3, 14))
+
+    def test_only_a_high_bound_counts_back_from_itself(self):
+        start, end, _ = trends.resolve_range(None, datetime(2026, 3, 14), 'month',
+                                             datetime(2026, 9, 1))
+        assert end == datetime(2026, 3, 14)
+        assert start == datetime(2025, 4, 1)
+
+    def test_both_bounds_are_used_exactly_as_asked(self):
+        """Never snapped outward: the table below the chart is filtered by these dates."""
+        low, high = datetime(2026, 2, 5), datetime(2026, 3, 9)
+        assert trends.resolve_range(low, high, 'month', None)[:2] == (low, high)
+
+    def test_an_empty_collection_has_no_window_rather_than_today(self):
+        """The data ends well before the calendar does; today is not a usable anchor."""
+        assert trends.resolve_range(None, None, 'day', None) == (None, None, None)

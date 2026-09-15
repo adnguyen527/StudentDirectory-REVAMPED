@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify, request
 from models import Student, Instructor, DigitalWorkoutPlan, Attendance, Center
+from models.trends import series
+from routes import trends
 from routes.serialization import serialize
 
 metrics_bp = Blueprint('metrics', __name__, url_prefix='/api')
@@ -53,6 +55,47 @@ def get_center_metrics():
         'centers': sorted({name for name in centers if name}),
         'totals': serialize(totals),
     }), 200
+
+
+@metrics_bp.route('/home/trends', methods=['GET'])
+def get_home_trends():
+    """Monthly activity across the program, for the Home page's trend charts.
+
+    Sessions, distinct students, pages completed and unfinalized reports per month. Monthly
+    by default where the other two trend routes are daily, because this is the view a
+    manager opens on -- and `default_buckets` is per interval, so asking for months gets a
+    year of them rather than a month of days. Widening it from one month to three is a
+    `?date_from=`, with no change to the response.
+
+    ⚠️ `students` is distinct *within* a month and does NOT sum across months. Someone who
+    came in February and in March is counted in both, which is what a trend line means and
+    is wrong for anyone totalling the column.
+
+    No `finalized` count: it is `sessions - unfinalized`, and the unfinalized side is the
+    actionable one -- the reports a manager can still chase.
+
+    Named for the page rather than for a resource, which the rest of this API does not do.
+    Kept because the Home page is the only caller and the README calls it home activity;
+    worth renaming if a second reader appears.
+    """
+    interval, start, end, error = trends.parse(
+        request.args, DigitalWorkoutPlan.latest_session_date(), default_interval='month'
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    centers = request.args.getlist('center')
+
+    buckets = [] if start is None else series(
+        DigitalWorkoutPlan.criteria(None, centers, None, {'date': (start, end)}),
+        start, end, interval,
+    )
+
+    return jsonify(trends.envelope(
+        interval, start, end, buckets,
+        ('sessions', 'students', 'pages_completed', 'unfinalized'),
+        centers=centers,
+    )), 200
 
 
 @metrics_bp.route('/metrics', methods=['GET'])

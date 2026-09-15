@@ -7,6 +7,7 @@ import pytest
 from bson import ObjectId
 
 from config import DEFAULT_ORIGINS, parse_bool, parse_origins, parse_port
+from models import trends
 from tests.conftest import TEST_API_KEY
 from tests.sample_data import (
     ACCOUNT_NGUYEN,
@@ -1554,3 +1555,590 @@ class TestParseOrigins:
 
     def test_wildcard_is_available_but_must_be_explicit(self):
         assert parse_origins('*') == '*'
+
+
+def bars(payload):
+    """The distribution as {center: count} -- the shape the assertions below read."""
+    return {row['center']: row['count'] for row in payload['distribution']}
+
+
+def keyed(payload):
+    """Buckets as {key: bucket}, for asserting on one without indexing by position."""
+    return {bucket['key']: bucket for bucket in payload['buckets']}
+
+
+class TestStudentDistribution:
+    """GET /api/students/distribution -- the center bar chart above the students list."""
+
+    def get(self, client, **params):
+        response = client.get('/api/students/distribution', query_string=params)
+        assert response.status_code == 200
+        return response.get_json()
+
+    def test_counts_the_students_at_each_center(self, client):
+        assert bars(self.get(client)) == {'Eastside': 1, 'Westside': 2}
+
+    def test_the_bars_account_for_every_row_the_list_would_show(self, client):
+        """⚠️ The invariant the whole design rests on.
+
+        This chart reads the `students` collection through the list's own criteria rather
+        than taking a slice of /api/centers/metrics, so that the bars and the table
+        underneath are one population counted once. If this ever fails, the page is showing
+        two different answers to the same question.
+        """
+        payload = self.get(client)
+        assert payload['counted'] + payload['no_center'] == payload['total'] == 3
+
+    def test_the_bars_are_ordered_by_name_not_by_count(self, client):
+        """So they hold position as filters are ticked -- /api/centers sorts for the same
+        reason. Westside is the taller bar, and still comes second."""
+        assert [row['center'] for row in self.get(client)['distribution']] == [
+            'Eastside', 'Westside'
+        ]
+
+    def test_a_center_filter_narrows_it(self, client):
+        payload = self.get(client, center='Westside')
+        assert bars(payload) == {'Westside': 2}
+        assert payload['total'] == 2
+
+    def test_a_search_narrows_it(self, client):
+        """?query= is the list's search, spelled the same way, so the chart follows it."""
+        assert bars(self.get(client, query='Nguyen')) == {'Westside': 2}
+
+    def test_a_range_filter_narrows_it(self, client):
+        """The FILTERABLE columns too -- only Anthony has two sessions."""
+        assert bars(self.get(client, sessions_min=2)) == {'Westside': 1}
+
+    def test_an_unknown_center_is_an_empty_chart_not_an_error(self, client):
+        """"Nothing at Xyz" is a correct answer to a filter -- see models/filters.py."""
+        payload = self.get(client, center='Xyz')
+        assert payload['distribution'] == [] and payload['total'] == 0
+
+    def test_a_student_with_no_center_is_counted_apart_rather_than_dropped(self, client,
+                                                                          seeded_db):
+        """$unwind would discard the row silently; preserveNullAndEmptyArrays keeps it."""
+        seeded_db['students'].insert_one({
+            'student_key': f'{ACCOUNT_TAN}_nikhil-rao',
+            'account_id': ACCOUNT_TAN,
+            'student_name': 'Nikhil Rao',
+            'total_sessions': 1,
+            'centers': [],
+        })
+
+        payload = self.get(client)
+        assert payload['total'] == 4
+        assert payload['no_center'] == 1
+        assert bars(payload) == {'Eastside': 1, 'Westside': 2}
+        assert payload['counted'] + payload['no_center'] == payload['total']
+
+    def test_a_malformed_bound_is_refused(self, client):
+        assert client.get('/api/students/distribution?sessions_min=abc').status_code == 400
+
+    def test_a_backwards_range_is_refused(self, client):
+        assert client.get(
+            '/api/students/distribution?sessions_min=9&sessions_max=1'
+        ).status_code == 400
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/students/distribution').status_code == 401
+
+
+class TestInstructorDistribution:
+    """GET /api/instructors/distribution -- the same chart above the instructors list."""
+
+    def get(self, client, **params):
+        response = client.get('/api/instructors/distribution', query_string=params)
+        assert response.status_code == 200
+        return response.get_json()
+
+    def test_an_instructor_at_two_centers_is_one_person_and_two_bars(self, client):
+        """⚠️ Where this route differs from the students one, and the page must say so.
+
+        Dana works at both. The bars come to 4 across a roster of 3, and that overshoot is
+        the answer rather than an error -- 11 of 103 do this in the live data.
+        """
+        payload = self.get(client)
+        assert bars(payload) == {'Eastside': 2, 'Westside': 2}
+        assert payload['total'] == 3
+        assert payload['counted'] == 4
+
+    def test_a_center_filter_does_not_leak_the_other_centers_of_who_it_matched(self, client):
+        """⚠️ The regression test for the $match/$unwind trap.
+
+        `center_criteria` selects a *document* if any of its centers matches; $unwind then
+        emits every center on it. Without the second $match in models/distribution.py, Dana
+        matching Westside also draws an Eastside bar -- a center the caller filtered out.
+        """
+        payload = self.get(client, center='Westside')
+        assert bars(payload) == {'Westside': 2}
+        assert 'Eastside' not in bars(payload)
+        assert payload['total'] == 2
+
+    def test_the_bars_never_come_to_less_than_the_roster(self, client):
+        payload = self.get(client)
+        assert payload['counted'] >= payload['total']
+
+    def test_a_search_narrows_it(self, client):
+        """Dana and Marcus share a surname; Sam does not."""
+        payload = self.get(client, query='Reyes')
+        assert bars(payload) == {'Eastside': 1, 'Westside': 2}
+        assert payload['total'] == 2
+
+    def test_a_range_filter_narrows_it(self, client):
+        assert self.get(client, sessions_min=2)['total'] < 3
+
+    def test_an_unknown_center_is_an_empty_chart_not_an_error(self, client):
+        assert self.get(client, center='Xyz')['distribution'] == []
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/instructors/distribution').status_code == 401
+
+
+class TestReportTrends:
+    """GET /api/reports/trends -- the report-volume chart above the reports list."""
+
+    def get(self, client, **params):
+        response = client.get('/api/reports/trends', query_string=params)
+        assert response.status_code == 200
+        return response.get_json()
+
+    def test_counts_the_sessions_in_each_bucket(self, client):
+        buckets = keyed(self.get(client, interval='month',
+                                 date_from='2026-02-01', date_to='2026-03-31'))
+        assert buckets['2026-02']['sessions'] == 1
+        assert buckets['2026-03']['sessions'] == 3
+
+    def test_a_co_taught_session_is_one_session(self, client):
+        """Anthony's 3/14 session has two instructors and is still one row of the table."""
+        buckets = keyed(self.get(client, interval='day',
+                                 date_from='2026-03-14', date_to='2026-03-14'))
+        assert buckets['2026-03-14']['sessions'] == 1
+
+    def test_the_axis_has_no_holes(self, client):
+        """A day nobody attended is a zero. Five of these eight are empty."""
+        payload = self.get(client, interval='day',
+                           date_from='2026-03-07', date_to='2026-03-14')
+        assert len(payload['buckets']) == 8
+        assert sum(bucket['sessions'] for bucket in payload['buckets']) == 3
+        assert sum(1 for bucket in payload['buckets'] if bucket['sessions'] == 0) == 5
+
+    def test_the_week_buckets_are_iso_weeks(self, client):
+        """2026-02-01 is a Sunday, so it lands in the week that began 2026-01-26."""
+        payload = self.get(client, interval='week',
+                           date_from='2026-02-01', date_to='2026-03-14')
+        first = payload['buckets'][0]
+        assert first['key'] == '2026-W05'
+        assert first['start']['$date'].startswith('2026-01-26')
+        assert first['sessions'] == 1
+
+    def test_an_edge_bucket_the_window_only_part_covers_is_marked(self, client):
+        """So the chart can say the bar is short because the window is."""
+        payload = self.get(client, interval='week',
+                           date_from='2026-02-01', date_to='2026-03-14')
+        assert payload['buckets'][0]['partial'] is True
+        assert payload['buckets'][-1]['partial'] is True
+
+    def test_it_draws_volume_and_not_the_rest_of_what_it_computed(self, client):
+        """Pages and distinct students come off the same pass and have readers elsewhere."""
+        bucket = self.get(client, interval='month',
+                          date_from='2026-03-01', date_to='2026-03-31')['buckets'][0]
+        assert 'sessions' in bucket
+        assert 'pages_completed' not in bucket and 'students' not in bucket
+
+    def test_the_window_is_anchored_on_the_reports_not_the_built_aggregate(
+        self, client, seeded_db
+    ):
+        """⚠️ The one test that can tell the two latest_session_date methods apart.
+
+        `students.last_session_date` and `max(dwp_reports.date)` are both 2026-03-14 in the
+        fixtures, so only a report newer than any student's rollup shows which one the
+        window follows. A chart anchored on the built collection would lose these days
+        whenever an import has run and a rebuild has not.
+        """
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_NGUYEN,
+            'student_name': 'Anthony Nguyen',
+            'date': datetime(2026, 4, 1),
+            'centers': ['Westside'],
+            'instructors': ['Marcus Reyes'],
+            'pages_completed': 2,
+        })
+
+        payload = self.get(client, interval='day')
+        assert payload['buckets'][-1]['key'] == '2026-04-01'
+        assert payload['buckets'][-1]['sessions'] == 1
+
+    def test_the_default_window_is_as_wide_as_the_interval_needs(self, client):
+        assert len(self.get(client, interval='day')['buckets']) == 30
+        assert len(self.get(client, interval='month')['buckets']) == 12
+
+    def test_a_center_filter_narrows_it(self, client):
+        payload = keyed(self.get(client, interval='month', center='Eastside',
+                                 date_from='2026-02-01', date_to='2026-03-31'))
+        assert payload['2026-02']['sessions'] == 1
+        assert payload['2026-03']['sessions'] == 0
+
+    def test_an_instructor_filter_narrows_it(self, client):
+        """The filter the reports list grew at the same time, so the table can follow."""
+        payload = keyed(self.get(client, interval='month', instructor='Sam Ortiz',
+                                 date_from='2026-02-01', date_to='2026-03-31'))
+        assert payload['2026-02']['sessions'] == 1
+        assert payload['2026-03']['sessions'] == 0
+
+    def test_a_search_narrows_it(self, client):
+        payload = self.get(client, interval='month', query='Ava',
+                           date_from='2026-03-01', date_to='2026-03-31')
+        assert payload['buckets'][0]['sessions'] == 1
+
+    def test_an_unknown_instructor_is_an_empty_chart_not_an_error(self, client):
+        payload = self.get(client, interval='month', instructor='Nobody At All',
+                           date_from='2026-02-01', date_to='2026-03-31')
+        assert [bucket['sessions'] for bucket in payload['buckets']] == [0, 0]
+
+    def test_it_echoes_the_window_it_answered_for(self, client):
+        """The response outlives the request, and "12 buckets" means nothing alone."""
+        payload = self.get(client, interval='month', center='Westside',
+                           date_from='2026-02-01', date_to='2026-03-31')
+        assert payload['interval'] == 'month'
+        assert payload['range']['start']['$date'].startswith('2026-02-01')
+        assert payload['range']['end']['$date'].startswith('2026-03-31')
+        assert payload['centers'] == ['Westside']
+
+    def test_an_unknown_interval_is_refused(self, client):
+        """An allowlist, as ?sort= is: there is no correct answer to a fortnight."""
+        response = client.get('/api/reports/trends?interval=fortnight')
+        assert response.status_code == 400
+        assert 'day, week, month' in response.get_json()['error']
+
+    def test_a_range_too_wide_to_chart_is_refused_rather_than_truncated(self, client):
+        """A truncated time series reads as a real decline; a truncated page does not."""
+        response = client.get(
+            '/api/reports/trends?interval=day&date_from=2000-01-01&date_to=2026-03-14'
+        )
+        assert response.status_code == 400
+        assert str(trends.MAX_BUCKETS) in response.get_json()['error']
+
+    def test_a_malformed_date_is_refused(self, client):
+        assert client.get('/api/reports/trends?date_from=not-a-date').status_code == 400
+
+    def test_a_backwards_range_is_refused(self, client):
+        assert client.get(
+            '/api/reports/trends?date_from=2026-03-31&date_to=2026-02-01'
+        ).status_code == 400
+
+    def test_an_empty_collection_is_an_empty_chart_and_not_todays_date(self, client,
+                                                                      seeded_db):
+        seeded_db['dwp_reports'].delete_many({})
+        payload = self.get(client, interval='day')
+        assert payload['buckets'] == []
+        assert payload['range'] is None
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/reports/trends').status_code == 401
+
+
+class TestHomeTrends:
+    """GET /api/home/trends -- the Home page's monthly activity charts."""
+
+    def get(self, client, **params):
+        response = client.get('/api/home/trends', query_string=params)
+        assert response.status_code == 200
+        return response.get_json()
+
+    def test_it_is_monthly_without_being_asked(self, client):
+        assert self.get(client)['interval'] == 'month'
+        assert len(self.get(client)['buckets']) == 12
+
+    def test_it_reports_sessions_students_pages_and_the_outstanding_count(self, client):
+        bucket = keyed(self.get(client, date_from='2026-03-01',
+                                date_to='2026-03-31'))['2026-03']
+        assert bucket['sessions'] == 3
+        assert bucket['pages_completed'] == 16
+        assert bucket['unfinalized'] == 3
+
+    def test_pages_are_the_pages_recorded_not_the_pages_credited(self, client):
+        """⚠️ March's co-taught session turned 7 pages, not 14.
+
+        Summing the instructors collection over the same month gives 23 against the 16
+        actually recorded. This counts sessions, where each is one row.
+        """
+        assert keyed(self.get(client, date_from='2026-03-01',
+                              date_to='2026-03-31'))['2026-03']['pages_completed'] == 16
+
+    def test_siblings_count_as_two_students(self, client):
+        """Anthony and Ava share an account. Grouping by the account would say one."""
+        assert keyed(self.get(client, date_from='2026-03-01',
+                              date_to='2026-03-31'))['2026-03']['students'] == 2
+
+    def test_distinct_students_do_not_sum_across_buckets(self, client, seeded_db):
+        """⚠️ Someone active in two months is counted in both, which a trend line means.
+
+        Three students exist; these two months report two each. A reader totalling the
+        column gets four, which is a property of the question rather than a bug -- but it
+        is also what an "optimisation" flattening the nested $group would quietly break.
+        """
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_NGUYEN,
+            'student_name': 'Anthony Nguyen',
+            'date': datetime(2026, 2, 10),
+            'centers': ['Westside'],
+            'instructors': ['Marcus Reyes'],
+            'pages_completed': 1,
+        })
+
+        buckets = keyed(self.get(client, date_from='2026-02-01', date_to='2026-03-31'))
+        assert buckets['2026-02']['students'] == 2
+        assert buckets['2026-03']['students'] == 2
+
+    def test_it_reports_no_finalized_count(self, client):
+        """It is sessions minus unfinalized; two figures that must agree can disagree."""
+        bucket = self.get(client, date_from='2026-03-01',
+                          date_to='2026-03-31')['buckets'][0]
+        assert 'finalized' not in bucket
+
+    def test_a_center_filter_narrows_it(self, client):
+        payload = self.get(client, center='Eastside',
+                           date_from='2026-02-01', date_to='2026-03-31')
+        assert keyed(payload)['2026-02']['sessions'] == 1
+        assert payload['centers'] == ['Eastside']
+
+    def test_widening_to_three_months_does_not_change_the_response(self, client):
+        """The README's "extend one month to three" is a date bound, not a new contract."""
+        one = self.get(client, date_from='2026-03-01', date_to='2026-03-31')
+        three = self.get(client, date_from='2026-01-01', date_to='2026-03-31')
+        assert len(one['buckets']) == 1 and len(three['buckets']) == 3
+        assert set(one['buckets'][0]) == set(three['buckets'][0])
+
+    def test_an_unknown_interval_is_refused(self, client):
+        assert client.get('/api/home/trends?interval=fortnight').status_code == 400
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/home/trends').status_code == 401
+
+
+class TestInstructorTrends:
+    """GET /api/instructors/trends -- the workload chart."""
+
+    def get(self, client, **params):
+        response = client.get('/api/instructors/trends', query_string=params)
+        assert response.status_code == 200
+        return response.get_json()
+
+    def test_it_narrows_to_one_instructors_sessions(self, client):
+        payload = keyed(self.get(client, instructor='Sam Ortiz', interval='month',
+                                 date_from='2026-02-01', date_to='2026-03-31'))
+        assert payload['2026-02']['sessions'] == 1
+        assert payload['2026-03']['sessions'] == 0
+
+    def test_co_taught_pages_are_credited_in_full_to_each_instructor(self, client):
+        """⚠️ Right for "work in sessions I ran", and not summable across instructors.
+
+        Dana taught all three March sessions (16 pages); Marcus only the co-taught 3/14,
+        whose 7 pages are credited to him in full as well. Adding the two answers gives 23
+        against the 16 actually recorded -- the 168,623-against-153,360 trap, now reachable
+        through a query parameter. Label the column; do not total it.
+        """
+        window = dict(interval='month', date_from='2026-03-01', date_to='2026-03-31')
+        dana = keyed(self.get(client, instructor='Dana Reyes', **window))['2026-03']
+        marcus = keyed(self.get(client, instructor='Marcus Reyes', **window))['2026-03']
+
+        assert (dana['sessions'], dana['pages_completed']) == (3, 16)
+        assert (marcus['sessions'], marcus['pages_completed']) == (1, 7)
+        assert dana['pages_completed'] + marcus['pages_completed'] == 23
+
+    def test_several_instructors_are_a_union_and_a_shared_session_counts_once(self, client):
+        """Asking for both is not the same as adding them up.
+
+        Dana's 3 sessions and Marcus's 1 overlap on 3/14, so the union is 3 sessions and
+        the 16 pages actually recorded -- not the 4 and 23 that summing the two separate
+        answers gives. The filter widens the match; it does not count anything twice.
+        """
+        payload = self.get(client, instructor=['Dana Reyes', 'Marcus Reyes'],
+                           interval='month', date_from='2026-03-01', date_to='2026-03-31')
+        assert payload['buckets'][0]['sessions'] == 3
+        assert payload['buckets'][0]['pages_completed'] == 16
+
+    def test_a_center_filter_narrows_it(self, client):
+        payload = keyed(self.get(client, center='Westside', interval='month',
+                                 date_from='2026-02-01', date_to='2026-03-31'))
+        assert payload['2026-02']['sessions'] == 0
+        assert payload['2026-03']['sessions'] == 3
+
+    def test_no_instructor_given_is_the_whole_program(self, client):
+        payload = self.get(client, interval='month',
+                           date_from='2026-02-01', date_to='2026-03-31')
+        assert sum(bucket['sessions'] for bucket in payload['buckets']) == 4
+
+    def test_an_unknown_instructor_is_an_empty_chart_not_an_error(self, client):
+        payload = self.get(client, instructor='Nobody At All', interval='month',
+                           date_from='2026-02-01', date_to='2026-03-31')
+        assert [bucket['sessions'] for bucket in payload['buckets']] == [0, 0]
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/instructors/trends').status_code == 401
+
+
+class TestReportQuality:
+    """GET /api/reports/quality -- the data-quality monitoring cards."""
+
+    def get(self, client, **params):
+        response = client.get('/api/reports/quality', query_string=params)
+        assert response.status_code == 200
+        return response.get_json()
+
+    def counts(self, client, **params):
+        return {row['key']: row['count'] for row in self.get(client, **params)['checks']}
+
+    def test_it_counts_the_reports_nobody_finalized(self, client):
+        """The actionable one: the reports a manager can still chase."""
+        assert self.counts(client)['unfinalized'] == 4
+        assert self.get(client)['total'] == 4
+
+    def test_a_finalized_report_leaves_the_outstanding_count(self, client, seeded_db):
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_NGUYEN,
+            'student_name': 'Anthony Nguyen',
+            'date': datetime(2026, 3, 21),
+            'centers': ['Westside'],
+            'instructors': ['Dana Reyes'],
+            'pages_completed': 3,
+            'finalized': True,
+            'session_start': datetime(2026, 3, 21, 15, 0),
+            'session_end': datetime(2026, 3, 21, 16, 0),
+            'topics': [{'id': 'PK-1', 'name': 'Fractions', 'status': 'Worked On'}],
+        })
+
+        counts = self.counts(client)
+        assert counts['unfinalized'] == 4        # the new one is not outstanding
+        assert self.get(client)['total'] == 5
+
+    def test_it_counts_sessions_with_no_topics_recorded(self, client, seeded_db):
+        """An empty list and an absent field are the same finding to a reader."""
+        for topics in ([], None):
+            seeded_db['dwp_reports'].insert_one({
+                '_id': ObjectId(),
+                'account_id': ACCOUNT_TAN,
+                'student_name': 'Chloe Tan',
+                'date': datetime(2026, 2, 15),
+                'centers': ['Eastside'],
+                'instructors': ['Sam Ortiz'],
+                'topics': topics,
+            })
+
+        assert self.counts(client)['no_topics'] == 2
+
+    def test_it_counts_unstaffed_sessions(self, client, seeded_db):
+        """73 of these in the live data, and they still count as sessions."""
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_TAN,
+            'student_name': 'Chloe Tan',
+            'date': datetime(2026, 2, 15),
+            'centers': ['Eastside'],
+            'instructors': [],
+        })
+
+        assert self.counts(client)['no_instructor'] == 1
+
+    def test_it_counts_sessions_that_never_recorded_an_end_time(self, client):
+        """217 in the live data -- sessions that cannot be given a duration."""
+        assert self.counts(client)['missing_session_end'] == 4
+
+    def test_the_tripwire_checks_are_present_even_at_zero(self, client, seeded_db):
+        """A check reading zero is the answer, not a reason to omit the card.
+
+        A null `date` matters more than its current count: every trend chart buckets on it,
+        so one would drop out of every chart silently rather than show up as a gap.
+        """
+        counts = self.counts(client)
+        assert counts['missing_date'] == 0
+
+        seeded_db['dwp_reports'].insert_one({
+            '_id': ObjectId(),
+            'account_id': ACCOUNT_TAN,
+            'student_name': 'Chloe Tan',
+            'date': None,
+            'centers': ['Eastside'],
+        })
+        assert self.counts(client)['missing_date'] == 1
+
+    def test_it_finds_the_natural_keys_two_documents_share(self, client, seeded_db):
+        """⚠️ The condition outlives the import that created it.
+
+        `import_reports.py` reports an ambiguous key to the console and skips the row, so
+        the event is gone -- but both colliding documents are still stored, which is what
+        makes this a current-state check rather than something waiting on import history.
+        These are the rows an import can no longer update.
+        """
+        collision = {
+            'account_id': ACCOUNT_TAN,
+            'student_name': 'Chloe Tan',
+            'date': datetime(2026, 2, 1),
+            'session_start': datetime(2026, 2, 1, 15, 30),
+        }
+        seeded_db['dwp_reports'].insert_many([
+            {'_id': ObjectId(), **collision, 'centers': ['Eastside'], 'pages_completed': 2},
+            {'_id': ObjectId(), **collision, 'centers': ['Eastside'], 'pages_completed': 5},
+        ])
+
+        found = self.get(client)['ambiguous_keys']
+        assert len(found) == 1
+        assert found[0]['student_name'] == 'Chloe Tan'
+        assert found[0]['documents'] == 2
+
+    def test_a_key_only_one_document_holds_is_not_ambiguous(self, client):
+        assert self.get(client)['ambiguous_keys'] == []
+
+    def test_a_center_filter_scopes_it(self, client):
+        """So a manager sees their own centers rather than the whole program."""
+        payload = self.get(client, center='Westside')
+        assert payload['total'] == 3
+        assert payload['centers'] == ['Westside']
+
+    def test_a_date_filter_scopes_it(self, client):
+        assert self.get(client, date_from='2026-03-01')['total'] == 3
+
+    def test_an_unknown_center_is_zeroes_rather_than_an_error(self, client):
+        payload = self.get(client, center='Xyz')
+        assert payload['total'] == 0
+        assert all(row['count'] == 0 for row in payload['checks'])
+
+    def test_a_malformed_date_is_refused(self, client):
+        assert client.get('/api/reports/quality?date_from=nope').status_code == 400
+
+    def test_it_returns_counts_and_not_the_reports_behind_them(self, client):
+        """Every row counted here is about a named child. Drill-down is the list's job."""
+        payload = self.get(client)
+        assert set(payload) == {'centers', 'total', 'checks', 'ambiguous_keys'}
+        assert all(set(row) == {'key', 'count'} for row in payload['checks'])
+
+    def test_the_route_requires_a_credential(self, anonymous_client):
+        assert anonymous_client.get('/api/reports/quality').status_code == 401
+
+
+class TestChartRoutesWithholdPrivateFields:
+    """None of the six chart routes goes through LIST_PROJECTION, so none may leak.
+
+    Cheap, and the one class of mistake that would not show up as a wrong number. The
+    ambiguous-key rows are the closest thing any of them ships to a document, and they
+    carry the four key fields and nothing else.
+    """
+
+    CHART_ROUTES = (
+        '/api/students/distribution',
+        '/api/instructors/distribution',
+        '/api/reports/trends',
+        '/api/home/trends',
+        '/api/instructors/trends',
+        '/api/reports/quality',
+    )
+
+    @pytest.mark.parametrize('route', CHART_ROUTES)
+    def test_no_private_field_reaches_the_response(self, client, route):
+        body = client.get(route).get_data(as_text=True)
+        for field in ('row_hash', 'lead_id', 'student_notes', 'internal_notes',
+                      'notes_from_center_director'):
+            assert field not in body
