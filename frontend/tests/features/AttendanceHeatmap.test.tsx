@@ -119,7 +119,7 @@ describe('attendance heatmap', () => {
     }
   })
 
-  it('reports sessions and days as different numbers', async () => {
+  it('keeps sessions and days distinct in the accessible table', async () => {
     // ⚠️ A day is not a session: 70 student-days in the live data carry more than one.
     withAttendance('2026-03-09', '2026-03-11', [
       visit('2026-03-10', 2, 9),
@@ -131,9 +131,7 @@ describe('attendance heatmap', () => {
       ['2026-03-10', '2', '9'],
       ['2026-03-11', '1', '3'],
     ])
-    expect(
-      await screen.findByText(/2 days attended in this period, 3 sessions/i),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/shade is pages completed that day/i)).toBeInTheDocument()
   })
 
   it('says what the shade means, so the ramp is not read as sessions', async () => {
@@ -145,10 +143,41 @@ describe('attendance heatmap', () => {
 
   it('carries the exact counts in each cell, not only in the shade', async () => {
     withAttendance('2026-03-10', '2026-03-10', [visit('2026-03-10', 1, 4)])
+    const { user } = renderApp(`/students/${ANTHONY_KEY}`)
+
+    await heatRows()
+    const cell = gridCells()[0] as HTMLElement
+    await user.click(cell)
+
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('March 10, 2026')
+    expect(within(card).queryByText('Sessions')).not.toBeInTheDocument()
+    expect(within(card).getByText('Pages')).toBeInTheDocument()
+    // The tooltip shows only the page value, not the session counter.
+    const values = within(card).getAllByRole('definition')
+    expect(values.map((el) => el.textContent)).toEqual(['4'])
+  })
+
+  it('names the shade an unattended day carries instead', async () => {
+    withAttendance('2026-03-09', '2026-03-10', [visit('2026-03-10', 1, 4)])
+    const { user } = renderApp(`/students/${ANTHONY_KEY}`)
+
+    await heatRows()
+    const unattended = gridCells('0')[0] as HTMLElement
+    await user.click(unattended)
+
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('No session')
+  })
+
+  it('labels each month under the column where its first day appears', async () => {
+    withAttendance('2026-01-25', '2026-03-15', [visit('2026-01-30', 1, 2)])
     renderApp(`/students/${ANTHONY_KEY}`)
 
     await heatRows()
-    const cell = gridCells()[0]
-    expect(cell?.getAttribute('title')).toBe('2026-03-10: 1 session, 4 pages')
+    expect(document.querySelectorAll('.heat-month')).toHaveLength(2)
+    expect(document.querySelectorAll('.heat-grid .heat-month')).toHaveLength(0)
+    expect(screen.getByText('Feb', { selector: '.heat-month' })).toBeInTheDocument()
+    expect(screen.getByText('Mar', { selector: '.heat-month' })).toBeInTheDocument()
   })
 })

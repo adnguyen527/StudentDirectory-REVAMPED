@@ -19,7 +19,7 @@ function isoDay(date: Date): string {
 }
 
 /**
- * The three months ending at the student's last session -- not at today.
+ * The eight months ending at the student's last session -- not at today.
  *
  * The route refuses to default the window on purpose: "this month" silently returns
  * nothing whenever the imported data lags the calendar. The data currently ends
@@ -29,7 +29,7 @@ function isoDay(date: Date): string {
 function defaultPeriod(lastSessionDate: ExtDate | null): { start: string; end: string } {
   const end = toDate(lastSessionDate) ?? new Date()
   const start = new Date(end)
-  start.setMonth(start.getMonth() - 3)
+  start.setMonth(start.getMonth() - 8)
   return { start: isoDay(start), end: isoDay(end) }
 }
 
@@ -122,6 +122,7 @@ export function AttendancePanel({ studentKey, lastSessionDate }: AttendancePanel
               <tr>
                 <th>Month</th>
                 <th className="numeric">Sessions</th>
+                <th className="numeric">Avg. pages/session</th>
                 <th className="numeric">Days</th>
               </tr>
             </thead>
@@ -130,6 +131,7 @@ export function AttendancePanel({ studentKey, lastSessionDate }: AttendancePanel
                 <tr key={month.month}>
                   <td>{month.month}</td>
                   <td className="numeric">{formatNumber(month.sessions)}</td>
+                  <td className="numeric">{formatNumber(month.pages_per_session)}</td>
                   <td className="numeric">{formatNumber(month.days)}</td>
                 </tr>
               ))}

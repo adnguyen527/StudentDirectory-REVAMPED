@@ -674,7 +674,9 @@ class TestStudentAttendance:
         assert body['student']['student_name'] == 'Anthony Nguyen'
         assert body['period'] == {'start': '2026-03-01', 'end': '2026-03-31'}
         assert body['totals'] == {'sessions': 3, 'days': 2}
-        assert body['by_month'] == [{'month': '2026-03', 'sessions': 3, 'days': 2}]
+        assert body['by_month'] == [
+            {'month': '2026-03', 'sessions': 3, 'pages_per_session': 4.0, 'days': 2}
+        ]
         assert len(body['visits']) == 2
 
     def test_the_dates_are_present_and_chronological(self, client):

@@ -10,12 +10,14 @@ import type { ReportsResponse } from '../../api/types'
 // components
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
+import { HoverTarget } from '../../shell/HoverCard'
 import { Pager } from '../../shell/Pager'
 import { DateRangeFilter } from '../DateRangeFilter'
 import { OpenReportLink } from '../OpenReportLink'
 import { ReportModal } from '../ReportModal'
 // utils
 import { useCardRange } from '../ranges'
+import { UNFINALIZED_CARD } from '../unfinalizedHover'
 import { durationMinutes, timeRange } from '../timeRange'
 // styles
 import './Centers.css'
@@ -207,7 +209,9 @@ export function CenterSessionsCard({
                       {report.finalized ? (
                         <span className="muted">Finalized</span>
                       ) : (
-                        <span className="tag tag-warn">Unfinalized</span>
+                        <HoverTarget as="span" className="tag tag-warn" card={UNFINALIZED_CARD}>
+                          Unfinalized
+                        </HoverTarget>
                       )}
                     </td>
                     <td>

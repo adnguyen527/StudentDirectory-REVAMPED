@@ -8,10 +8,12 @@ import type { ReportDetail } from '../../api/types'
 // components
 import { Card } from '../../shell/Card'
 import { CardRow } from '../../shell/CardRow'
+import { HoverTarget } from '../../shell/HoverCard'
 import { DashboardIcon, StudentsIcon, TopicsIcon } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
 // utils
 import { durationMinutes, timeRange } from '../timeRange'
+import { UNFINALIZED_CARD } from '../unfinalizedHover'
 // styles
 import './Profile.css'
 
@@ -135,7 +137,9 @@ export function ReportChips({ report }: { report: ReportDetail }) {
       {report.finalized ? (
         <span className="muted">Finalized</span>
       ) : (
-        <span className="tag tag-warn">Unfinalized</span>
+        <HoverTarget as="span" className="tag tag-warn" card={UNFINALIZED_CARD}>
+          Unfinalized
+        </HoverTarget>
       )}
     </>
   )

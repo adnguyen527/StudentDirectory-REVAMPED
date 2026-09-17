@@ -364,8 +364,8 @@ export const ANTHONY_ATTENDANCE: AttendanceResponse = {
   // Three sessions over two days: the pair that must not be reported as one number.
   totals: { sessions: 3, days: 2 },
   by_month: [
-    { month: '2026-02', sessions: 1, days: 1 },
-    { month: '2026-03', sessions: 2, days: 1 },
+    { month: '2026-02', sessions: 1, pages_per_session: 5, days: 1 },
+    { month: '2026-03', sessions: 2, pages_per_session: 3.5, days: 1 },
   ],
   visits: [
     {

@@ -189,16 +189,9 @@ export function StudentProfilePage() {
       </div>
 
       <div className="tile-row">
-        {/* The months read against the count above them: 149 sessions across 12 months.
-            The last-session date stays because this is the only place it appears. */}
         <StatTile
           label="Sessions"
           value={formatNumber(student.total_sessions)}
-          sub={
-            monthsAttended > 0
-              ? `${formatNumber(monthsAttended)} month${monthsAttended === 1 ? '' : 's'} · last ${formatDate(student.last_session_date)}`
-              : `last on ${formatDate(student.last_session_date)}`
-          }
           icon={<StudentsIcon size={22} />}
           wash={1}
         />
@@ -219,13 +212,9 @@ export function StudentProfilePage() {
           wash={3}
         />
         <StatTile
-          label="Topics on plan"
-          value={formatNumber(student.total_topics_on_plan)}
-          sub={
-            student.total_topic_reassignments > 0
-              ? `${formatNumber(student.total_topic_reassignments)} reassignments`
-              : undefined
-          }
+          label="Months attended"
+          value={formatNumber(monthsAttended)}
+          sub={`last attended session: ${formatDate(student.last_session_date)}`}
           icon={<DashboardIcon size={22} />}
           wash={4}
         />

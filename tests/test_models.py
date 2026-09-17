@@ -394,7 +394,9 @@ class TestAttendance:
         summary = Attendance.period_summary(
             ANTHONY_KEY, _day(2026, 1, 1), _day(2026, 12, 31)
         )
-        assert summary['by_month'] == [{'month': '2026-03', 'sessions': 3, 'days': 2}]
+        assert summary['by_month'] == [
+            {'month': '2026-03', 'sessions': 3, 'pages_per_session': 4.0, 'days': 2}
+        ]
 
     def test_period_summary_months_are_ordered(self, seeded_db):
         """A list, not a dict -- clients should not have to trust JSON key order."""

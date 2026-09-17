@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react'
+// libraries
+import { Link } from 'react-router-dom'
 // apis
 import { formatDate, formatNumber, toDate } from '../../api/bson'
 import type { Topic, TopicState } from '../../api/types'
 // components
 import { Card } from '../../shell/Card'
 import { CardSearch } from '../CardSearch'
+import { HoverTarget } from '../../shell/HoverCard'
 import { Pager } from '../../shell/Pager'
 // styles
 import './Profile.css'
@@ -152,9 +155,13 @@ export function TopicsCard({ topics }: TopicsCardProps) {
                     {/* The inner span is what scrolls on hover -- the outer one is the
                         window it scrolls behind. title, so the full name is one hover
                         away rather than one slow scroll away. */}
-                    <span className="primary-name topic-name" title={topic.name}>
+                    <Link
+                      className="primary-name topic-name row-link"
+                      to={`/topics/${encodeURIComponent(topic.id)}`}
+                      title={topic.name}
+                    >
                       <span>{topic.name}</span>
-                    </span>
+                    </Link>
                     <span className="topic-id">{topic.id}</span>
                   </td>
                   <td>
@@ -169,9 +176,17 @@ export function TopicsCard({ topics }: TopicsCardProps) {
                         filter changed; the stand-in holds the line open, unseen and
                         unannounced. Same trick as the filler rows below. */}
                     {topic.times_assigned > 1 ? (
-                      <span className="tag tag-warn topic-flag">
+                      <HoverTarget
+                        as="span"
+                        className="tag tag-warn topic-flag"
+                        card={{
+                          header: 'Reassigned',
+                          prose:
+                            'Put back on the plan after coming off it -- prompted by a new assessment or lesson plan.',
+                        }}
+                      >
                         reassigned ×{topic.times_assigned - 1}
-                      </span>
+                      </HoverTarget>
                     ) : (
                       <span
                         className="tag tag-warn topic-flag topic-flag-empty"

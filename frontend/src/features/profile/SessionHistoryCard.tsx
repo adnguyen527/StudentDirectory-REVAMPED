@@ -8,12 +8,14 @@ import type { DwpReport } from '../../api/types'
 // components
 import { Card } from '../../shell/Card'
 import { DateRangeFilter } from '../DateRangeFilter'
+import { HoverTarget } from '../../shell/HoverCard'
 import { OpenReportLink } from '../OpenReportLink'
 import { ReportModal } from '../ReportModal'
 import { Pager } from '../../shell/Pager'
 // utils
 import { useCardRange } from '../ranges'
 import { timeRange } from '../timeRange'
+import { UNFINALIZED_CARD } from '../unfinalizedHover'
 // styles
 import './Profile.css'
 
@@ -182,7 +184,9 @@ export function SessionHistoryCard({ reports }: SessionHistoryCardProps) {
                           {report.finalized ? (
                             <span className="muted">Finalized</span>
                           ) : (
-                            <span className="tag tag-warn">Unfinalized</span>
+                            <HoverTarget as="span" className="tag tag-warn" card={UNFINALIZED_CARD}>
+                              Unfinalized
+                            </HoverTarget>
                           )}
                         </td>
                         <td>

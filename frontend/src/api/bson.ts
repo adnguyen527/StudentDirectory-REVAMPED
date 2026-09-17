@@ -74,6 +74,18 @@ export function formatDate(value: unknown): string {
   })
 }
 
+/** "June 10, 2026", or a dash. Same UTC reasoning as formatDate. */
+export function formatLongDate(value: unknown): string {
+  const date = toDate(value)
+  if (!date) return '—'
+  return date.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: UTC,
+  })
+}
+
 /** "5:53 PM", or a dash. Same UTC reasoning as formatDate. */
 export function formatTime(value: unknown): string {
   const date = toDate(value)

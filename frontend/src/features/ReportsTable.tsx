@@ -9,8 +9,10 @@ import { OpenReportLink } from './OpenReportLink'
 import { Note } from './profile/SessionHistoryCard'
 import { ReportModal } from './ReportModal'
 import { ColumnHeader } from './SortHeader'
+import { HoverTarget } from '../shell/HoverCard'
 // utils
 import { timeRange } from './timeRange'
+import { UNFINALIZED_CARD } from './unfinalizedHover'
 // styles
 import './profile/Profile.css'
 
@@ -157,7 +159,9 @@ export function ReportsTable({ reports, sortable }: ReportsTableProps) {
                     {report.finalized ? (
                       <span className="muted">Finalized</span>
                     ) : (
-                      <span className="tag tag-warn">Unfinalized</span>
+                      <HoverTarget as="span" className="tag tag-warn" card={UNFINALIZED_CARD}>
+                        Unfinalized
+                      </HoverTarget>
                     )}
                   </td>
                   <td>

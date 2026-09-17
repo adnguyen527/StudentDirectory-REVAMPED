@@ -1,4 +1,5 @@
-import { render } from '@testing-library/react'
+import { fireEvent, render, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { BarChart, ColumnChart } from '../../src/charts/BarChart'
@@ -77,12 +78,26 @@ describe('column marks', () => {
     expect(container.querySelectorAll('.column-band-label')).toHaveLength(2)
   })
 
-  it('hides the marks from assistive tech, leaving the twin to speak', () => {
+  it('hides a compact chart\'s marks from assistive tech, leaving the twin to speak', () => {
+    // Compact is the small multiples on Home -- no room for a hover card, so it keeps the
+    // old contract: aria-hidden, and nothing inside it in the tab order.
+    const { container } = render(
+      <ColumnChart data={DATA} caption="Test" valueLabel="Count" compact />,
+    )
+
+    expect(container.querySelector('.chart-plot')).toHaveAttribute('aria-hidden', 'true')
+    expect(container.querySelector('.column-slot')).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('opts a full chart into a labelled group instead, so its marks can be reached', () => {
     const { container } = render(
       <ColumnChart data={DATA} caption="Test" valueLabel="Count" />,
     )
 
-    expect(container.querySelector('.chart-plot')).toHaveAttribute('aria-hidden', 'true')
+    const plot = container.querySelector('.chart-plot')
+    expect(plot).not.toHaveAttribute('aria-hidden')
+    expect(plot).toHaveAttribute('role', 'group')
+    expect(plot?.getAttribute('aria-label')).toMatch(/Test/)
   })
 
   it('reserves the chart height while loading rather than collapsing', () => {
@@ -97,10 +112,11 @@ describe('column marks', () => {
   })
 })
 
-describe('mark tooltips', () => {
-  it('says the days a bucket covers, not just its axis label', () => {
+describe('mark hover card', () => {
+  it('says the days a bucket covers, not just its axis label', async () => {
     // ⚠️ The whole reason `hint` exists: an axis has room for "W25" and nothing more, and
-    // "W25" on its own does not say when. The hover is where the dates go.
+    // "W25" on its own does not say when. The hover card is where the dates go.
+    const user = userEvent.setup()
     const { container } = render(
       <ColumnChart
         data={[{ key: '2025-W25', label: 'W25', hint: '16–22 Jun 2025', value: 42 }]}
@@ -109,16 +125,18 @@ describe('mark tooltips', () => {
       />,
     )
 
-    expect(container.querySelector('.column-slot')).toHaveAttribute(
-      'title',
-      '16–22 Jun 2025: 42',
-    )
+    await user.click(container.querySelector('.column-slot')!)
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('16–22 Jun 2025')
+    expect(within(card).getByText('Sessions')).toBeInTheDocument()
+    expect(within(card).getByText('42')).toBeInTheDocument()
     // And the axis keeps the short form, so fifty of them still fit.
     expect(container.querySelector('.column-band-label')).toHaveTextContent('W25')
   })
 
-  it('falls back to the label where a hint would say nothing new', () => {
+  it('falls back to the label where a hint would say nothing new', async () => {
     // The center distributions pass none: "Westside" is already the whole answer.
+    const user = userEvent.setup()
     const { container } = render(
       <BarChart
         data={[{ key: 'w', label: 'Westside', value: 395 }]}
@@ -127,10 +145,14 @@ describe('mark tooltips', () => {
       />,
     )
 
-    expect(container.querySelector('.bar-row')).toHaveAttribute('title', 'Westside: 395')
+    await user.click(container.querySelector('.bar-row')!)
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('Westside')
+    expect(within(card).getByText('395')).toBeInTheDocument()
   })
 
-  it('carries the partial marker, so a dimmed bar is not colour-only', () => {
+  it('carries the partial marker, so a dimmed bar is not colour-only', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ColumnChart
         data={[{ key: '2025-W25', label: 'W25', hint: '16–22 Jun 2025', value: 8, partial: true }]}
@@ -139,10 +161,24 @@ describe('mark tooltips', () => {
       />,
     )
 
-    expect(container.querySelector('.column-slot')).toHaveAttribute(
-      'title',
-      '16–22 Jun 2025 (partial): 8',
+    await user.click(container.querySelector('.column-slot')!)
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('Partial')
+  })
+
+  it('shows the same card on focus, not only on click', async () => {
+    const { container } = render(
+      <BarChart
+        data={[{ key: 'w', label: 'Westside', value: 395 }]}
+        caption="Test"
+        valueLabel="Students"
+      />,
     )
+
+    const row = container.querySelector('.bar-row') as HTMLElement
+    fireEvent.focus(row)
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('Westside')
   })
 
   it('gives the table twin the same dates the hover has', () => {

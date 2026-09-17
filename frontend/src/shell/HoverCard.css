@@ -1,0 +1,109 @@
+/*
+ * The one hover surface every chart mark and every designated indicator shares.
+ *
+ * Positioned by useHoverCard writing `transform` and `visibility` directly to this element
+ * -- position: fixed and top/left: 0 are the resting state; nothing else here is animated
+ * or measured. z-index 50 rather than the app's usual 21-39 gap above the filter panels:
+ * ReportDetailBody's "Unfinalized" tag is itself inside the report Modal (z-index 40), so a
+ * card opened from it has to clear the dialog, not just the shell. See Modal.css.
+ */
+.hover-card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  visibility: hidden;
+  max-width: 260px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  /* Never the pointer's target: a card that could itself be hovered would keep a transient
+     open forever as the pointer crosses the gap between the anchor and the card. */
+  pointer-events: none;
+}
+
+.hover-card-header {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.hover-card-rule {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--border);
+}
+
+.hover-card-rows {
+  margin: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.hover-card-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.hover-card-row dt {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.hover-card-row dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Only the heatmap sets `swatch` -- every other chart draws one series in --accent, and a
+   swatch that is always the same colour would repeat what the mark already says. */
+.hover-card-swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.hover-card-swatch[data-level='1'] { background: var(--chart-ramp-1); }
+.hover-card-swatch[data-level='2'] { background: var(--chart-ramp-2); }
+.hover-card-swatch[data-level='3'] { background: var(--chart-ramp-3); }
+.hover-card-swatch[data-level='4'] { background: var(--chart-ramp-4); }
+.hover-card-swatch[data-level='5'] { background: var(--chart-ramp-5); }
+
+.hover-card-prose {
+  margin: var(--space-2) 0 0;
+  max-width: 30ch;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.hover-card-footnote {
+  margin: var(--space-2) 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* The affordance on a designated indicator -- a chart mark needs none, it already looks
+   like a mark. */
+.hover-hint {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) {
+  .hover-hint {
+    cursor: help;
+  }
+}

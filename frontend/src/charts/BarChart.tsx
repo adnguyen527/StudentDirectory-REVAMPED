@@ -1,9 +1,11 @@
 import type { CSSProperties, ReactNode } from 'react'
 
 import { formatNumber } from '../api/bson'
+import { HoverTarget, type HoverCardContent } from '../shell/HoverCard'
 import { ChartFigure } from './ChartFigure'
 import { ChartTable } from './ChartTable'
 import { niceScale, percent } from './scale'
+import { useRovingGroup } from './useRovingGroup'
 import './Chart.css'
 
 export interface Datum {
@@ -53,16 +55,26 @@ interface CommonProps {
  */
 
 /**
- * What a mark says on hover.
+ * What a mark says on hover, as the hover card's structured content.
  *
  * `hint` where the caller gave one -- the days a bucket covers -- and the axis label
- * otherwise. The partial marker rides along, because the tooltip is the hover reading of
- * what the table twin spells out, and a dimmed bar with no explanation is colour-only.
+ * otherwise. The partial marker becomes the footnote, because the card is the hover
+ * reading of what the table twin spells out, and a dimmed bar with no explanation is
+ * colour-only.
  *
  * ⚠️ A nicety, never the only way to read a value: the twin carries every number as text.
  */
-function tip(d: Datum, format: (value: number) => string): string {
-  return `${d.hint ?? d.label}${d.partial ? ' (partial)' : ''}: ${format(d.value)}`
+function cardOf(d: Datum, valueLabel: string, format: (value: number) => string): HoverCardContent {
+  return {
+    header: d.hint ?? d.label,
+    rows: [{ name: valueLabel, value: format(d.value) }],
+    footnote: d.partial ? 'Partial' : undefined,
+  }
+}
+
+/** The same reading, flattened to one string -- the mark's accessible name. */
+function describe(d: Datum, valueLabel: string, format: (value: number) => string): string {
+  return `${d.hint ?? d.label}${d.partial ? ' (partial)' : ''}: ${valueLabel} ${format(d.value)}`
 }
 
 /** Lengths reach CSS as custom properties, the idiom CardRow established. */
@@ -112,6 +124,7 @@ export function BarChart({
   format = formatNumber,
 }: CommonProps) {
   const { max } = niceScale(data.map((d) => d.value))
+  const { groupProps, itemProps } = useRovingGroup({ count: data.length })
 
   return (
     <ChartFigure
@@ -119,12 +132,18 @@ export function BarChart({
       loading={loading}
       note={note}
       twin={twinOf(data, caption, valueLabel, format)}
+      interactiveMarks
     >
-      <div className="bar-list">
-        {data.map((d) => (
-          // Native title: a tooltip with no JS, no positioning, and nothing for .card's
-          // overflow:hidden to clip. The twin is the guarantee; this is the nicety.
-          <div className="bar-row" key={d.key} title={tip(d, format)}>
+      <div className="bar-list" onKeyDown={groupProps.onKeyDown}>
+        {data.map((d, index) => (
+          <HoverTarget
+            as="div"
+            className="bar-row"
+            key={d.key}
+            card={cardOf(d, valueLabel, format)}
+            aria-label={describe(d, valueLabel, format)}
+            {...itemProps(index)}
+          >
             <span className="bar-label">{d.label}</span>
             <span className="bar-track">
               {/* ⚠️ A zero draws no element at all, rather than a fill with no width.
@@ -142,7 +161,7 @@ export function BarChart({
             {/* Outside the bar, never inside: inside is --text-on-accent on --accent, which
                 the contrast test already pins as a known shortfall in dark. */}
             <span className="bar-value">{format(d.value)}</span>
-          </div>
+          </HoverTarget>
         ))}
       </div>
     </ChartFigure>
@@ -177,6 +196,7 @@ export function ColumnChart({
   const scale = niceScale(data.map((d) => d.value))
   const max = scale.max
   const ticks = compact ? [] : scale.ticks
+  const { groupProps, itemProps } = useRovingGroup({ count: data.length })
 
   return (
     <ChartFigure
@@ -184,6 +204,7 @@ export function ColumnChart({
       loading={loading}
       note={note}
       twin={twinOf(data, caption, valueLabel, format)}
+      interactiveMarks={!compact}
     >
       <div className={compact ? 'column-chart column-chart-compact' : 'column-chart'}>
         {!compact && (
@@ -205,12 +226,19 @@ export function ColumnChart({
             />
           ))}
 
-          <div className="column-list">
-            {data.map((d) => (
-              <div
+          <div className="column-list" onKeyDown={compact ? undefined : groupProps.onKeyDown}>
+            {data.map((d, index) => (
+              <HoverTarget
+                as="div"
                 className="column-slot"
                 key={d.key}
-                title={tip(d, format)}
+                card={cardOf(d, valueLabel, format)}
+                aria-label={describe(d, valueLabel, format)}
+                // A compact multiple stays out of the tab order: it is aria-hidden at the
+                // ChartFigure level (interactiveMarks={!compact} above), so a focusable
+                // mark inside it would be the exact fault this feature exists to avoid.
+                // Mouse and touch hover still work -- only Tab is withheld.
+                {...(compact ? { tabIndex: -1 } : itemProps(index))}
               >
                 {/* A zero column draws nothing, for the reason BarChart states above. */}
                 {d.value > 0 && (
@@ -219,7 +247,7 @@ export function ColumnChart({
                     style={lengthVar(d.value, max)}
                   />
                 )}
-              </div>
+              </HoverTarget>
             ))}
           </div>
         </div>

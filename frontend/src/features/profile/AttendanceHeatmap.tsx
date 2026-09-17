@@ -1,9 +1,11 @@
 // apis
-import { formatNumber, toDate } from '../../api/bson'
+import { formatLongDate, formatNumber, toDate } from '../../api/bson'
 import type { AttendanceVisit } from '../../api/types'
 // components
 import { ChartFigure } from '../../charts/ChartFigure'
 import { ChartTable } from '../../charts/ChartTable'
+import { useRovingGroup } from '../../charts/useRovingGroup'
+import { HoverTarget, type HoverCardContent } from '../../shell/HoverCard'
 // styles
 import '../../charts/Chart.css'
 import './Profile.css'
@@ -103,7 +105,29 @@ function weekdayOf(iso: string): number {
   return (new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7
 }
 
+/** What a cell says on hover -- the date, page count and swatch that names the shade. */
+function cardOf(day: Day): HoverCardContent {
+  const step = level(day)
+  return {
+    header: formatLongDate(day.iso),
+    rows: day.attended
+      ? [{ name: 'Pages', value: formatNumber(day.pages) }]
+      : undefined,
+    footnote: day.attended ? undefined : 'No session',
+    swatch: step > 0 ? (step as 1 | 2 | 3 | 4 | 5) : undefined,
+  }
+}
+
+/** The same reading, flattened to one string -- the cell's accessible name. */
+function describeDay(day: Day): string {
+  return day.attended
+    ? `${formatLongDate(day.iso)}: ${formatNumber(day.pages)} pages`
+    : `${formatLongDate(day.iso)}: no session`
+}
+
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const HEAT_LABEL_WIDTH = 32
 
 /**
  * Days attended, as a calendar.
@@ -114,22 +138,32 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
  */
 export function AttendanceHeatmap({ visits, period }: AttendanceHeatmapProps) {
   const days = daysIn(period, visits)
+  // Called unconditionally either way -- the empty-days early return below still has to
+  // run after every hook in this component, so the count here is 0 rather than the return
+  // happening first.
+  const { groupProps, itemProps } = useRovingGroup({ count: days.length, stride: 7 })
   if (days.length === 0) return null
 
   // Pad the first column so the grid starts on the right weekday rather than sliding the
   // whole calendar up by however many days the period happens to begin after Monday.
   const lead = weekdayOf(days[0].iso)
+  const weekColumns = Math.ceil((lead + days.length) / 7)
+  const monthStarts = days.flatMap((day, index) => {
+    // If this is not the first of the month, skip it.
+    if (day.iso.slice(8) !== '01') return []
+    const month = MONTHS[Number(day.iso.slice(5, 7)) - 1]
+    // grid column 1 is the weekday gutter; weeks start at column 2. Each week is a column.
+    return month ? [{ month, column: Math.floor((lead + index) / 7) + 2 }] : []
+  })
 
   const attended = days.filter((day) => day.attended)
-  const sessions = attended.reduce((sum, day) => sum + day.sessions, 0)
 
   return (
     <ChartFigure
       caption="Days attended"
       note={
         <>
-          {`${formatNumber(attended.length)} days attended in this period, ` +
-            `${formatNumber(sessions)} sessions. Shade is pages completed that day.`}
+          {`Shade is pages completed that day.`}
           <span className="heat-key">
             <span className="muted">Less</span>
             {[1, 2, 3, 4, 5].map((step) => (
@@ -155,34 +189,50 @@ export function AttendanceHeatmap({ visits, period }: AttendanceHeatmapProps) {
           ])}
         />
       }
+      interactiveMarks
     >
-      <div className="heat-grid">
-        {WEEKDAYS.map((name, index) => (
-          // Every third row labelled, as a contribution calendar does: seven labels in a
-          // 12px column is a wall of text.
-          <span className="heat-weekday" key={name} style={{ gridRow: index + 1 }}>
-            {index % 2 === 0 ? name : ''}
-          </span>
-        ))}
+      <div className="heat-calendar">
+        <div
+          className="heat-grid"
+          style={{ gridTemplateColumns: `${HEAT_LABEL_WIDTH}px repeat(${weekColumns}, 12px)` }}
+          onKeyDown={groupProps.onKeyDown}
+        >
+          {WEEKDAYS.map((name, index) => (
+            // Every third row labelled, as a contribution calendar does: seven labels in a
+            // 12px column is a wall of text.
+            <span className="heat-weekday" key={name} style={{ gridRow: index + 1 }} aria-hidden="true">
+              {index % 2 === 0 ? name : ''}
+            </span>
+          ))}
 
-        {Array.from({ length: lead }, (_, index) => (
-          <span className="heat-cell heat-cell-pad" key={`pad-${index}`} />
-        ))}
+          {Array.from({ length: lead }, (_, index) => (
+            <span className="heat-cell heat-cell-pad" key={`pad-${index}`} aria-hidden="true" />
+          ))}
 
-        {days.map((day) => (
-          <span
-            className="heat-cell"
-            key={day.iso}
-            data-level={level(day)}
-            title={
-              day.attended
-                ? `${day.iso}: ${formatNumber(day.sessions)} session${
-                    day.sessions === 1 ? '' : 's'
-                  }, ${formatNumber(day.pages)} pages`
-                : `${day.iso}: no session`
-            }
-          />
-        ))}
+          {days.map((day, index) => (
+            <HoverTarget
+              as="span"
+              className="heat-cell"
+              key={day.iso}
+              data-level={level(day)}
+              card={cardOf(day)}
+              aria-label={describeDay(day)}
+              {...itemProps(index)}
+            />
+          ))}
+        </div>
+
+        <div
+          className="heat-months"
+          style={{ gridTemplateColumns: `${HEAT_LABEL_WIDTH}px repeat(${weekColumns}, 12px)` }}
+          aria-hidden="true"
+        >
+          {monthStarts.map(({ month, column }) => (
+            <span className="heat-month" key={`${month}-${column}`} style={{ gridColumn: column }}>
+              {month}
+            </span>
+          ))}
+        </div>
       </div>
     </ChartFigure>
   )

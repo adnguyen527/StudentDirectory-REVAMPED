@@ -175,13 +175,16 @@ describe('topics over time card', () => {
       ),
     )
 
-    renderApp(`/students/${ANTHONY_KEY}`)
+    const { user } = renderApp(`/students/${ANTHONY_KEY}`)
     await trackRows()
 
-    const mark = document.querySelector('.topic-mark')
-    expect(mark?.getAttribute('title')).toBe('Long Division — 2026-03-10: Worked On')
-    // ⚠️ And the row reports the aggregate's status, not the session's: the ladder is not
-    // written cumulatively, so these two disagree by design.
+    const mark = document.querySelector('.topic-mark') as HTMLElement
+    await user.click(mark)
+
+    const card = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(card).toHaveTextContent('Long Division')
+    expect(within(card).getByText('March 10, 2026')).toBeInTheDocument()
+    expect(within(card).getByText('Worked On')).toBeInTheDocument()
     expect(document.querySelector('.topic-now')?.textContent).toBe('Mastered')
   })
 })

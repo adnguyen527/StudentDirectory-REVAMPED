@@ -1162,7 +1162,10 @@ Items remain in priority order within each group.
       which is why this is one entry's worth of code and two ticks.
 - [x] `P2` Added the student attendance heatmap inside the existing *Sessions in a period*
       card, drawn from the `visits[]` that card already fetches -- no new request, and no second
-      date control on the page.
+      date control on the page. Its default window spans eight months ending on the student's
+      last session so the heatmap fills the card; the end date stays anchored to the last
+      available session while development uses older imported data.
+      ⚠️ On a live database, change that default end date to the real current date instead.
       ⚠️ **Intensity is pages, not sessions**, against what this item originally asked for.
       Measured first: of 29,311 attended days, 29,241 hold exactly one session, so a ramp keyed
       on sessions would paint every cell the same shade except seventy -- spending the whole
@@ -1179,12 +1182,27 @@ Items remain in priority order within each group.
       question only the route can answer. The pages option carries its warning in the chart's
       own note: a co-taught session's pages count in full for each instructor on it, so the
       figure answers "work in sessions I ran" and cannot be added across people.
-- [ ] `P2` **Replace default chart tooltips with a shared custom hover card.** Hovering a dot
-       or bar should show the label, metric name, and exact value in a compact custom card;
-       hovering a designated table cell or indicator should use the same card rather than
-       applying this behavior to every row. Make the interaction available through keyboard
-       focus, click, and touch as well as mouse hover, and keep the equivalent information in
-       the chart/table accessible summary.
+- [x] `P2` Added the shared hover card (`shell/HoverCard.tsx`, `shell/useHoverCard.ts`,
+      `charts/useRovingGroup.ts`) and put it on all four chart marks (bar, column, heatmap
+      cell, topic-progress mark) plus four designated indicators: the topics `reassigned ×N`
+      flag, the instructor list's `+N` centers pill, the `Unfinalized` tag (one definition,
+      four call sites), and `CenterInstructorsCard`'s scope-caveat column headers. A header,
+      hairline and right-aligned metric rows, with a swatch only on the heatmap, where colour
+      actually encodes magnitude. Portals to `document.body` at `z-index: 50` -- above
+      `Modal`'s 40, because the `Unfinalized` tag also renders inside `ReportModal`, so the
+      card has to clear the dialog that can contain it, not just the shell's usual 20. Hover
+      and focus show a transient card; click or tap pins it; Escape, an outside click, or
+      re-clicking dismisses it. Keyboard reaches every chart through one roving tab stop with
+      arrow-key navigation (`ChartFigure`'s new `interactiveMarks` prop swaps `aria-hidden` for
+      `role="group"` on the plot); Home's compact small multiples opt out and keep the old
+      `aria-hidden`, unchanged. The sr-only table twin stays the unconditional accessible
+      summary either way.
+      ⚠️ Interactive charts now announce each value twice in browse mode -- once at the mark,
+      once in the twin -- the traded-off cost of not shipping focusable content inside
+      `aria-hidden`. Not verified against a real screen reader.
+      ⚠️ Verified with the unit suite and `tsc`/`vite build` only; a live-browser pass (right-
+      edge clipping, a pinned card tracking scroll, dark mode, touch) is still outstanding --
+      the dev server needs the Flask API and Mongo running, which this session didn't have.
 - [x] `P3` Added the data-quality page at `/data-quality`: a card per check with its
       denominator, one bar chart of all seven, and the ambiguous natural keys named in full.
       Checks reading zero are shown too -- a zero is the good news, and hiding it makes the

@@ -315,6 +315,7 @@ export interface AttendanceMonth {
   month: string
   sessions: number
   days: number
+  pages_per_session: number
 }
 
 export interface AttendanceResponse {

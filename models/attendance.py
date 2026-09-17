@@ -70,9 +70,25 @@ class Attendance:
         by_month = {}
         for visit in visits:
             month = visit['date'].strftime('%Y-%m')
-            bucket = by_month.setdefault(month, {'month': month, 'sessions': 0, 'days': 0})
+            bucket = by_month.setdefault(
+                month, {'month': month, 'sessions': 0, 'days': 0, '_pages': 0}
+            )
             bucket['sessions'] += visit.get('sessions') or 0
             bucket['days'] += 1
+
+            bucket['_pages'] += visit.get('pages_completed') or 0
+
+        by_month = [
+            {
+                'month': bucket['month'],
+                'sessions': bucket['sessions'],
+                'days': bucket['days'],
+                'pages_per_session': round(bucket['_pages'] / bucket['sessions'], 2)
+                if bucket['sessions']
+                else 0,
+            }
+            for bucket in (by_month[m] for m in sorted(by_month))
+        ]
 
         return {
             'totals': {
@@ -81,7 +97,7 @@ class Attendance:
             },
             # A list, not a dict: JSON object key order is not something a client should
             # have to trust, and the frontend wants to iterate these in order.
-            'by_month': [by_month[m] for m in sorted(by_month)],
+            'by_month': by_month,
             'visits': visits,
         }
 

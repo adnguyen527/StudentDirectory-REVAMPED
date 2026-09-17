@@ -9,6 +9,7 @@ import type { InstructorListItem, InstructorsResponse } from '../../api/types'
 // components
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
+import { HoverTarget } from '../../shell/HoverCard'
 import { Pager } from '../../shell/Pager'
 // styles
 import './Centers.css'
@@ -82,12 +83,20 @@ export function CenterInstructorsCard({ centers }: { centers: string[] }) {
                 <th className="numeric">Sessions</th>
                 <th className="numeric">Students</th>
                 <th className="numeric">Days</th>
-                <th className="numeric" title="Across every center this instructor works at">
+                <HoverTarget
+                  as="th"
+                  className="numeric"
+                  card={{ header: 'Pages', prose: 'Across every center this instructor works at.' }}
+                >
                   Pages
-                </th>
-                <th className="numeric" title="Across every center this instructor works at">
+                </HoverTarget>
+                <HoverTarget
+                  as="th"
+                  className="numeric"
+                  card={{ header: 'Pages/session', prose: 'Across every center this instructor works at.' }}
+                >
                   Pages/session
-                </th>
+                </HoverTarget>
                 <th>Last session</th>
               </tr>
             </thead>

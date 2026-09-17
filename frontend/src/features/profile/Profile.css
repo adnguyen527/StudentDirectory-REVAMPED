@@ -370,18 +370,29 @@
  * grid-auto-flow: column already means, so nothing has to be measured, and each cell stays
  * a real DOM node that can carry a title and a focus ring.
  */
-.heat-grid {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(7, 1fr);
-  gap: 3px;
-  /* The weekday gutter, then as many week columns as the period holds. */
-  grid-auto-columns: 12px;
+.heat-calendar {
   overflow-x: auto;
   padding-bottom: var(--space-2);
 }
 
+.heat-grid,
+.heat-months {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 3px;
+  width: max-content;
+}
+
+.heat-grid {
+  grid-template-rows: repeat(7, 1fr);
+}
+
+.heat-months {
+  margin-top: 3px;
+}
+
 .heat-cell {
+  position: relative;
   width: 12px;
   height: 12px;
   border-radius: 3px;
@@ -389,6 +400,15 @@
      ramp's lightest step: absence is not a low value, and in dark mode the first ramp
      step is a mid violet that would read as a quiet day. */
   background: var(--border);
+}
+
+/* The hover/tap target reaches WCAG 2.5.8's 24px minimum without the calendar itself
+   growing past 12px -- the extra reach is invisible, not extra ink. A pad cell gets none:
+   it is not a day and has nothing to hover. */
+.heat-cell:not(.heat-cell-pad)::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
 }
 
 .heat-cell[data-level='1'] { background: var(--chart-ramp-1); }
@@ -410,7 +430,13 @@
   font-size: 11px;
   line-height: 1;
   /* Out of the flow of auto-placed cells: this column is the gutter, not a week. */
-  padding-right: var(--space-2);
+  padding-right: var(--space-1);
+}
+
+.heat-month {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .heat-key {

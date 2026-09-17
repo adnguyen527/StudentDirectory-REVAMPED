@@ -7,6 +7,7 @@ import type { InstructorListItem } from '../api/types'
 import { DateRangeFilter } from './DateRangeFilter'
 import { NumberRangeFilter } from './NumberRangeFilter'
 import { ColumnHeader } from './SortHeader'
+import { HoverTarget } from '../shell/HoverCard'
 
 interface InstructorsTableProps {
   instructors: InstructorListItem[]
@@ -80,9 +81,20 @@ export function InstructorsTable({ instructors, sortable }: InstructorsTableProp
                 ) : (
                   <span className="muted">—</span>
                 )}
-                {/* Most teach at one center; the count says so without listing them. */}
+                {/* Most teach at one center; the count says so without listing them --
+                    the names themselves are nowhere else on the row, so the card. */}
                 {instructor.centers.length > 1 && (
-                  <span className="muted"> +{instructor.centers.length - 1}</span>
+                  <HoverTarget
+                    as="span"
+                    className="muted"
+                    card={{
+                      header: 'Also teaches at',
+                      rows: instructor.centers.slice(1).map((center) => ({ value: center.name })),
+                    }}
+                  >
+                    {' '}
+                    +{instructor.centers.length - 1}
+                  </HoverTarget>
                 )}
               </td>
               <td className="numeric">{formatNumber(instructor.total_sessions_taught)}</td>

@@ -75,13 +75,16 @@ describe('student profile', () => {
     expect(screen.queryByText('Topics completed')).not.toBeInTheDocument()
   })
 
-  it('counts all-time months on the sessions tile, beside the last session', async () => {
+  it('shows the all-time months and last session on the months tile', async () => {
     // Both fixture reports fall in March 2026, so this also pins the singular.
     renderApp(PROFILE)
 
     const sessions = await tile('Sessions')
     expect(within(sessions).getByText('2')).toBeInTheDocument()
-    expect(within(sessions).getByText('1 month · last Mar 14, 2026')).toBeInTheDocument()
+
+    const months = await tile('Months attended')
+    expect(within(months).getByText('1')).toBeInTheDocument()
+    expect(within(months).getByText('last attended session: Mar 14, 2026')).toBeInTheDocument()
   })
 
   it('counts months on the tile from every session, not the panel period', async () => {
@@ -103,9 +106,10 @@ describe('student profile', () => {
     )
     renderApp(PROFILE)
 
-    const sessions = await tile('Sessions')
+    const months = await tile('Months attended')
     // Four sessions over three distinct months -- the two November ones count once.
-    expect(within(sessions).getByText(/^3 months ·/)).toBeInTheDocument()
+    expect(within(months).getByText('3')).toBeInTheDocument()
+    expect(within(months).getByText('last attended session: Mar 14, 2026')).toBeInTheDocument()
 
     // Meanwhile the panel still reports its own period, from the attendance response.
     const panel = await card(/Sessions in a period/)
@@ -126,8 +130,8 @@ describe('student profile', () => {
     )
     renderApp(PROFILE)
 
-    const sessions = await tile('Sessions')
-    expect(within(sessions).getByText(/^1 month ·/)).toBeInTheDocument()
+    const months = await tile('Months attended')
+    expect(within(months).getByText('1')).toBeInTheDocument()
   })
 
   it('opens the topics card on what the student is working on now', async () => {
@@ -140,6 +144,10 @@ describe('student profile', () => {
 
     const topics = within(await card(/^Topics$/))
     expect(topics.getByText('Combining Radicals')).toBeInTheDocument()
+    expect(topics.getByRole('link', { name: 'Combining Radicals' })).toHaveAttribute(
+      'href',
+      '/topics/PK-2000-00',
+    )
     // The finished and removed topics are filtered out, not merely sorted below.
     expect(topics.queryByText('Distributive Property')).not.toBeInTheDocument()
     expect(topics.queryByText('Long Division')).not.toBeInTheDocument()
@@ -159,10 +167,11 @@ describe('student profile', () => {
   it('anchors the attendance period on the last session, not today', async () => {
     // The route refuses to default a period because "this month" silently returns nothing
     // whenever the data lags the calendar. Anchoring on today would open this panel empty
-    // on every student; the fixture's last session is 2026-03-14.
+    // on every student; the fixture's last session is 2026-03-14. The default spans eight
+    // months so the heatmap fills the card.
     renderApp(PROFILE)
 
-    expect(await screen.findByLabelText('Period start')).toHaveValue('2025-12-14')
+    expect(await screen.findByLabelText('Period start')).toHaveValue('2025-07-14')
     expect(screen.getByLabelText('Period end')).toHaveValue('2026-03-14')
   })
 
@@ -196,8 +205,8 @@ describe('student profile', () => {
           period: { start: '2025-10-01', end: '2026-03-31' },
           totals: { sessions: 9, days: 5 },
           by_month: [
-            { month: '2025-11', sessions: 4, days: 2 },
-            { month: '2026-03', sessions: 5, days: 3 },
+            { month: '2025-11', sessions: 4, pages_per_session: 2.5, days: 2 },
+            { month: '2026-03', sessions: 5, pages_per_session: 4, days: 3 },
           ],
         }),
       ),

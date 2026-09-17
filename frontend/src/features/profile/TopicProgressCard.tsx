@@ -2,17 +2,46 @@ import { useState } from 'react'
 // libraries
 import { Link } from 'react-router-dom'
 // apis
-import { formatNumber } from '../../api/bson'
+import { formatLongDate, formatNumber } from '../../api/bson'
 import type { DwpReport, Topic } from '../../api/types'
 // components
 import { ChartFigure } from '../../charts/ChartFigure'
 import { ChartTable } from '../../charts/ChartTable'
+import { useRovingGroup } from '../../charts/useRovingGroup'
 import { Card } from '../../shell/Card'
+import { HoverTarget, type HoverCardContent } from '../../shell/HoverCard'
 // utils
-import { placeOn, sessionSpan, topicHistories, type TopicHistory } from './topicHistory'
+import { placeOn, sessionSpan, topicHistories, type TopicHistory, type TopicObservation } from './topicHistory'
 // styles
 import '../../charts/Chart.css'
 import './Profile.css'
+
+/** What a mark says on hover -- the topic it belongs to, then the session and the status. */
+function cardOf(history: TopicHistory, observation: TopicObservation): HoverCardContent {
+  return {
+    header: history.name,
+    rows: [
+      { name: 'Date', value: formatLongDate(observation.iso) },
+      { name: 'Status', value: observation.status },
+    ],
+  }
+}
+
+/** The same reading, flattened to one string -- the mark's accessible name. */
+function describeMark(history: TopicHistory, observation: TopicObservation): string {
+  return `${history.name} — ${formatLongDate(observation.iso)}: ${observation.status}`
+}
+
+/** Running totals before each row, so a flat mark index can be split back into row/offset. */
+function rowStarts(lengths: readonly number[]): number[] {
+  const starts: number[] = []
+  let sum = 0
+  for (const length of lengths) {
+    starts.push(sum)
+    sum += length
+  }
+  return starts
+}
 
 interface TopicProgressCardProps {
   reports: DwpReport[]
@@ -62,6 +91,13 @@ export function TopicProgressCard({ reports, topics }: TopicProgressCardProps) {
   const histories = topicHistories(reports, topics)
   const shown = histories.filter(VIEWS[view].keep)
 
+  const rowLengths = shown.map((history) => history.observations.length)
+  const starts = rowStarts(rowLengths)
+  const { groupProps, itemProps } = useRovingGroup({
+    count: rowLengths.reduce((sum, length) => sum + length, 0),
+    rows: rowLengths,
+  })
+
   return (
     <Card
       title="Topics over time"
@@ -106,23 +142,27 @@ export function TopicProgressCard({ reports, topics }: TopicProgressCardProps) {
               ])}
             />
           }
+          interactiveMarks
         >
-          <div className="topic-track-list">
-            {shown.map((history) => (
+          <div className="topic-track-list" onKeyDown={groupProps.onKeyDown}>
+            {shown.map((history, historyIndex) => (
               <div className="topic-track-row" key={history.id}>
                 <Link className="topic-track-name row-link" to={`/topics/${encodeURIComponent(history.id)}`}>
-                  {history.name}
+                  {history.id}: {history.name}
                 </Link>
                 <span className="topic-track">
-                  {history.observations.map((observation) => (
+                  {history.observations.map((observation, obsIndex) => (
                     // Discrete marks, never joined. A line between two of these would draw
                     // a claim the source does not make.
-                    <span
+                    <HoverTarget
+                      as="span"
                       className="topic-mark"
                       key={`${observation.iso}-${observation.status}`}
                       data-status={observation.status}
                       style={{ left: `${placeOn(span, observation.iso)}%` }}
-                      title={`${history.name} — ${observation.iso}: ${observation.status}`}
+                      card={cardOf(history, observation)}
+                      aria-label={describeMark(history, observation)}
+                      {...itemProps(starts[historyIndex] + obsIndex)}
                     />
                   ))}
                 </span>
