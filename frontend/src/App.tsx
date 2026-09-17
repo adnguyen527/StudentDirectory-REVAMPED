@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
+// features
 import { CenterMetricsPage } from './features/centers/CenterMetricsPage'
 import { DataQualityPage } from './features/quality/DataQualityPage'
 import { HomePage } from './features/HomePage'

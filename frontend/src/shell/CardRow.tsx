@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-
+// styles
 import './CardRow.css'
 
 interface CardRowProps {

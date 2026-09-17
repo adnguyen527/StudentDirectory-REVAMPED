@@ -1,13 +1,17 @@
 import { Fragment, useState } from 'react'
+// libraries
 import { Link } from 'react-router-dom'
-
+// apis
 import { formatDate, formatNumber } from '../api/bson'
 import type { ReportListItem } from '../api/types'
+// components
 import { OpenReportLink } from './OpenReportLink'
 import { Note } from './profile/SessionHistoryCard'
 import { ReportModal } from './ReportModal'
 import { ColumnHeader } from './SortHeader'
+// utils
 import { timeRange } from './timeRange'
+// styles
 import './profile/Profile.css'
 
 /** Date, Time, Student, Instructor, Center, Pages, Mathlete, Topics, Status, Open. */

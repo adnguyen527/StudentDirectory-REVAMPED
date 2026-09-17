@@ -1,11 +1,15 @@
+// hooks
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { getHomeTrends } from '../api/endpoints'
 import type { TrendBucket, TrendsResponse } from '../api/types'
+// components
 import { ColumnChart } from '../charts/BarChart'
-import { bucketHint, bucketLabel } from '../charts/buckets'
-import { useApi } from '../hooks/useApi'
 import { Card } from '../shell/Card'
 import { CardRow } from '../shell/CardRow'
+// utils
+import { bucketHint, bucketLabel } from '../charts/buckets'
 
 interface Measure {
   title: string

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+// libraries
 import { useSearchParams } from 'react-router-dom'
-
+// components
 import { CloseIcon, SearchIcon } from '../shell/Icons'
+// styles
 import './ListFilter.css'
 
 /** As GlobalSearch: long enough that typing does not fire a request per keystroke. */
@@ -14,7 +16,7 @@ interface ListFilterProps {
 }
 
 /**
- * A list page's own filter box, sitting where its card title used to be.
+ * A list page's own filter box, in the filter row under the page's heading.
  *
  * Not the top-bar dropdown: that one answers students and instructors together and jumps
  * you somewhere, while this narrows the table you are already reading.

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-
+// styles
 import './StatTile.css'
 
 interface StatTileProps {

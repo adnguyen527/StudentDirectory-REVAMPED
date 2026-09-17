@@ -1,13 +1,16 @@
 import { useState } from 'react'
+// libraries & hooks
 import { Link } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatDate, formatNumber } from '../../api/bson'
 import { listInstructors } from '../../api/endpoints'
 import type { InstructorListItem, InstructorsResponse } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// components
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
 import { Pager } from '../../shell/Pager'
+// styles
 import './Centers.css'
 
 const ROWS = 10

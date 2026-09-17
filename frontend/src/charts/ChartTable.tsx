@@ -45,7 +45,7 @@ export function ChartTable({ caption, columns, rows }: ChartTableProps) {
       </thead>
       <tbody>
         {rows.map((row, rowIndex) => (
-          // The row's own label is the stable key: bucket keys and centre names are unique
+          // The row's own label is the stable key: bucket keys and center names are unique
           // within a chart, and the index alone would reorder badly on a filter change.
           <tr key={String(row[0]) || rowIndex}>
             {row.map((cell, index) => (

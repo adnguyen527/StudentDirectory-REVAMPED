@@ -1,6 +1,7 @@
+// libraries
 import { useSearchParams } from 'react-router-dom'
-
-import { CHART_PARAM } from './useChartToggle'
+// utils
+import { VIEW_PARAM } from './centers/CenterActivityCard'
 
 /**
  * The URL params that position the list rather than narrow it.
@@ -10,8 +11,12 @@ import { CHART_PARAM } from './useChartToggle'
  * while a new *view* control is a one-word addition here. Listing the filters instead
  * would put the burden on the wrong side, which is how ticking a center came to filter the
  * list with nothing on screen offering to undo it.
+ *
+ * `VIEW_PARAM` is the center activity card's, and no list page renders that card today --
+ * it is listed because this set is the rule rather than an inventory of what happens to
+ * collide right now. It replaces `CHART_PARAM`, which went when the chart toggles did.
  */
-const VIEW_PARAMS = new Set(['offset', 'sort', 'direction', CHART_PARAM])
+const VIEW_PARAMS = new Set(['offset', 'sort', 'direction', VIEW_PARAM])
 
 /** The names of the params narrowing the list right now. */
 function activeFilters(params: URLSearchParams) {
@@ -25,7 +30,7 @@ function activeFilters(params: URLSearchParams) {
 }
 
 /**
- * The list pages' escape hatch, in the card header's right-hand slot.
+ * The list pages' escape hatch, at the end of the filter row -- see FilterBar.
  *
  * Renders nothing at all when the list is unfiltered -- the button is the only sign that
  * what you are reading is a subset, so it appearing has to mean exactly that.

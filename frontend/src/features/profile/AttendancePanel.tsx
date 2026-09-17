@@ -1,13 +1,16 @@
 import { useState } from 'react'
-
+// hooks
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatNumber, toDate } from '../../api/bson'
 import type { ExtDate } from '../../api/bson'
 import { getStudentAttendance } from '../../api/endpoints'
 import type { AttendanceResponse } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// components
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
 import { AttendanceHeatmap } from './AttendanceHeatmap'
+// styles
 import './Profile.css'
 
 /** 'YYYY-MM-DD' in UTC, which is what <input type="date"> and the route both speak. */

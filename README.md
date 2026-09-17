@@ -468,7 +468,7 @@ These skip with a clear message when `MONGODB_URI` is unset or still holds the
 
 ```bash
 cd frontend
-npm test                # 467 tests, Vitest + Testing Library
+npm test                # 506 tests, Vitest + Testing Library
 npm run test:watch      # re-runs on change
 npm run test:coverage
 ```
@@ -522,7 +522,7 @@ proving nothing.
 | GET | `/api/instructors/distribution` | instructors per center, under the list's own filters. The bars sum to **more** than the roster |
 | GET | `/api/instructors/trends` | time-bucketed sessions, distinct students and pages; `?instructor=` (repeatable), `?center=`, `?interval=`, `?date_from=`/`_to` |
 | GET | `/api/instructors/search?q=` | name search, minimum 2 characters |
-| GET | `/api/instructors/<instructor_name>` | one instructor, with the roster and days taught |
+| GET | `/api/instructors/<instructor_name>` | one instructor, with the roster, the days taught and the ranked topics |
 | GET | `/api/topics` | a page of topics, most worked first; `?query=` to search name, former names or id, a `_min`/`_max` pair per count column, `?sort=`+`?direction=` |
 | GET | `/api/topics/search?q=` | search, minimum 2 characters — matches `name`, `also_known_as` and `topic_id` |
 | GET | `/api/topics/<topic_id>` | one topic, with its ranked instructors |
@@ -878,7 +878,7 @@ last session, the report-volume chart from `/api/metrics`.
 
 Almost none. Every chart here draws **one series**, so bars and columns take `--accent`,
 which the contrast test already covers, and no legend is needed anywhere -- the card's title
-names what is plotted. The four centres all take the same colour: shading them by value
+names what is plotted. The four centers all take the same colour: shading them by value
 would re-encode bar length as hue and spend the only free channel on what the bar already
 shows.
 
@@ -901,7 +901,7 @@ meaning the tiles deny.
 ### Considered and set aside: Power BI
 
 Embedding Power BI was weighed for these charts and rejected, for reasons specific to what
-these are. They are UI bound to live app state -- the centre chart redraws as someone types
+these are. They are UI bound to live app state -- the center chart redraws as someone types
 in the search box -- not reports a manager opens, so each keystroke would round-trip through
 an iframe to a remote capacity where a local endpoint answers in ~120ms. It would re-derive
 in DAX the rules the six endpoints already encode, starting from raw collections where the
@@ -929,6 +929,11 @@ exactly to **29,382 sessions and 153,360 pages**.
 ---
 
 ## Known Issues
+
+- **Profile pages show two vertical scrollbars.** One scrollbar belongs to the profile page,
+  while the other scrolls the surrounding admin shell over it. Fix the profile-page layout and
+  overflow handling so that only the profile content is scrollable when entering a student or
+  instructor profile.
 
 - **The Topics card on a student profile collapses when its search matches nothing.**
   The card is built to hold one height whatever the filter — ten rows, padded out with
@@ -1024,12 +1029,11 @@ Items remain in priority order within each group.
 
 - [x] `P2` Added completed topics to the student aggregates, including per-status counts and
       instructor/topic reconciliation on the completed side.
-- [ ] `P2` **Add most-taught topics to instructors.** Build a ranked `topics[]` array in
-      `ingestion/build_instructors.py` with `{topic_id, name, sessions}`, expose it in the
-      instructor detail response and frontend types, and rebuild the collection. The list
-      projection should continue excluding the large array. The profile card currently shows
-      an unavailable-state placeholder; add linked topic rows, a clear ranking/tie rule, empty
-      and loading states, and frontend/integration coverage.
+- [x] `P2` Added a ranked `topics[]` to the instructor aggregate — `{topic_id, name,
+      sessions}`, ordered by `(-sessions, name)` so ties break alphabetically, named through
+      the same `canonical_name` the topics collection uses. The builder wrote it some time
+      before the card consumed it; the list projection excludes it, as it does `days_taught`
+      and `students`, because a median instructor carries 126 entries and the widest 504.
 - [x] `P2` Added topic completion and page-pace statistics used by the topic detail page.
 - [x] `P2` Switched report imports to the natural key with in-place replacement, retaining
       `_id` values; ambiguous keys are reported and skipped.
@@ -1128,15 +1132,21 @@ Items remain in priority order within each group.
       response if a student's history becomes large.
 - [x] `P2` Built instructor search/list/profile, plus topic list/detail, center filters, and
       the report browser/detail pages.
-- [ ] `P2` **Finish the instructor profile's Most-taught topics card** after the instructor
-      aggregate exposes `topics[]`. Show ranked topic links and session counts, define how ties
-      are ordered, handle instructors with no topic history, and replace the current explanatory
-      placeholder with loading, empty, and error states. Depends on the instructor builder/API
-      work above and a rebuild of the `instructors` collection.
-- [x] `P2` Added the centre-distribution bar chart above the student and instructor lists —
+- [x] `P2` Built the instructor profile's Most-taught topics card on that array. Opens on
+      the ten most taught — the title's own question — and expands to the full list with a
+      pager and a name-or-id search, since 504 rows is fifty pages. Each row links to the
+      topic and shows its id beneath the name, because 87 of the 103 instructors have a name
+      appearing twice or more in their own list and the ids are the only thing telling those
+      rows apart. A footnote says the column does not total: a session covers several topics,
+      so the counts come to about 1.73× the sessions actually taught, which would otherwise
+      read as contradicting the Sessions tile above it. Absent and empty `topics` are answered
+      separately — a document built before the field existed is stale, not topic-less. No
+      loading or error state, contrary to this item's original wording: the array arrives with
+      the instructor the page has already fetched, so both belong to the page.
+- [x] `P2` Added the center-distribution bar chart above the student and instructor lists —
       the same item as *center comparison charts* below, built once. Collapsed by default and
       mounted only when open, so a closed chart costs no request; reuses the list's own query,
-      centre and range filters while deliberately ignoring paging and sorting. The instructor
+      center and range filters while deliberately ignoring paging and sorting. The instructor
       card states `counted` against `total` in words, because 120 appearances across 103
       people otherwise reads as an error.
 - [x] `P2` Added the report-volume chart above the reports list, open on arrival. Reads the
@@ -1148,7 +1158,7 @@ Items remain in priority order within each group.
       shared axis would flatten two of the four into the baseline, and a second y-axis invents
       a correlation the data does not have. The students card reports its busiest month rather
       than a total, because a distinct count does not sum across months.
-- [x] `P2` Centre comparison charts — the same work as the centre-distribution item above,
+- [x] `P2` Center comparison charts — the same work as the center-distribution item above,
       which is why this is one entry's worth of code and two ticks.
 - [x] `P2` Added the student attendance heatmap inside the existing *Sessions in a period*
       card, drawn from the `visits[]` that card already fetches -- no new request, and no second
@@ -1179,7 +1189,7 @@ Items remain in priority order within each group.
       denominator, one bar chart of all seven, and the ambiguous natural keys named in full.
       Checks reading zero are shown too -- a zero is the good news, and hiding it makes the
       page look like it only finds problems. **Drill-down is deferred and the page says so**
-      rather than faking it: the reports list filters by student, centre and date, so there is
+      rather than faking it: the reports list filters by student, center and date, so there is
       no view to link "1,068 unfinalized" to until the `P3` finalized filter lands.
 - [x] `P3` Added the topic progression view on the student profile, computed entirely from
       the sessions already on the page. Measured before designing it: the widest student has

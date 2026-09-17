@@ -1,15 +1,20 @@
 import type { ReactNode } from 'react'
-
+// components
 import { MoreIcon } from './Icons'
+// styles
 import './Card.css'
 
 interface CardProps {
   /** Optional because `lead` can stand in its place -- see below. */
   title?: string
   /**
-   * Replaces the title on the left of the header. The list pages put their filter box
-   * here: the page's own <h1> already names the table, so repeating it in the card was
-   * two words where a control could go.
+   * Replaces the title on the left of the header, for a card whose header holds a control
+   * rather than a name -- profile/TopicsCard puts its search box here and supplies its own
+   * sr-only heading, so the section still has a name in the accessibility tree.
+   *
+   * ⚠️ Passing neither this nor `title` renders an *empty* <h2> and a bordered, empty
+   * header strip: the ?? below only guards `lead`. A card with nothing to put in its
+   * header wants a title, not an omission.
    */
   lead?: ReactNode
   /**

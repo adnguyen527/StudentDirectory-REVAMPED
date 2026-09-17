@@ -1,5 +1,5 @@
 /*
- * A list page's filter box, in the card header where the title used to be.
+ * A list page's filter box, and the page-level row it sits in.
  *
  * Deliberately not the .search classes from GlobalSearch.css: that one is a dropdown
  * anchored to the top bar with absolutely-positioned results under it, and borrowing its
@@ -51,7 +51,7 @@
   appearance: none;
 }
 
-/* Narrow screens: the field takes the header's full width rather than being crushed
+/* Narrow screens: the field takes the row's full width rather than being crushed
    against the controls beside it. */
 @media (max-width: 640px) {
   .list-filter {
@@ -59,8 +59,11 @@
   }
 }
 
-/* The card header's left slot, once it holds more than the search box. The search takes
-   the slack and each filter keeps its own width, so more filters can join the row. */
+/* The filters themselves. The search takes the slack and each filter keeps its own width,
+   so more filters can join the row.
+ *
+ * ⚠️ `flex: 1` is load-bearing in its parent, not here: inside .filter-bar it is what
+   pushes Clear to the far end, the same job it did when this sat in a card header. */
 .list-controls {
   display: flex;
   align-items: center;
@@ -72,4 +75,20 @@
   .list-controls {
     flex-wrap: wrap;
   }
+}
+
+/*
+ * The page-level filter row: the filters, and the way out of them.
+ *
+ * Bare rather than a card, following .center-bar on the metrics page -- a control that
+ * scopes the whole page is chrome for the page, not another panel beside the ones it
+ * governs. FilterBar.tsx says why it sits above the chart rather than in the table's card.
+ *
+ * No margin: .page is a flex column with its own gap.
+ */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }

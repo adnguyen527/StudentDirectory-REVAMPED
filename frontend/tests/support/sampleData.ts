@@ -474,6 +474,39 @@ export const DANA_DETAIL: InstructorDetail = {
       pages_completed: 27,
     },
   ],
+  /*
+   * Her ranked topics, mirroring the Python fixture's tie (Decimals before Fractions at
+   * two sessions each) and carrying the two traps measured on the real collection.
+   *
+   * ⚠️ **A name appears twice** -- *Word Problems – Multi-Step* at T-300 and again at
+   * T-301, with different counts. 87 of the 103 real instructors have such a pair and no
+   * fixture did, so the one thing the card's topic ids exist for went untested. The two
+   * land at #2 and #10, both inside the opening ten, where the contradiction is visible.
+   *
+   * ⚠️ **Thirteen topics against four sessions taught** is deliberately impossible data.
+   * A real instructor's per-topic sessions come to about 1.73× the sessions they taught;
+   * these come to 7.5×. It is the one liberty the fixture takes, and it is taken because
+   * the expand button, the search box and the pager only exist above ten rows -- a
+   * plausible four-session list would be three topics and none of them would render.
+   */
+  topics: [
+    { topic_id: 'T-310', name: 'Angles', sessions: 4 },
+    { topic_id: 'T-300', name: 'Word Problems – Multi-Step', sessions: 4 },
+    { topic_id: 'T-311', name: 'Addition – Carrying', sessions: 3 },
+    { topic_id: 'T-312', name: 'Area and Perimeter', sessions: 3 },
+    { topic_id: 'T-313', name: 'Division – Long', sessions: 3 },
+    // The Python fixture's tie, in the order the builder's (-sessions, name) sort gives.
+    { topic_id: 'T-110', name: 'Decimals', sessions: 2 },
+    { topic_id: 'T-100', name: 'Fractions', sessions: 2 },
+    { topic_id: 'T-314', name: 'Geometry Basics', sessions: 2 },
+    { topic_id: 'T-315', name: 'Measurement', sessions: 2 },
+    // The second half of the duplicate pair, tenth and so the last row of the top ten.
+    { topic_id: 'T-301', name: 'Word Problems – Multi-Step', sessions: 2 },
+    // The eleventh onward exist to give the pager a second page to turn to.
+    { topic_id: 'T-316', name: 'Percentages', sessions: 1 },
+    { topic_id: 'T-317', name: 'Rounding', sessions: 1 },
+    { topic_id: 'T-318', name: 'Telling Time', sessions: 1 },
+  ],
 }
 
 /*

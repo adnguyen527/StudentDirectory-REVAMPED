@@ -18,7 +18,7 @@ export interface Datum {
    * The axis has to be terse -- fifty bands share one row, so a week is `W25` -- but `W25`
    * on its own does not say *when*, which is the whole point of reading a timeline. A time
    * chart passes the days the bucket covers here and keeps the short form on the axis.
-   * Omitted where the label already says everything, as on the centre distributions.
+   * Omitted where the label already says everything, as on the center distributions.
    */
   hint?: string
   /**
@@ -93,13 +93,13 @@ function twinOf(data: readonly Datum[], caption: string, valueLabel: string, for
 }
 
 /**
- * Horizontal bars, one per category -- the centre distributions.
+ * Horizontal bars, one per category -- the center distributions.
  *
- * Horizontal because the categories are words: a centre called "North Dallas" set under a
+ * Horizontal because the categories are words: a center called "North Dallas" set under a
  * vertical column either wraps, tilts or truncates, and all three are worse than simply
  * running the bar the other way and letting the name sit beside it on one line.
  *
- * One colour for every bar. The centres have no order, so shading them by value would
+ * One colour for every bar. The centers have no order, so shading them by value would
  * re-encode bar length as hue -- spending the only free channel on what the length already
  * says. A single series also needs no legend: the card's title names what is plotted.
  */

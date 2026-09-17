@@ -1,21 +1,26 @@
 import { useMemo, useState } from 'react'
+// libraries & hooks
 import { Link, useParams } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatDate, formatNumber, toDate } from '../../api/bson'
 import { getInstructor } from '../../api/endpoints'
 import type { ExtDate } from '../../api/bson'
 import type { InstructorDetailResponse, InstructorRosterEntry } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// components
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
 import { InstructorWorkloadCard } from './InstructorWorkloadCard'
+import { InstructorTopicsCard } from './InstructorTopicsCard'
 import { CardRow } from '../../shell/CardRow'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { Pager } from '../../shell/Pager'
 import { StatTile } from '../../shell/StatTile'
+// utils
 import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { daysPerWeek } from './daysPerWeek'
 import { PAGES_PER_SESSION_MIN, pagesPerSession } from './pagesPerSession'
+// styles
 import './Profile.css'
 
 /** Matches the topic page's instructor table. 91% of rosters need more than one page --
@@ -313,16 +318,12 @@ export function InstructorProfilePage() {
         lastSessionDate={instructor.last_session_date}
       />
 
-      {/* Named in the README's profile spec but not buildable: the instructors collection
-          carries no topic data, so there is nothing to rank. See the P2 data-integrity
-          item "Add most-taught topics to instructors". */}
-      <Card title="Most-taught topics" showOverflow={false}>
-        <p className="muted">
-          Not available yet — the <code>instructors</code> collection carries no topic data,
-          so there is nothing to rank. It needs the ranked topic counts added by
-          <code> ingestion/build_instructors.py</code> first.
-        </p>
-      </Card>
+      {/* Full width for the same reason as the workload above it: expanded, this is a
+          paged table of up to 504 rows with a search box in its header. */}
+      <InstructorTopicsCard
+        topics={instructor.topics}
+        sessionsTaught={instructor.total_sessions_taught}
+      />
     </div>
   )
 }

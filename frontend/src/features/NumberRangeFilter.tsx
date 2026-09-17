@@ -1,8 +1,10 @@
 import { useState } from 'react'
-
+// components
 import { FunnelIcon } from '../shell/Icons'
 import { FilterPopover } from '../shell/FilterPopover'
+// utils
 import { useRange, type RangeState } from './ranges'
+// styles
 import './ColumnFilter.css'
 
 interface NumberRangeFilterProps {

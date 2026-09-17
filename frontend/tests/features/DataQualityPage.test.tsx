@@ -142,7 +142,7 @@ describe('data quality page', () => {
     expect(await screen.findByText(/these counts are not yet clickable/i)).toBeInTheDocument()
   })
 
-  it('scopes to the picked centres', async () => {
+  it('scopes to the picked centers', async () => {
     const seen: string[] = []
     server.use(
       http.get('/api/reports/quality', ({ request }) => {

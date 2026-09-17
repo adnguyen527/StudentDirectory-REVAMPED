@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
-
+// apis
 import { formatDate, formatNumber, toDate } from '../../api/bson'
 import type { Topic, TopicState } from '../../api/types'
+// components
 import { Card } from '../../shell/Card'
 import { CardSearch } from '../CardSearch'
 import { Pager } from '../../shell/Pager'
+// styles
 import './Profile.css'
 
 type Filter = TopicState | 'all'

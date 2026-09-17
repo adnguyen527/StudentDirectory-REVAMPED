@@ -86,7 +86,7 @@ describe('column marks', () => {
   })
 
   it('reserves the chart height while loading rather than collapsing', () => {
-    // AsyncBoundary's centred "Loading…" would shrink the card to one line and make it
+    // AsyncBoundary's centered "Loading…" would shrink the card to one line and make it
     // jump when data lands -- the problem StatTile's own skeleton exists to avoid.
     const { container } = render(
       <ColumnChart data={[]} caption="Test" valueLabel="Count" loading />,
@@ -118,7 +118,7 @@ describe('mark tooltips', () => {
   })
 
   it('falls back to the label where a hint would say nothing new', () => {
-    // The centre distributions pass none: "Westside" is already the whole answer.
+    // The center distributions pass none: "Westside" is already the whole answer.
     const { container } = render(
       <BarChart
         data={[{ key: 'w', label: 'Westside', value: 395 }]}

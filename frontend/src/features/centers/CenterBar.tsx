@@ -1,8 +1,10 @@
+// libraries & hooks
 import { useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { listCenters } from '../../api/endpoints'
 import type { CentersResponse } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// styles
 import './Centers.css'
 
 /**

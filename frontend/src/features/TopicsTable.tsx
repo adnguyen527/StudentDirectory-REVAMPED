@@ -1,7 +1,9 @@
+// libraries
 import { Link } from 'react-router-dom'
-
+// apis
 import { formatNumber } from '../api/bson'
 import type { TopicListItem } from '../api/types'
+// components
 import { NumberRangeFilter } from './NumberRangeFilter'
 import { ColumnHeader } from './SortHeader'
 

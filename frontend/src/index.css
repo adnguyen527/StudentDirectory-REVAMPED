@@ -202,6 +202,26 @@ button:disabled {
   background: var(--surface-sunken);
 }
 
+/*
+ * The pressed one, in a group of buttons that pick between views.
+ *
+ * ⚠️ This rule was missing until the center activity card needed it, so every switcher
+ * already writing `button-on` -- the instructor workload card's measure buttons among them
+ * -- drew its selected button exactly like the other two. `aria-pressed` said which was
+ * active and nothing on screen did.
+ *
+ * `--accent-soft` with `--wash-1-ink`, the pair `.chip-active` already uses for the same
+ * job, so the two families of picker read as one idea. The transparent border keeps the
+ * box the same size as its unpressed neighbours.
+ */
+.button-on,
+.button-on:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--wash-1-ink);
+  font-weight: 600;
+}
+
 /* The same button at row scale. A table holds fifty of these, so the default padding would
    set the row height rather than the content doing it. */
 .button-row {

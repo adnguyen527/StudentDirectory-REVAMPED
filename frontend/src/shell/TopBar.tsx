@@ -1,5 +1,7 @@
+// components
 import { GlobalSearch } from '../features/GlobalSearch'
 import { ChevronIcon } from './Icons'
+// styles
 import './TopBar.css'
 
 /** Global search on the left, user menu on the right -- the reference's top bar. */

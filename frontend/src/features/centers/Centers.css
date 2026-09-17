@@ -41,3 +41,18 @@
   background: var(--accent-hover);
   color: var(--text-on-accent);
 }
+
+/*
+ * The activity card's view selector: Sessions / Students / Instructors.
+ *
+ * A group of its own inside .card-controls-wrap rather than three loose buttons, so when the
+ * header runs out of room the three wrap together and the date filter goes to the next line
+ * whole -- three picks split across two rows read as two unrelated controls.
+ *
+ * Deliberately not .center-pill above it: those are the page's filter and this is a view
+ * switch. Two controls one over the other, doing different jobs, should not look alike.
+ */
+.view-switch {
+  display: flex;
+  gap: var(--space-1);
+}

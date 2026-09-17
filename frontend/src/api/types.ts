@@ -223,12 +223,42 @@ export interface InstructorRosterEntry {
   pages_completed: number
 }
 
-/** The detail document: the base plus the two arrays the list projection drops. */
+/**
+ * One topic an instructor taught, ranked most-taught first then alphabetically.
+ *
+ * The other side of `TopicInstructor` below -- the same (instructor, topic) pairs read from
+ * the instructor rather than from the topic, which a live test holds to pair for pair.
+ *
+ * ⚠️ `topic_id` is not decoration. A session's topics are named by
+ * `build_topics.canonical_name`, and names are not unique: 87 of 103 instructors have a name
+ * appearing twice or more in their own list, one of them three times at 59, 26 and 8
+ * sessions. Rendered without the id those read as one row repeated with contradictory
+ * numbers.
+ *
+ * ⚠️ `sessions` does not total. A session covers several topics, so these add to about 1.73
+ * times the sessions the instructor actually taught. Read each row on its own.
+ */
+export interface InstructorTopic {
+  topic_id: string
+  name: string
+  sessions: number
+}
+
+/** The detail document: the base plus the three arrays the list projection drops. */
 export interface InstructorDetail extends InstructorBase {
   /** Every distinct day taught, oldest first. Up to 209 in the current data. */
   days_taught: ExtDate[]
   /** Sorted by sessions, so [0] is who they taught most. Up to 304 entries. */
   students: InstructorRosterEntry[]
+  /**
+   * What they taught most. A median of 126 entries and up to 504.
+   *
+   * Optional for the reason `finalized_sessions` above is: the collection only grew this
+   * when build_instructors.py learned to write it, so a document from before that rebuild
+   * simply has none. Absent and empty are different answers and the card says so separately
+   * -- telling a stale document "no topics recorded" would be wrong rather than missing.
+   */
+  topics?: InstructorTopic[]
 }
 
 /** Wrapped in an object rather than returned bare, so stats can be added beside it. */
@@ -365,7 +395,7 @@ export interface TopicRollupBase {
   session_pages_ratio_basis: number
   /**
    * ⚠️ The line a topic's ratio is read against, and it is **not 1.0**: a session's pages
-   * count once for every topic on it, so centred on 1.0 some 223 of 283 topics read as
+   * count once for every topic on it, so centered on 1.0 some 223 of 283 topics read as
    * speeding students up. 1.21 on the current data, with half the topics each side.
    *
    * Program-wide and identical on every document -- see build_topics.py for why it is
@@ -517,11 +547,11 @@ export interface CenterCountRow {
 }
 
 /**
- * How a filtered list divides across centres -- models/distribution.py.
+ * How a filtered list divides across centers -- models/distribution.py.
  *
  * ⚠️ `total` and `counted` are different numbers and both are wanted. `total` is the rows
  * the list would show; `counted` is the sum of the bars. They are equal on students, where
- * a student belongs to exactly one centre, and `counted` is larger on instructors, where 11
+ * a student belongs to exactly one center, and `counted` is larger on instructors, where 11
  * of 103 work at two or more and appear under each. One person, two bars -- the page has to
  * label that rather than let the arithmetic look broken.
  */
@@ -530,7 +560,7 @@ export interface DistributionResponse {
   centers: string[]
   total: number
   counted: number
-  /** Rows carrying no centre at all. 0 on both collections today, reported rather than assumed. */
+  /** Rows carrying no center at all. 0 on both collections today, reported rather than assumed. */
   no_center: number
   distribution: CenterCountRow[]
 }

@@ -1,21 +1,23 @@
+// libraries & hooks
 import { useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { PAGE_SIZE, listReports } from '../api/endpoints'
 import type { ReportsResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
 import { useDocumentTitle } from '../shell/useDocumentTitle'
 import { CenterFilter } from './CenterFilter'
-import { ClearFilters } from './ClearFilters'
 import { DateRangeFilter } from './DateRangeFilter'
+import { FilterBar } from './FilterBar'
 import { ListFilter } from './ListFilter'
-import { orderPhrase, type OrderPhrase } from './orderPhrase'
-import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 import { ReportsTable } from './ReportsTable'
-import { ReportVolumeCard } from './ReportVolumeCard'
+// utils
+import { nounFor, orderPhrase, type OrderPhrase } from './orderPhrase'
+import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 
 // The columns this list can be bounded by -- the same declaration models/dwp_report.py
 // makes as FILTERABLE, and the URL's names are the API's.
@@ -41,11 +43,12 @@ const ORDER: Record<string, OrderPhrase> = {
  * what makes it worth having: students, instructors and topics all answer "how has this
  * gone over time", and none of them answers "what happened at Southlake last Tuesday".
  *
- * Unlike the other three, the filters sit together in the card header rather than in the
- * column headers. The distinction that puts them there is what you arrive knowing: a
- * student list is scanned and then narrowed by a column you are already looking at, while
- * a session list is almost always entered with a period and a center already in mind, and
- * a filter you have to go hunting through a header row for is the wrong shape for that.
+ * Unlike the other three, its one bounded column -- the date -- is filtered from the row
+ * above the table rather than from the column header. What you arrive knowing is the
+ * distinction: a student list is scanned and then narrowed by a column you are already
+ * looking at, while a session list is almost always entered with a period and a center
+ * already in mind, and a filter you have to go hunting through a header row for is the
+ * wrong shape for that.
  */
 export function ReportsPage() {
   useDocumentTitle('Reports')
@@ -78,36 +81,34 @@ export function ReportsPage() {
 
   const page = data?.page
 
+  /**
+   * What the table is, in words -- the count and the order it is in.
+   *
+   * ⚠️ Leads with the count rather than the noun alone. "Reports" here would name the same
+   * thing the <h1> above already names, which reads as a repeat on screen and makes
+   * getByRole('heading', { name: 'Reports' }) ambiguous in a test.
+   */
+  const summary = page
+    ? `${formatNumber(page.total)} ${query ? 'matching ' : ''}${nounFor(page.total, 'report')}, ` +
+      `${orderPhrase(ORDER, 'newest first', sort, direction)}`
+    : 'Newest first'
+
   return (
     <div className="page">
       <div className="page-header">
         <h1>Reports</h1>
-        <p>
-          {page
-            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, ` +
-              `${orderPhrase(ORDER, 'newest first', sort, direction)}.`
-            : 'Newest first.'}
-        </p>
       </div>
 
-      {/* Above the table and open on arrival: this is the one list entered with a
-          period already in mind, so the shape of that period leads. */}
-      <ReportVolumeCard />
+      {/* The placeholder says what the box matches -- the student, not the instructor, who
+          is a column you read rather than the thing you arrive looking for. */}
+      <FilterBar>
+        <ListFilter placeholder="Search reports by student name" />
+        <CenterFilter />
+        <DateRangeFilter column="date" label="session date" standalone />
+      </FilterBar>
 
-      {/* No title: the <h1> above already says Reports. The placeholder says what the box
-          matches -- the student, not the instructor, who is a column you read rather than
-          the thing you arrive looking for. */}
-      <Card
-        lead={
-          <div className="list-controls">
-            <ListFilter placeholder="Search reports by student name" />
-            <CenterFilter />
-            <DateRangeFilter column="date" label="session date" standalone />
-          </div>
-        }
-        flush
-        controls={<ClearFilters />}
-      >
+      {/* The count and the order name the *table*, not the page -- see StudentsPage. */}
+      <Card title={summary} flush>
         <AsyncBoundary
           loading={loading}
           error={error}

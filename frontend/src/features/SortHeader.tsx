@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
-
+// components
 import { SortIcon } from '../shell/Icons'
+// utils
 import { useSort, type SortDirection, type SortState } from './useSort'
+// styles
 import './SortHeader.css'
 
 interface ColumnHeaderProps {

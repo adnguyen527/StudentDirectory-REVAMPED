@@ -1,8 +1,10 @@
+// libraries & hooks
 import { Link } from 'react-router-dom'
-
+import { useApi } from '../hooks/useApi'
+// apis
 import { getReport } from '../api/endpoints'
 import type { ReportDetailResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Modal } from '../shell/Modal'
 import { ReportChips, ReportDetailBody } from './profile/ReportDetailBody'

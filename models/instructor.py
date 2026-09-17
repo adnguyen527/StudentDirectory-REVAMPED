@@ -133,7 +133,12 @@ class Instructor:
 
     @staticmethod
     def find_by_name(instructor_name):
-        """One instructor, roster and days included -- exact match on the unique index."""
+        """One instructor, roster, days and topics included -- exact match on the unique
+        index.
+
+        No projection, deliberately: the three arrays LIST_PROJECTION drops are the whole
+        reason a detail view exists.
+        """
         return Instructor._collection().find_one({'instructor_name': instructor_name})
 
     @staticmethod

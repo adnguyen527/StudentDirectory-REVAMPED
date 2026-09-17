@@ -1,14 +1,17 @@
 import { useState } from 'react'
-
+// hooks
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatNumber, isoDay, toDate } from '../../api/bson'
 import type { ExtDate } from '../../api/bson'
 import { getInstructorTrends } from '../../api/endpoints'
 import type { TrendBucket, TrendsResponse } from '../../api/types'
+// components
 import { ColumnChart } from '../../charts/BarChart'
-import { bucketHint, bucketLabel, pickInterval } from '../../charts/buckets'
-import { useApi } from '../../hooks/useApi'
 import { Card } from '../../shell/Card'
 import { DateRangeFilter } from '../DateRangeFilter'
+// utils
+import { bucketHint, bucketLabel, pickInterval } from '../../charts/buckets'
 import { useCardRange } from '../ranges'
 
 type MetricKey = 'sessions' | 'students' | 'pages_completed'

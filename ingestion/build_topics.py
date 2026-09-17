@@ -208,7 +208,7 @@ def page_ratios(sessions):
     Nobody should later "simplify" this into one.
 
     ⚠️ **Its neutral point is not 1.0.** A session's pages count once for every topic on
-    it, which biases every ratio upward: centred on 1.0, 223 of the 283 qualifying topics
+    it, which biases every ratio upward: centered on 1.0, 223 of the 283 qualifying topics
     read as speeding students up. The program median returned here -- 1.21 on the current
     data -- is the line to read them against, and half the topics sit each side of it by
     construction.

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+// libraries
 import { useSearchParams } from 'react-router-dom'
 
 /** Which suffix pair a column's bounds take -- routes/filtering.py, BOUNDS. */

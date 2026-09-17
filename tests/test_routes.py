@@ -827,7 +827,7 @@ class TestSearchInstructors:
 
 class TestGetInstructor:
 
-    def test_returns_the_instructor_with_roster_and_days(self, client):
+    def test_returns_the_instructor_with_roster_days_and_topics(self, client):
         response = client.get('/api/instructors/Dana Reyes')
         assert response.status_code == 200
 
@@ -837,6 +837,11 @@ class TestGetInstructor:
         assert len(instructor['days_taught']) == 3
         assert [s['student_name'] for s in instructor['students']] == [
             'Anthony Nguyen', 'Ava Nguyen'
+        ]
+        # On the wire, in rank order, with the id beside the name -- the profile's
+        # most-taught card needs the id because topic names are not unique.
+        assert [(t['topic_id'], t['sessions']) for t in instructor['topics']] == [
+            ('T-110', 2), ('T-100', 2)
         ]
 
     def test_a_name_with_a_space_survives_url_encoding(self, client):

@@ -1,13 +1,17 @@
+// libraries & hooks
 import { Link, useParams } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatDate } from '../../api/bson'
 import { getReport } from '../../api/endpoints'
 import type { ReportDetailResponse } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// components
 import { Card } from '../../shell/Card'
 import { ChevronIcon } from '../../shell/Icons'
-import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { ReportChips, ReportDetailBody } from './ReportDetailBody'
+//utils 
+import { useDocumentTitle } from '../../shell/useDocumentTitle'
+// styles
 import './Profile.css'
 
 /**

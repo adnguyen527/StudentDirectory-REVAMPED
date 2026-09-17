@@ -290,9 +290,9 @@ const TOPIC_DETAILS: Record<string, TopicDetail> = {
  * which is the only way a test can prove the chart reuses the list's filter state. A fake
  * answering a fixed body would make that claim untestable.
  *
- * ⚠️ The $unwind trap is reproduced faithfully: a person at two centres contributes a count
+ * ⚠️ The $unwind trap is reproduced faithfully: a person at two centers contributes a count
  * to *each*, so `counted` runs above `total`, and when `?center=` narrows the selection only
- * the requested centres appear. A fake that filtered documents but not their centres would
+ * the requested centers appear. A fake that filtered documents but not their centers would
  * hide the exact bug the route's second $match exists to prevent.
  */
 function distribution<T extends { centers: { name: string }[] }>(rows: T[], url: URL) {

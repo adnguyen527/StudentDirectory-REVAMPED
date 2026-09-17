@@ -1,18 +1,21 @@
+// libraries & hooks
 import { useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { PAGE_SIZE, listTopics } from '../api/endpoints'
 import type { TopicsResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
-import { useDocumentTitle } from '../shell/useDocumentTitle'
-import { ClearFilters } from './ClearFilters'
+import { FilterBar } from './FilterBar'
 import { ListFilter } from './ListFilter'
-import { orderPhrase, type OrderPhrase } from './orderPhrase'
-import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 import { TopicsTable } from './TopicsTable'
+// utils
+import { useDocumentTitle } from '../shell/useDocumentTitle'
+import { nounFor, orderPhrase, type OrderPhrase } from './orderPhrase'
+import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 
 // As StudentsPage. The resting order here is most-worked rather than by name, which is
 // why the third click on a header has to be able to get back to it.
@@ -82,26 +85,36 @@ export function TopicsPage() {
 
   const page = data?.page
 
+  /**
+   * What the table is, in words -- the count and the order it is in.
+   *
+   * ⚠️ Leads with the count rather than the noun alone. "Topics" here would name the same
+   * thing the <h1> above already names, which reads as a repeat on screen and makes
+   * getByRole('heading', { name: 'Topics' }) ambiguous in a test.
+   */
+  const summary = page
+    ? `${formatNumber(page.total)} ${query ? 'matching ' : ''}${nounFor(page.total, 'topic')}, ` +
+      `${orderPhrase(ORDER, 'most worked first', sort, direction)}`
+    : 'Most worked first'
+
   return (
     <div className="page">
       <div className="page-header">
         <h1>Topics</h1>
-        <p>
-          {page
-            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, ` +
-              `${orderPhrase(ORDER, 'most worked first', sort, direction)}.`
-            : 'Most worked first.'}
-        </p>
       </div>
 
-      {/* No title: the <h1> above already says Topics. The placeholder says what the
-          box matches -- the id is a real handle, and the only thing separating two topics
-          that share a name. */}
-      <Card
-        flush
-        lead={<ListFilter placeholder="Search topics by name or id" />}
-        controls={<ClearFilters />}
-      >
+      {/* The placeholder says what the box matches -- the id is a real handle, and the only
+          thing separating two topics that share a name.
+
+          This list has no chart for the row to also scope, so it gains nothing here beyond
+          being laid out like the other three. Consistency is the reason: a search box that
+          moves depending on which list you opened is worse than one that does not. */}
+      <FilterBar>
+        <ListFilter placeholder="Search topics by name or id" />
+      </FilterBar>
+
+      {/* The count and the order name the *table*, not the page -- see StudentsPage. */}
+      <Card title={summary} flush>
         <AsyncBoundary
           loading={loading}
           error={error}

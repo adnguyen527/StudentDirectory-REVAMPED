@@ -1,7 +1,9 @@
+// libraries
 import { Link } from 'react-router-dom'
-
+// apis
 import { formatDate, formatNumber } from '../api/bson'
 import type { StudentListItem } from '../api/types'
+// components
 import { DateRangeFilter } from './DateRangeFilter'
 import { NumberRangeFilter } from './NumberRangeFilter'
 import { ColumnHeader } from './SortHeader'

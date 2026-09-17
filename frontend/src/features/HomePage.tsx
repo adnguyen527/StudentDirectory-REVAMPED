@@ -1,7 +1,10 @@
+// hooks
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { getMetrics, listStudents } from '../api/endpoints'
 import type { Metrics, StudentsResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { DashboardIcon, InstructorsIcon, StudentsIcon } from '../shell/Icons'

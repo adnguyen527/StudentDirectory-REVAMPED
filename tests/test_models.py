@@ -160,10 +160,14 @@ class TestInstructor:
         ]
 
     def test_find_all_omits_the_growing_arrays(self, seeded_db):
-        """days_taught and the roster are detail-view data; a list must not carry them."""
+        """days_taught, the roster and the topics are detail-view data; a list must not
+        carry them."""
         listed = rows(Instructor.find_all(PAGE))
         assert all('days_taught' not in i for i in listed)
         assert all('students' not in i for i in listed)
+        # The third and largest of them: a median of 126 entries and up to 504, which on a
+        # page of 50 instructors is the difference between a listing and a download.
+        assert all('topics' not in i for i in listed)
         # The counts that stand in for them have to survive the projection.
         assert all('total_days_taught' in i and 'unique_students' in i for i in listed)
 
@@ -174,6 +178,19 @@ class TestInstructor:
         assert dana['days_taught'] == [_day(2026, 3, 7), _day(2026, 3, 10), _day(2026, 3, 14)]
         assert [s['student_name'] for s in dana['students']] == [
             'Anthony Nguyen', 'Ava Nguyen'
+        ]
+
+    def test_find_by_name_returns_the_ranked_topics(self, seeded_db):
+        """The third array, and the one the profile's most-taught card is built on.
+
+        Ranked by the builder, not by the reader: `(-sessions, name)`, so a tie is broken
+        alphabetically. Dana's two are tied at two sessions each for exactly that reason,
+        and a lookup that returned them in insertion order would put Fractions first.
+        """
+        dana = Instructor.find_by_name('Dana Reyes')
+        assert [(t['topic_id'], t['name'], t['sessions']) for t in dana['topics']] == [
+            ('T-110', 'Decimals', 2),
+            ('T-100', 'Fractions', 2),
         ]
 
     def test_find_by_name_is_exact_not_a_prefix(self, seeded_db):

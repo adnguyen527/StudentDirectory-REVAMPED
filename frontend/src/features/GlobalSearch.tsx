@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+// libraries & hooks
 import { useNavigate } from 'react-router-dom'
-
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { MIN_SEARCH_LENGTH, searchInstructors, searchStudents } from '../api/endpoints'
 import type { InstructorsResponse, StudentsResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { CloseIcon, SearchIcon } from '../shell/Icons'
+// styles
 import './GlobalSearch.css'
 
 const DEBOUNCE_MS = 250

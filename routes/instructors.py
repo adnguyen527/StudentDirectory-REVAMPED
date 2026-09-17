@@ -136,7 +136,7 @@ def search_instructors():
 
 @instructors_bp.route('/instructors/<instructor_name>', methods=['GET'])
 def get_instructor(instructor_name):
-    """One instructor, roster and days included.
+    """One instructor, roster, days and ranked topics included.
 
     The name is the key, so it travels URL-encoded in the path. Wrapped in an object so
     a profile page's later additions do not move what is already here.

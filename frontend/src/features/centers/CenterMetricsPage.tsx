@@ -1,9 +1,11 @@
+// libraries & hooks
 import { useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatNumber } from '../../api/bson'
 import { getCenterMetrics } from '../../api/endpoints'
 import type { CenterMetricsResponse } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// components
 import {
   DashboardIcon,
   InstructorsIcon,
@@ -12,10 +14,12 @@ import {
 } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
 import { useDocumentTitle } from '../../shell/useDocumentTitle'
+import { CenterActivityCard } from './CenterActivityCard'
 import { CenterBar } from './CenterBar'
 import { CenterInstructorsCard } from './CenterInstructorsCard'
 import { CenterSessionsCard } from './CenterSessionsCard'
 import { CenterStudentsCard } from './CenterStudentsCard'
+// styles
 import './Centers.css'
 
 /**
@@ -113,6 +117,16 @@ export function CenterMetricsPage() {
           />
         </div>
       )}
+
+      {/* Directly under the tiles, because it is the same five figures drawn over time and
+          across centers rather than summed. It shares the sessions card's anchor for the
+          same reason, and for its bucket width rather than its opening window -- this one
+          opens on Any time. */}
+      <CenterActivityCard
+        centers={centers}
+        lastSession={totals?.last_session ?? null}
+        anchorLoading={loading}
+      />
 
       {/* The card opens on the newest session day at these centers, which is why the
           anchor comes from the totals already fetched above rather than from a second

@@ -33,3 +33,18 @@ export function orderPhrase(
   if (!phrase) return resting
   return (direction ?? phrase.first) === 'asc' ? phrase.asc : phrase.desc
 }
+
+/**
+ * The noun a count takes: "1 student", "893 students".
+ *
+ * It exists because naming the thing being counted introduced a bug the old wording dodged.
+ * The line used to read "1 matching, sorted by name" -- no noun, so no plural to get wrong.
+ * Naming it reads better and made "1 matching students" possible, which is the kind of
+ * mistake that survives review because it only appears when a filter matches exactly one row.
+ *
+ * Every noun these lists count -- student, instructor, topic, report, center -- is a regular
+ * plural, so this stays a rule rather than a table. A noun that is not would need one.
+ */
+export function nounFor(count: number, singular: string): string {
+  return count === 1 ? singular : `${singular}s`
+}

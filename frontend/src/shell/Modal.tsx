@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+// libraries
 import { createPortal } from 'react-dom'
-
+// components
 import { CloseIcon } from './Icons'
+// styles
 import './Modal.css'
 
 interface ModalProps {

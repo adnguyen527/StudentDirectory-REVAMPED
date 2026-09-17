@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import './Chart.css'
 
 interface ChartFigureProps {
-  /** What the chart is, as a sentence fragment -- "Students by centre". */
+  /** What the chart is, as a sentence fragment -- "Students by center". */
   caption: string
   /** Reserved-height placeholder while the data is in flight. */
   loading?: boolean
@@ -24,7 +24,7 @@ interface ChartFigureProps {
  * component with eleven booleans. What is shared between a bar chart and a calendar grid is
  * the *semantics*, and that is all this holds.
  *
- * **Loading is handled here rather than by AsyncBoundary.** The boundary renders a centred
+ * **Loading is handled here rather than by AsyncBoundary.** The boundary renders a centered
  * `<p>Loading…</p>`, which collapses a chart to a single line and makes the card jump when
  * the data lands. StatTile hit the same problem and solved it the same way, with its own
  * `loading` prop over a fixed-size placeholder: "a bar the width of a plausible number, so

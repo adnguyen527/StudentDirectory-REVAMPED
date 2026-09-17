@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-
+// components
 import { ChevronIcon } from './Icons'
+ // styles
 import './FilterDropdown.css'
 
 interface FilterPopoverProps {

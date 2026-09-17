@@ -66,10 +66,15 @@ describe('reports page', () => {
     expect(screen.getAllByText('Unfinalized')).toHaveLength(2)
   })
 
-  it('rests newest first, and says so under the title', async () => {
+  it('rests newest first, and says so on the table it describes', async () => {
     renderApp('/reports')
 
-    expect(await screen.findByText(/4 in total, newest first\./)).toBeInTheDocument()
+    // The count and the order name the table, so they sit on the table's card rather than
+    // under the page heading -- and lead with the count, which keeps this heading from
+    // colliding with the <h1> that already says "Reports".
+    expect(
+      await screen.findByRole('heading', { name: /4 reports, newest first/i }),
+    ).toBeInTheDocument()
     await waitFor(() =>
       expect(dateColumn()).toEqual(['Mar 14, 2026', 'Mar 14, 2026', 'Mar 10, 2026', 'Jan 5, 2026']),
     )

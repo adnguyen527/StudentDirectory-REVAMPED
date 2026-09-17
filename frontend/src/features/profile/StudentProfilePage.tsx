@@ -1,25 +1,29 @@
 import { useMemo, useState } from 'react'
+// libraries & hooks
 import { Link, useParams } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatDate, formatNumber, toDate } from '../../api/bson'
 import { getStudent } from '../../api/endpoints'
 import type { StudentDetailResponse, StudentInstructor } from '../../api/types'
-import { useApi } from '../../hooks/useApi'
+// components
 import { Card } from '../../shell/Card'
 import { CardRow } from '../../shell/CardRow'
 import { Pager } from '../../shell/Pager'
 import { NumberRangeFilter } from '../NumberRangeFilter'
 import { ColumnHeader } from '../SortHeader'
-import { useCardRange } from '../ranges'
-import { useCardSort } from '../useSort'
 import { ChevronIcon, DashboardIcon, InstructorsIcon, StudentsIcon } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
-import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { AttendancePanel } from './AttendancePanel'
 import { SessionHistoryCard } from './SessionHistoryCard'
 import { TopicProgressCard } from './TopicProgressCard'
 import { TopicsCard } from './TopicsCard'
+// utils
+import { useDocumentTitle } from '../../shell/useDocumentTitle'
+import { useCardRange } from '../ranges'
+import { useCardSort } from '../useSort'
 import { PAGES_PER_SESSION_MIN, pagesPerSession } from './pagesPerSession'
+// styles
 import './Profile.css'
 
 /** Matches the other two profile tables. The median student has 9 instructors and the

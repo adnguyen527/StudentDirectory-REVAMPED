@@ -1,14 +1,17 @@
+// libraries & hooks
 import { Link, useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../../hooks/useApi'
+// apis
 import { formatDate, formatNumber } from '../../api/bson'
 import { getReportQuality } from '../../api/endpoints'
 import type { QualityResponse } from '../../api/types'
+// components
 import { BarChart } from '../../charts/BarChart'
-import { useApi } from '../../hooks/useApi'
 import { AsyncBoundary } from '../../shell/AsyncBoundary'
 import { Card } from '../../shell/Card'
-import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { CenterBar } from '../centers/CenterBar'
+// utils
+import { useDocumentTitle } from '../../shell/useDocumentTitle'
 import { CHECK_ORDER, checkCopy } from './checks'
 
 /**
@@ -159,10 +162,10 @@ export function DataQualityPage() {
 
           <p className="muted table-footnote">
             {/* Said plainly rather than shown as links that do not work. The reports list
-                filters on student, centre and date only, so "the 1,068 unfinalized reports"
+                filters on student, center and date only, so "the 1,068 unfinalized reports"
                 is not yet a view it can express -- that waits on the P3 finalized filter. */}
             These counts are not yet clickable. The reports list can be filtered by student,
-            centre and date, but not by whether a report is finalized or what it is missing,
+            center and date, but not by whether a report is finalized or what it is missing,
             so there is no view to link a card to.
           </p>
         </>

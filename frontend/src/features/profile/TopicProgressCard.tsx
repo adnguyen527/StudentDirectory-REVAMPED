@@ -1,14 +1,18 @@
 import { useState } from 'react'
+// libraries
 import { Link } from 'react-router-dom'
-
+// apis
 import { formatNumber } from '../../api/bson'
 import type { DwpReport, Topic } from '../../api/types'
+// components
 import { ChartFigure } from '../../charts/ChartFigure'
 import { ChartTable } from '../../charts/ChartTable'
 import { Card } from '../../shell/Card'
+// utils
+import { placeOn, sessionSpan, topicHistories, type TopicHistory } from './topicHistory'
+// styles
 import '../../charts/Chart.css'
 import './Profile.css'
-import { placeOn, sessionSpan, topicHistories, type TopicHistory } from './topicHistory'
 
 interface TopicProgressCardProps {
   reports: DwpReport[]

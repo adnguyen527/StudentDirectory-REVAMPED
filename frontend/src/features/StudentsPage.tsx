@@ -1,20 +1,22 @@
+// libraries & hooks
 import { useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { PAGE_SIZE, listStudents } from '../api/endpoints'
 import type { StudentsResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
-import { useDocumentTitle } from '../shell/useDocumentTitle'
-import { CenterDistributionCard } from './CenterDistributionCard'
 import { CenterFilter } from './CenterFilter'
-import { ClearFilters } from './ClearFilters'
+import { FilterBar } from './FilterBar'
 import { ListFilter } from './ListFilter'
-import { orderPhrase, type OrderPhrase } from './orderPhrase'
-import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 import { StudentsTable } from './StudentsTable'
+// utils
+import { nounFor, orderPhrase, type OrderPhrase } from './orderPhrase'
+import { rangeKey, rangeParams, type RangeColumns } from './ranges'
+import { useDocumentTitle } from '../shell/useDocumentTitle'
 
 // Each sortable column said in words, for the line under the title. `first` has to
 // match what StudentsTable passes the same column's header.
@@ -83,33 +85,35 @@ export function StudentsPage() {
 
   const page = data?.page
 
+  /**
+   * What the table is, in words -- the count and the order it is in.
+   *
+   * ⚠️ Leads with the count rather than the noun alone. "Students" here would name the same
+   * thing the <h1> above already names, which reads as a repeat on screen and makes
+   * getByRole('heading', { name: 'Students' }) ambiguous in a test.
+   */
+  const summary = page
+    ? `${formatNumber(page.total)} ${query ? 'matching ' : ''}${nounFor(page.total, 'student')}, ` +
+      `${orderPhrase(ORDER, 'sorted by name', sort, direction)}`
+    : 'Sorted by name'
+
   return (
     <div className="page">
       <div className="page-header">
         <h1>Students</h1>
-        <p>
-          {page
-            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, ` +
-              `${orderPhrase(ORDER, 'sorted by name', sort, direction)}.`
-            : 'Sorted by name.'}
-        </p>
       </div>
 
-      {/* Above the table rather than inside it: .page is a flex column with its
-          own gap, so this needs no layout of its own. */}
-      <CenterDistributionCard kind="students" filterColumns={FILTER_COLUMNS} />
+      {/* Above the table rather than in its card header, because it scopes the whole page
+          -- see FilterBar. */}
+      <FilterBar>
+        <ListFilter placeholder="Search students by name" />
+        <CenterFilter />
+      </FilterBar>
 
-      {/* No title: the <h1> above already says Students. */}
-      <Card
-        lead={
-          <div className="list-controls">
-            <ListFilter placeholder="Search students by name" />
-            <CenterFilter />
-          </div>
-        }
-        flush
-        controls={<ClearFilters />}
-      >
+      {/* The count and the order name the *table*, not the page, so they sit on the
+          table's card rather than under the <h1>. Leading with the count also keeps this
+          heading from repeating the page's own name back at it. */}
+      <Card title={summary} flush>
         <AsyncBoundary
           loading={loading}
           error={error}

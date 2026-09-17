@@ -200,7 +200,7 @@ export function searchInstructors(q: string, limit = 10, signal?: AbortSignal) {
 /* --- Chart data ------------------------------------------------------------------- */
 
 /**
- * How the students this list would show divide across centres.
+ * How the students this list would show divide across centers.
  *
  * Takes the list's own parameters, unchanged -- which is the whole point. The chart sits
  * above the table and is read as a picture of it, and that only holds while both ask the

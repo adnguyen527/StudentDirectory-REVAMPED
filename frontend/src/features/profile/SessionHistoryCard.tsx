@@ -1,16 +1,20 @@
 import { Fragment, useMemo, useState } from 'react'
+// libraries
 import { Link } from 'react-router-dom'
-
+// apis
 import { formatDate, formatNumber } from '../../api/bson'
 import { decodeEntities } from '../../api/text'
 import type { DwpReport } from '../../api/types'
+// components
 import { Card } from '../../shell/Card'
 import { DateRangeFilter } from '../DateRangeFilter'
 import { OpenReportLink } from '../OpenReportLink'
-import { useCardRange } from '../ranges'
 import { ReportModal } from '../ReportModal'
-import { timeRange } from '../timeRange'
 import { Pager } from '../../shell/Pager'
+// utils
+import { useCardRange } from '../ranges'
+import { timeRange } from '../timeRange'
+// styles
 import './Profile.css'
 
 const ROWS_PER_PAGE = 25

@@ -212,13 +212,6 @@ describe('instructor profile', () => {
     expect(within(roster).getByRole('button', { name: /next/i })).toBeDisabled()
   })
 
-  it('says most-taught topics are not available, and why', async () => {
-    // Named in the profile spec but unbuildable: the collection carries no topic data.
-    renderApp(PROFILE)
-
-    const topics = within(await card(/Most-taught topics/))
-    expect(topics.getByText(/carries no topic data/)).toBeInTheDocument()
-  })
 
   it('offers a way back for an unknown instructor', async () => {
     const { user } = renderApp('/instructors/Nobody%20Here')

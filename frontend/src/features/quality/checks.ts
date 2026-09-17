@@ -2,7 +2,7 @@
  * What each data-quality check is called, and what it means.
  *
  * The keys are the API's contract (models/quality.py, CHECKS); the wording is this app's.
- * Kept here rather than served, unlike the centre names: a centre appears the day one opens
+ * Kept here rather than served, unlike the center names: a center appears the day one opens
  * and the frontend must not need a release for it, whereas a new check is new code at both
  * ends anyway -- it needs a card, a label and a sentence explaining what to do about it.
  */

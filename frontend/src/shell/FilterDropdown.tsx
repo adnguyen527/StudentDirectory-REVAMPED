@@ -1,4 +1,6 @@
+// components
 import { FilterPopover } from './FilterPopover'
+// styles
 import './FilterDropdown.css'
 
 interface FilterDropdownProps {

@@ -1,6 +1,9 @@
+// apis
 import { formatNumber } from '../api/bson'
 import type { Page } from '../api/types'
+// components
 import { ChevronIcon } from './Icons'
+// styles
 import './Pager.css'
 
 interface PagerProps {

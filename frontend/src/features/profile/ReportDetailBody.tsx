@@ -1,14 +1,18 @@
 import type { ReactNode } from 'react'
+// libraries
 import { Link } from 'react-router-dom'
-
+// apis
 import { formatDate, formatNumber, formatTime } from '../../api/bson'
 import { decodeEntities } from '../../api/text'
 import type { ReportDetail } from '../../api/types'
-import { durationMinutes, timeRange } from '../timeRange'
+// components
 import { Card } from '../../shell/Card'
 import { CardRow } from '../../shell/CardRow'
 import { DashboardIcon, StudentsIcon, TopicsIcon } from '../../shell/Icons'
 import { StatTile } from '../../shell/StatTile'
+// utils
+import { durationMinutes, timeRange } from '../timeRange'
+// styles
 import './Profile.css'
 
 /**

@@ -1,6 +1,7 @@
 import { useRef } from 'react'
-
+// components
 import { CloseIcon, SearchIcon } from '../shell/Icons'
+// styles
 import './ListFilter.css'
 
 interface CardSearchProps {

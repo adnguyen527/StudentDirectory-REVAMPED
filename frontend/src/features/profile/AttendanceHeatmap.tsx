@@ -1,7 +1,10 @@
+// apis
 import { formatNumber, toDate } from '../../api/bson'
 import type { AttendanceVisit } from '../../api/types'
+// components
 import { ChartFigure } from '../../charts/ChartFigure'
 import { ChartTable } from '../../charts/ChartTable'
+// styles
 import '../../charts/Chart.css'
 import './Profile.css'
 

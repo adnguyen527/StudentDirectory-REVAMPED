@@ -1,19 +1,21 @@
+// libraries & hooks
 import { useSearchParams } from 'react-router-dom'
-
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatNumber } from '../api/bson'
 import { PAGE_SIZE, listInstructors } from '../api/endpoints'
 import type { InstructorsResponse } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { AsyncBoundary } from '../shell/AsyncBoundary'
 import { Card } from '../shell/Card'
 import { Pager } from '../shell/Pager'
 import { useDocumentTitle } from '../shell/useDocumentTitle'
 import { InstructorsTable } from './InstructorsTable'
-import { CenterDistributionCard } from './CenterDistributionCard'
 import { CenterFilter } from './CenterFilter'
-import { ClearFilters } from './ClearFilters'
+import { FilterBar } from './FilterBar'
 import { ListFilter } from './ListFilter'
-import { orderPhrase, type OrderPhrase } from './orderPhrase'
+// utils
+import { nounFor, orderPhrase, type OrderPhrase } from './orderPhrase'
 import { rangeKey, rangeParams, type RangeColumns } from './ranges'
 
 // As StudentsPage: `first` has to match what InstructorsTable passes the header.
@@ -80,33 +82,33 @@ export function InstructorsPage() {
 
   const page = data?.page
 
+  /**
+   * What the table is, in words -- the count and the order it is in.
+   *
+   * ⚠️ Leads with the count rather than the noun alone. "Instructors" here would name the same
+   * thing the <h1> above already names, which reads as a repeat on screen and makes
+   * getByRole('heading', { name: 'Instructors' }) ambiguous in a test.
+   */
+  const summary = page
+    ? `${formatNumber(page.total)} ${query ? 'matching ' : ''}${nounFor(page.total, 'instructor')}, ` +
+      `${orderPhrase(ORDER, 'sorted by name', sort, direction)}`
+    : 'Sorted by name'
+
   return (
     <div className="page">
       <div className="page-header">
         <h1>Instructors</h1>
-        <p>
-          {page
-            ? `${formatNumber(page.total)} ${query ? 'matching' : 'in total'}, ` +
-              `${orderPhrase(ORDER, 'sorted by name', sort, direction)}.`
-            : 'Sorted by name.'}
-        </p>
       </div>
 
-      {/* Above the table rather than inside it: .page is a flex column with its
-          own gap, so this needs no layout of its own. */}
-      <CenterDistributionCard kind="instructors" filterColumns={FILTER_COLUMNS} />
+      {/* Above the table rather than in its card header, because it scopes the whole page
+          -- see FilterBar. */}
+      <FilterBar>
+        <ListFilter placeholder="Search instructors by name" />
+        <CenterFilter />
+      </FilterBar>
 
-      {/* No title: the <h1> above already says Instructors. */}
-      <Card
-        lead={
-          <div className="list-controls">
-            <ListFilter placeholder="Search instructors by name" />
-            <CenterFilter />
-          </div>
-        }
-        flush
-        controls={<ClearFilters />}
-      >
+      {/* The count and the order name the *table*, not the page -- see StudentsPage. */}
+      <Card title={summary} flush>
         <AsyncBoundary
           loading={loading}
           error={error}

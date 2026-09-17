@@ -1,12 +1,16 @@
 import { useState } from 'react'
-
+// hooks
+import { useApi } from '../hooks/useApi'
+// apis
 import { formatDate, isoDay, todayLocal, toDate } from '../api/bson'
 import { getMetrics } from '../api/endpoints'
 import type { Metrics } from '../api/types'
-import { useApi } from '../hooks/useApi'
+// components
 import { FunnelIcon } from '../shell/Icons'
 import { FilterPopover } from '../shell/FilterPopover'
+// utils
 import { useRange, type RangeState } from './ranges'
+// styles
 import './ColumnFilter.css'
 
 interface DateRangeFilterProps {
