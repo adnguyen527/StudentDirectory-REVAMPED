@@ -1,26 +1,42 @@
-.app-shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
-  grid-template-areas:
-    'sidebar topbar'
-    'sidebar content';
-  height: 100%;
-}
-
+/*
+ * ⚠️ Fixed positioning, not a grid, for the three shell regions -- three rounds of
+ * `min-height: 0` / `overflow: hidden` / `overscroll-behavior: contain` on a CSS Grid
+ * layout each closed one symptom of a document-level scrollbar without ever closing all
+ * of it (Chrome kept reporting real, if small, extra scrollable height on `html` that none
+ * of those fixes touched). A `position: fixed` box's size is pure viewport arithmetic --
+ * top/left/right/bottom -- so it cannot be grown by a sibling's content or a track's
+ * auto-sizing the way a grid item can. `.app-shell` itself does no layout work anymore;
+ * it exists only as AppShell.tsx's wrapper node.
+ */
 .sidebar {
-  grid-area: sidebar;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  overflow-y: auto;
+  z-index: 10;
 }
 
 .topbar {
-  grid-area: topbar;
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  height: var(--topbar-height);
+  z-index: 10;
 }
 
 .app-content {
-  grid-area: content;
-  /* Only this scrolls; minmax(0, 1fr) above is what lets it, rather than the grid growing
-     to fit its content and pushing the whole page. */
+  position: fixed;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
+  /* Kept even though the document-level leak it was papering over is gone by construction
+     now -- still correct defense against wheel input chaining past this box's own limit. */
+  overscroll-behavior: contain;
   padding: var(--space-5) var(--space-6) var(--space-6);
 }
 
@@ -54,19 +70,17 @@
 }
 
 @media (max-width: 900px) {
-  .app-shell {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      'topbar'
-      'content';
-  }
-
   /* Below this the rail costs more than it gives; nav returns as a drawer later. */
   .sidebar {
     display: none;
   }
 
+  .topbar {
+    left: 0;
+  }
+
   .app-content {
+    left: 0;
     padding: var(--space-4);
   }
 }

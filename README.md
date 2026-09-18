@@ -930,11 +930,6 @@ exactly to **29,382 sessions and 153,360 pages**.
 
 ## Known Issues
 
-- **Profile pages show two vertical scrollbars.** One scrollbar belongs to the profile page,
-  while the other scrolls the surrounding admin shell over it. Fix the profile-page layout and
-  overflow handling so that only the profile content is scrollable when entering a student or
-  instructor profile.
-
 - **The Topics card on a student profile collapses when its search matches nothing.**
   The card is built to hold one height whatever the filter — ten rows, padded out with
   blanks when the page is short, and a pager that keeps its controls' space. A search with
@@ -1037,6 +1032,31 @@ Items remain in priority order within each group.
 - [x] `P2` Added topic completion and page-pace statistics used by the topic detail page.
 - [x] `P2` Switched report imports to the natural key with in-place replacement, retaining
       `_id` values; ambiguous keys are reported and skipped.
+- [ ] `P2` **Categorize topics by math discipline** (Algebra, Geometry, Algebra 2,
+      Pre-Algebra, Fractions & Decimals, Number Sense, Statistics & Probability,
+      Trigonometry/Pre-Calculus, ... — a starting list, not final) so a topic can be filtered
+      and reported on by subject. A topic can carry more than one discipline.
+      `topics` is fully rebuilt from `dwp_reports` on every `ingestion/build_topics.py` run
+      (`drop()` then `insert_many()`), so the categorization cannot live as a field on those
+      documents directly — the next rebuild would erase it. It needs a checked-in
+      `ingestion/topic_categories.py` module, `{topic_id: {"disciplines": [...]}}`, that the
+      builder imports and merges in as it writes each document. A JSON file would survive
+      rebuilds the same way, but a Python module lets a curator leave the same kind of
+      "why I called it this" comment this file already writes for its own ambiguous renames
+      — there is no admin UI or write path anywhere in this app to populate a live collection
+      instead, and direct DB edits would carry no git history of who changed what or why.
+      **The blocker is curation, not code**: 771 topics, each needing a discipline judgment
+      call, with no id scheme or existing field to derive it from — `PK-3174-00` is an opaque
+      vendor id from the imported LP Assignment column
+      (`ingestion/import_reports.py:parse_lp_assignment`), never a curriculum code anywhere
+      in this pipeline. The list is already sorted by usage (`models/topic.py:LIST_SORT`), so
+      categorizing the most-worked topics first and leaving the long tail `[]` —
+      uncategorized, not missing, the same convention `median_sessions_to_finish` uses for
+      "nobody has finished this" — is a reasonable way to ship incrementally rather than
+      blocking on all 771 at once. Once populated: a `discipline_criteria()` beside
+      `center_criteria()` in `models/filters.py`, a repeatable `?discipline=` on `/api/topics`
+      plus a `/api/topics/disciplines` list endpoint mirroring `/api/centers`, and a
+      `DisciplineFilter` on the Topics page built the same way `CenterFilter` already is.
 - [ ] `P3` **Split restricted fields out of `dwp_reports`** so access is decided by what a
       caller can reach, not by every reader remembering `PRIVATE_FIELDS`. Candidate axes:
       sensitivity and center; not yet decided.
@@ -1053,6 +1073,15 @@ Items remain in priority order within each group.
       requiring a parser change and backfill.
 - [ ] `P3` **Check anonymization mappings** for other placeholders created from blank fields;
       students and centers still need review.
+- [ ] `P3` **Categorize topics by K-12 grade level**, once discipline tagging above exists to
+      model it against. Harder than discipline: there is no grade field anywhere in this
+      system — not on `students`, not on `topics` — so unlike discipline there is no partial
+      signal to lean on, only hand judgment against 771 names. The likely shape is coarse
+      grade *bands* (K-2, 3-5, 6-8, 9-12) rather than exact grades — easier to call
+      confidently, and a topic plausibly belongs to more than one anyway. Whether a topic can
+      in fact carry more than one band, the way discipline explicitly can, is exactly what
+      blocks scoping this further; not yet decided. Once it exists, show it on
+      `TopicsTable`/`TopicsPage` the same way discipline would be.
 
 ### API
 
@@ -1233,6 +1262,21 @@ Items remain in priority order within each group.
       user's layout belongs in `users` or browser storage.
 - [ ] `P3` **Add a separate spreadsheet upload page** for incoming `.xlsx` reports; the
       command-line import already works.
+- [ ] `P3` **Add a grade-level distribution chart to the instructor profile** — the percent
+      of an instructor's work that falls in each K-12 grade band, suggested as a pie/donut.
+      **Blocked on the grade-level TODO item above**, and not just for the data:
+      even once grade bands exist, whether a topic can carry more than one is that item's
+      call to make, and this chart needs an answer before its numbers mean anything (split a
+      multi-band topic's sessions across its bands? credit each band in full, the way a
+      co-taught session already credits each instructor in full elsewhere in this codebase?).
+      Matching this codebase's existing pattern, the distribution should be precomputed in
+      `ingestion/build_instructors.py` — rolling each instructor's `topics[]` sessions up by
+      band using the same grade-band source `build_topics.py` reads — rather than joined at
+      request time in `routes/instructors.py`; every other per-instructor aggregate here
+      works the same way. Chart type is left to whoever builds it: every chart in this app
+      today (`frontend/src/charts/BarChart.tsx`) is bar-based, there is no pie/donut
+      precedent, and the `dataviz` skill this project's chart work has followed generally
+      steers a part-of-whole read toward a stacked or grouped bar instead.
 
 ### Visualization implementation order
 
